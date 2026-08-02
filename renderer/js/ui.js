@@ -47,7 +47,8 @@ export function esc(s) {
 
    El canvas convierte cualquier notación —rgb, oklch, color(display-p3 …) y lo
    que venga después— sin que haya nada que parsear.
-   Ver C:\tools\electron-dev-docs\METODO-Flash-Verde-Arranque-Electron-Win11.md */
+   (El caso completo, con cómo se cazó, está en las notas de Electron del autor:
+   METODO-Flash-Verde-Arranque-Electron-Win11.) */
 
 /** Un color CSS cualquiera, resuelto a `#rrggbb`. */
 export function aHex(colorCSS) {

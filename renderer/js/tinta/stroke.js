@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Copiado de Scrawl (S:\tools\Scrawl\renderer\js\engine\stroke.js) SIN cambios.
+   Copiado de Scrawl (engine/stroke.js), otra app del mismo autor, SIN cambios.
 
    Se copia y no se enlaza, igual que con Onyx: las dos apps quedan
    independientes. Si arreglás algo acá que también aplique allá, portalo a

@@ -31,7 +31,29 @@
 const fsp = require('fs/promises');
 const path = require('path');
 
-const ROOT = process.env.QUIRE_DATA || path.join(__dirname, '..', 'data');
+/* Electron solo existe cuando la app corre de verdad; los tests cargan este
+   módulo con Node pelado. El require va defensivo por eso. */
+let electronApp = null;
+try { electronApp = require('electron').app; } catch { /* fuera de Electron */ }
+
+/**
+ * Dónde viven los datos.
+ *
+ * En desarrollo, `data/` al lado del proyecto: se ven, se abren con un editor
+ * y se versionan si querés. Esa es la gracia del diseño de Onyx.
+ *
+ * EMPAQUETADA no puede ser ahí. Con asar, __dirname apunta adentro del
+ * `app.asar`, que es de SOLO LECTURA: la app arrancaría y no podría guardar ni
+ * un ajuste, fallando en cada escritura. Ahí van a userData, que es el lugar
+ * que el sistema le da a cada app para eso.
+ *
+ * `QUIRE_DATA` gana siempre, y es lo que usan los tests.
+ */
+const ROOT = process.env.QUIRE_DATA
+  || (electronApp?.isPackaged
+    ? path.join(electronApp.getPath('userData'), 'data')
+    : path.join(__dirname, '..', 'data'));
+
 const SETTINGS_FILE = path.join(ROOT, 'settings.json');
 
 /* ── Ajustes de tu app ───────────────────────────────────────────────────────

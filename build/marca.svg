@@ -1,0 +1,48 @@
+<svg width="1024" height="1024" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    El ícono de Quire: el pliego de hojas doblado por el lomo.
+
+    Los dos paths son EXACTAMENTE los mismos que dibujan el splash de
+    renderer/index.html y el ícono `quire` de renderer/js/iconos.js. Si la marca
+    cambia, hay que cambiarlos en los tres lados o el trazo de la barra de
+    tareas deja de coincidir con el de adentro de la app.
+
+    Se rasteriza con ImageMagick (`npm run icons`). Antes esto se renderizaba
+    con Chromium para garantizar fidelidad, como hace Scrawl, pero una ventana
+    `transparent` + capturePage() cuelga el proceso sin decir nada. Para una
+    figura de dos paths y dos gradientes, el rasterizador de ImageMagick da el
+    mismo resultado y no tiene forma de trabarse.
+  -->
+  <defs>
+    <!-- El fondo repite la escalera de superficies de la app: un poco más
+         claro arriba, como si le diera una luz cenital. -->
+    <linearGradient id="fondo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#20232a"/>
+      <stop offset="1" stop-color="#0d0f13"/>
+    </linearGradient>
+    <linearGradient id="tinta" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#c8ccd4"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="16" height="16" rx="3.4" fill="url(#fondo)"/>
+
+  <!-- Un hairline interior, el mismo recurso que usa el chrome de la app. -->
+  <rect x="0.35" y="0.35" width="15.3" height="15.3" rx="3.1"
+        fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="0.7"/>
+
+  <!-- La marca, centrada y con aire.
+       Ojo con la escala: a 16 px la marca ocupa casi toda su caja porque no hay
+       lugar para más, pero a 1024 esa misma proporción se lee como un galón
+       gigante pegado a los bordes. Acá va al 78 %. -->
+  <g transform="translate(8 8.2) scale(0.78) translate(-8 -8.2)"
+     fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="0.85">
+    <path d="M8 4.3 2.4 6.2v5.9L8 10.3l5.6 1.8V6.2z" stroke="url(#tinta)"/>
+    <!-- El doblez es lo que distingue un pliego de un galón: tiene que verse.
+         Color plano y NO el gradiente: un linearGradient usa por defecto el
+         bounding box del path, y el de una línea vertical pura tiene ancho
+         cero. La caja queda degenerada y el trazo no se pinta. -->
+    <path d="M8 4.3v6" stroke="#d7dae1" stroke-opacity="0.5"/>
+  </g>
+</svg>

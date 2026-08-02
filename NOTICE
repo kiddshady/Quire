@@ -1,8 +1,43 @@
 Componentes de terceros incluidos en este repositorio
 =====================================================
 
-El código de Onyx está bajo la licencia MIT (ver LICENSE). Lo que sigue viaja
+El código de Quire está bajo la licencia MIT (ver LICENSE). Lo que sigue viaja
 empaquetado con él y tiene su propia licencia, independiente de la del proyecto.
+
+
+pdf.js  (pdfjs-dist)
+--------------------
+Archivos:  renderer/vendor/pdfjs/pdf.mjs
+           renderer/vendor/pdfjs/pdf.worker.mjs
+           renderer/vendor/pdfjs/cmaps/**
+           renderer/vendor/pdfjs/standard_fonts/**
+Licencia:  Apache License 2.0
+Texto:     renderer/vendor/pdfjs/LICENSE
+Copyright: Copyright Mozilla Foundation y colaboradores de pdf.js
+Origen:    https://github.com/mozilla/pdf.js
+
+Los archivos vienen del paquete npm `pdfjs-dist` y están copiados sin modificar.
+Lo único que Quire agrega al lado son `compat.mjs` y `worker-shim.mjs`, que son
+código propio (MIT) y no tocan los archivos de pdf.js.
+
+Las fuentes estándar que pdf.js incluye traen sus propias licencias:
+  renderer/vendor/pdfjs/standard_fonts/LICENSE_FOXIT
+  renderer/vendor/pdfjs/standard_fonts/LICENSE_LIBERATION
+Y los mapas de caracteres:
+  renderer/vendor/pdfjs/cmaps/LICENSE
+
+La Apache 2.0 exige conservar el aviso de copyright y el texto de la licencia en
+cualquier redistribución, incluida la de una app compilada.
+
+
+pdf-lib
+-------
+Archivos:  renderer/vendor/pdf-lib/pdf-lib.mjs
+Licencia:  MIT
+Texto:     renderer/vendor/pdf-lib/LICENSE.md
+Origen:    https://github.com/Hopding/pdf-lib
+
+Copiado sin modificar desde el paquete npm `pdf-lib`.
 
 
 Roboto Mono
@@ -13,5 +48,24 @@ Texto:     renderer/fonts/Roboto-Mono-LICENSE.txt
 Copyright: Copyright 2015 The Roboto Mono Project Authors
 
 La OFL exige que este aviso y el texto de la licencia acompañen a la fuente en
-cualquier redistribución, incluida la de una app compilada. Si empaquetás una
-app hecha con Onyx, la licencia tiene que viajar adentro.
+cualquier redistribución, incluida la de una app compilada. Si empaquetás Quire,
+la licencia tiene que viajar adentro.
+
+
+Electron
+--------
+Quire se distribuye como una app Electron. El runtime de Electron y el de
+Chromium traen sus propias licencias, que electron-builder incluye solo en el
+paquete final (LICENSE y LICENSES.chromium.html, junto al ejecutable). No están
+en este repositorio porque no son parte del código fuente.
+
+
+Base del proyecto
+-----------------
+El shell, el sistema de diseño y la infraestructura de datos salen de Onyx
+(https://github.com/kiddshady/Onyx), también MIT y del mismo autor: todo lo que
+lleva el prefijo `ox-`, más los módulos de `renderer/js/` que no están en
+`pdf/`, `imposicion/`, `tinta/` ni `views/`.
+
+El motor de entrada del stylus (`renderer/js/tinta/stroke.js`) está copiado sin
+cambios desde Scrawl, otra app del mismo autor.

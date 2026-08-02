@@ -9,9 +9,10 @@ npm install
 npm run dev
 ```
 
-Construida sobre [Onyx](C:\tools\Onyx). Oscura, acromática, todo hecho a mano.
-La referencia del sistema de diseño está en [docs/sistema.md](docs/sistema.md), y
-la vitrina viva de los primitivos, dentro de la app en **Piezas**.
+Construida sobre [Onyx](https://github.com/kiddshady/Onyx). Oscura, acromática,
+todo hecho a mano. La referencia del sistema de diseño está en
+[docs/sistema.md](docs/sistema.md), y la vitrina viva de los primitivos, dentro
+de la app en **Piezas**.
 
 ---
 
