@@ -387,15 +387,39 @@ function registrarComandos() {
 /* ══ Color de la ventana ═════════════════════════════════════════════════════
    --ox-bg está en oklch y Electron solo entiende hex. Se resuelve acá y se le
    manda al proceso principal, así el frame fantasma que pinta el compositor de
-   Windows al restaurar sigue camuflado aunque cambie el matiz en tokens.css. */
+   Windows al restaurar sigue camuflado aunque cambie el matiz en tokens.css.
+
+   ── Por qué se pasa por un canvas y no por un regex ────────────────────────
+   Esto antes sacaba los números del color computado con `.match(/\d+/g)`, y
+   funcionaba mientras el navegador devolvía `rgb(10, 11, 13)`. Desde Chromium
+   144 el valor computado de una var en oklch se devuelve TAL CUAL:
+
+       getComputedStyle(el).color  →  "oklch(0.149 0.0046 258)"
+
+   El regex agarraba ["0", "149", "0"] —el 0.149 del lightness partido en dos—
+   y armaba `#009500`. O sea que la app le mandaba VERDE a la ventana, y al
+   arrancar se veía medio segundo de pantalla verde antes del primer frame.
+
+   El canvas convierte cualquier notación de color CSS a píxeles concretos, sea
+   rgb, oklch, color(display-p3 …) o lo que venga después. No hay que parsear
+   nada: se pinta un píxel y se lee. */
 function sincronizarColorVentana() {
   const probe = document.createElement('span');
   probe.style.cssText = 'position:fixed;left:-9999px;color:var(--ox-bg)';
   document.body.appendChild(probe);
-  const rgb = getComputedStyle(probe).color.match(/\d+/g);
+  const color = getComputedStyle(probe).color;
   probe.remove();
-  if (!rgb) return;
-  api?.win?.setBackground(`#${rgb.slice(0, 3).map((n) => Number(n).toString(16).padStart(2, '0')).join('')}`);
+  if (!color) return;
+
+  const lienzo = document.createElement('canvas');
+  lienzo.width = 1;
+  lienzo.height = 1;
+  const ctx = lienzo.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+
+  api?.win?.setBackground(`#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`);
 }
 
 /* ══ Arranque ════════════════════════════════════════════════════════════════ */

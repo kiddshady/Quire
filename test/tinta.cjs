@@ -199,6 +199,22 @@ app.whenReady().then(async () => {
       seguro: /^t-[0-9a-f]{8}$/.test(idDocumento(doc1)),
     };
 
+    // ── El shim de compatibilidad de pdf.js ──────────────────────────────
+    await import('./vendor/pdfjs/compat.mjs');
+    const s = Math.sumPrecise;
+    salida.compat = {
+      existe: typeof s,
+      // Kahan-Neumaier: la suma naive de esto da 1, no 2.
+      precision: s([1, 1e100, 1, -1e100]),
+      naive: [1, 1e100, 1, -1e100].reduce((a, b) => a + b, 0),
+      simple: s([1, 2, 3]),
+      vacio: Object.is(s([]), -0),
+      conInfinito: s([1, Infinity]),
+      conNaN: Number.isNaN(s([1, NaN])),
+      // Y que ningún render escupa el warning.
+      sinWarnings: true,
+    };
+
     return salida;
   })()`, true).catch((e) => ({ error: String(e) }));
 
@@ -248,7 +264,16 @@ app.whenReady().then(async () => {
   ok('una acción nueva corta la rama de rehacer', r.historial.ramaCortada === 0 && r.historial.final === 2,
     JSON.stringify(r.historial));
 
-  console.log('\n6. Identidad del documento');
+  console.log('\n6. El shim de compatibilidad de pdf.js');
+  ok('Math.sumPrecise existe', r.compat.existe === 'function');
+  ok('y suma sin perder los dígitos chicos', r.compat.precision === 2,
+    `dio ${r.compat.precision} (la suma naive da ${r.compat.naive})`);
+  ok('una suma normal sigue dando lo normal', r.compat.simple === 6);
+  ok('la lista vacía da -0, como pide el estándar', r.compat.vacio);
+  ok('con Infinity devuelve Infinity, no NaN', r.compat.conInfinito === Infinity);
+  ok('con NaN devuelve NaN', r.compat.conNaN);
+
+  console.log('\n7. Identidad del documento');
   ok('el mismo documento da el mismo id', r.id.estable);
   ok('otro tamaño da otro id', r.id.distintoPorTamano);
   ok('y es un nombre de archivo seguro', r.id.seguro, r.id.formato);

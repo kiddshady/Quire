@@ -48,6 +48,35 @@ app.whenReady().then(async () => {
 
   const js = (código) => win.webContents.executeJavaScript(código, true);
 
+  /* ── 0. El color que el renderer le manda a la ventana ────────────────────
+     Tiene que ser el mismo fondo que main.cjs ya puso. Si no coincide, ese
+     color es lo que se ve mientras el contenido todavía no cubre la ventana:
+     un parseo mal hecho de `oklch(0.149 …)` mandaba `#009500` y la app
+     arrancaba con medio segundo de pantalla VERDE. */
+  notas.push(['color-ventana', await js(`(() => {
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:fixed;left:-9999px;color:var(--ox-bg)';
+    document.body.appendChild(probe);
+    const crudo = getComputedStyle(probe).color;
+    probe.remove();
+
+    const c = document.createElement('canvas');
+    c.width = c.height = 1;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = crudo;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+    const hex = '#' + [r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('');
+
+    return {
+      computado: crudo,
+      hex,
+      esElDelSplash: hex.toLowerCase() === '#0a0b0d',
+      // Verde saturado = el bug volvió.
+      esVerde: g > 80 && r < 70 && b < 70,
+    };
+  })()`)]);
+
   // ── 1. El shell montó ─────────────────────────────────────────────────────
   notas.push(['shell', await js(`(() => {
     const r = {};
@@ -184,6 +213,39 @@ app.whenReady().then(async () => {
       anchoAlVolver: visor.clientWidth,
     };
   })()`)]);
+
+  /* El panel a MITAD de camino, congelado: es el único frame donde se ve si
+     invade el rail. Se fija el transform a mano en vez de cazar el frame
+     exacto, que sería una carrera contra la animación. */
+  await js(`(() => {
+    const p = document.getElementById('qr-panel');
+    p.style.transition = 'none';
+    p.style.transform = 'translateX(-52%)';
+  })()`);
+  await esperar(260);
+  fs.writeFileSync(path.join(RAIZ, 'test', 'humo-plegando.png'), (await win.webContents.capturePage()).toPNG());
+
+  notas.push(['recorte', await js(`(() => {
+    const cuerpo = document.querySelector('.qr-lector__cuerpo');
+    const panel = document.getElementById('qr-panel');
+    const rail = document.querySelector('.ox-rail');
+    const p = panel.getBoundingClientRect();
+    const c = cuerpo.getBoundingClientRect();
+    const r = rail.getBoundingClientRect();
+    const res = {
+      // A mitad de camino el panel SÍ se sale de su área (eso es la animación)
+      // y en geometría pisa el rail…
+      panelSeSale: Math.round(c.left - p.left),
+      pisaElRail: p.left < r.right,
+      // …pero el contenedor lo recorta, así que no se pinta encima de nada.
+      overflow: getComputedStyle(cuerpo).overflow,
+      opacidad: getComputedStyle(panel).opacity,
+    };
+    panel.style.transition = '';
+    panel.style.transform = '';
+    return res;
+  })()`)]);
+  await esperar(320);
 
   // ── 5. ¿Hay tinta real en el canvas? ──────────────────────────────────────
   notas.push(['tinta', await js(`(() => {

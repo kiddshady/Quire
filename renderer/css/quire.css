@@ -57,6 +57,10 @@
   /* El hueco del panel se reserva de UNA, sin transición. Ver abajo. */
   padding-left: var(--qr-panel-w);
   --qr-panel-w: 208px;
+  /* Recorta al panel cuando se va: sin esto se desliza FUERA de su área y
+     pasa por encima del rail, que no tiene nada que ver con él. El panel se
+     mete en su hueco y desaparece ahí, como un cajón. */
+  overflow: hidden;
 }
 
 .qr-lector__cuerpo.sin-panel { padding-left: 0; }
@@ -86,12 +90,14 @@
   background: var(--ox-s1);
   box-shadow: inset -1px 0 0 var(--ox-line);
   overflow: hidden;
-  transition: transform var(--ox-t-3) var(--ox-ease),
-              opacity var(--ox-t-2) var(--ox-ease-in);
+  transition: transform var(--ox-t-3) var(--ox-ease);
 }
 
+/* Se va deslizándose y el contenedor lo recorta. Sin fade a propósito: con el
+   recorte, desvanecerlo además lo volvía fantasmal mientras salía — se veía a
+   través de él lo que estaba atrás. Un cajón no se transparenta al cerrarse,
+   se mete. */
 .qr-panel.is-collapsed {
-  opacity: 0;
   transform: translateX(-100%);
   pointer-events: none;
 }
