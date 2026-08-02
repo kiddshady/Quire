@@ -438,11 +438,22 @@ async function boot() {
      las impresoras tarda ~1s porque las pide el subsistema de Windows. */
   cargarImpresoras().catch((err) => console.error('[impresoras]', err.message));
 
-  if (S.settings.reabrirUltimo && S.settings.ultimoDocumento) {
+  /* Qué documento se carga al arrancar. El del doble click GANA: si abriste un
+     PDF desde el explorador querés ese, no el de ayer — y encima el de ayer
+     tardaría lo mismo en cargar para después ser reemplazado. */
+  const pedido = await api.docs.pendiente().catch(() => null);
+
+  if (pedido) {
+    abrirRuta(pedido);
+  } else if (S.settings.reabrirUltimo && S.settings.ultimoDocumento) {
     api.docs.leer(S.settings.ultimoDocumento)
       .then((archivo) => abrir(archivo).then(registrarComandos))
       .catch(() => api.settings.save({ ultimoDocumento: null }).catch(() => {}));
   }
+
+  /* Con Quire ya abierta, otro doble click no levanta una segunda ventana: el
+     proceso nuevo le pasa la ruta a este y se muere (ver main.cjs). */
+  api.docs.onAbrir((ruta) => { abrirRuta(ruta); });
 }
 
 boot();

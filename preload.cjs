@@ -66,6 +66,15 @@ contextBridge.exposeInMainWorld('onyx', {
     escribir: (carpeta, nombre, bytes) => call('docs:escribir', carpeta, nombre, bytes),
     recientes: () => call('docs:recientes'),
     olvidarRecientes: () => call('docs:olvidar-recientes'),
+    /** El PDF con el que te abrieron. null si arrancaste la app a secas. */
+    pendiente: () => call('docs:pendiente'),
+    /* Con Quire ya abierta, el doble click en otro PDF no levanta una segunda
+       ventana: el proceso nuevo le pasa la ruta a este y se muere (main.cjs). */
+    onAbrir: (cb) => {
+      const handler = (_e, ruta) => cb(ruta);
+      ipcRenderer.on('docs:abrir', handler);
+      return () => ipcRenderer.off('docs:abrir', handler);
+    },
     /* Un File soltado en la ventana no trae su ruta desde Electron 32: hay que
        pedírsela a webUtils. Sin esto no se puede saber de dónde vino el
        archivo, y "guardar sobre el original" queda sin destino. */

@@ -74,6 +74,9 @@ function register() {
   handle('docs:escribir', (carpeta, nombre, bytes) => documentos.escribir(carpeta, nombre, bytes));
   handle('docs:recientes', () => documentos.listarRecientes());
   handle('docs:olvidar-recientes', () => documentos.olvidarRecientes());
+  /* El PDF con el que te abrieron por doble click. El renderer lo reclama al
+     terminar de arrancar; devuelve null si arrancaste la app a secas. */
+  handle('docs:pendiente', () => documentos.tomarPendiente());
 
   /* ── Impresión ──────────────────────────────────────────────────────────
      El PDF que entra por 'print:imprimir' ya viene impuesto: este puente no

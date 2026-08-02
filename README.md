@@ -45,11 +45,17 @@ vectoriales sobre una copia — sin convertir el documento ni partirlo.
 
 **Combinar, dividir, exportar** — a PNG, JPEG o WEBP con el DPI que elijas.
 
+**Abrir con doble click** — si lo ponés como lector predeterminado, el PDF se
+carga solo. Con Quire ya abierta, otro doble click reusa la ventana en vez de
+levantar una segunda. El instalador **no** toca las asociaciones de archivo: si
+querés que sea tu lector por defecto, se lo decís vos a Windows.
+
 ## El mapa
 
 ```
-main.cjs               La ventana. El anti-flash viene de Onyx y está comentado ahí.
+main.cjs               La ventana, el lock de instancia única y el argv de entrada.
 src/
+  argv.cjs             El PDF con el que te abrieron. Sin Electron, para testearlo.
   documentos.cjs       Abrir, leer y guardar PDFs. Los bytes van por IPC.
   impresion.cjs        Capacidades reales de la impresora + mandar el papel.
   ipc.cjs · store.cjs  El puente y el disco (de Onyx).
@@ -76,15 +82,22 @@ Sin pdf-lib de por medio se puede testear con Node pelado.
 ## Verificar
 
 ```
-npm run verificar     # las cuatro suites, 161 aserciones
+npm run verificar     # las cinco suites, 186 aserciones
 ```
 
 | | |
 |---|---|
-| `npm test` | Node pelado: tokens, escritura atómica y la aritmética de imposición |
+| `npm test` | Node pelado: tokens, escritura atómica, la aritmética de imposición y el parseo de argv |
 | `npm run imposicion` | Impone de verdad y **vuelve a leer** el PDF para ver qué cayó dónde |
 | `npm run tinta` | El vuelco de la Y, el contorno, el borrador y el historial |
 | `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético |
+| `npm run apertura` | Lanza la app **como proceso**, con un PDF en la línea de comandos |
+
+`apertura` es el único que lanza la app entera desde afuera, y existe por un bug
+que ninguna otra suite podía ver: el doble click abría Quire vacía porque nadie
+miraba `process.argv`. Todo lo observable —el ícono, la asociación, la ventana—
+andaba bien. La señal que mira es `ultimoDocumento` en disco, que solo se escribe
+cuando un PDF terminó de abrirse de verdad.
 
 El humo mide **dónde cae** cada cosa y si el canvas tiene tinta — no solo si el
 elemento existe. Dos trampas aprendidas a los golpes, ya resueltas en el test:

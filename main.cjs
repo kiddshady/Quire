@@ -35,6 +35,10 @@ const { app, BrowserWindow, ipcMain, screen, shell } = require('electron');
 const path = require('path');
 const ipc = require('./src/ipc.cjs');
 const store = require('./src/store.cjs');
+const documentos = require('./src/documentos.cjs');
+const { rutaDeArgv } = require('./src/argv.cjs');
+
+const DEV = process.argv.includes('--dev');
 
 /* Color base de arranque. Tiene que coincidir con --ox-bg de tokens.css.
    Como --ox-bg es oklch y Electron solo entiende hex, el renderer se lo vuelve
@@ -129,7 +133,7 @@ function createWindow(state) {
 
   // En dev, la consola del renderer sale por la terminal: si un módulo no carga
   // o una vista revienta, se ve acá sin tener que abrir devtools.
-  if (process.argv.includes('--dev')) {
+  if (DEV) {
     win.webContents.on('console-message', (e) => {
       const level = ['debug', 'info', 'warn', 'error'][e.level] ?? e.level;
       console.log(`[renderer:${level}] ${e.message}`);
@@ -176,10 +180,48 @@ ipcMain.on('win:set-bg', (_e, hex) => {
   }
 });
 
-app.whenReady().then(async () => {
-  ipc.register();
-  createWindow(await loadWindowState());
-});
+/* ── Abrir con doble click ───────────────────────────────────────────────────
+   Windows no le "pasa" el archivo a la app: la ejecuta con la ruta como
+   argumento (ver src/argv.cjs). Acá se decide qué hacer con esa ruta según haya
+   o no alguien del otro lado para recibirla. */
+function entregar(ruta) {
+  if (!ruta) return;
+  if (documentos.yaReclamo() && win && !win.isDestroyed()) {
+    win.webContents.send('docs:abrir', ruta);
+  } else {
+    // Todavía no hay renderer escuchando: que lo venga a buscar cuando arranque.
+    documentos.encolar(ruta);
+  }
+}
+
+function arrancar() {
+  entregar(rutaDeArgv(process.argv, app.isPackaged));
+
+  app.whenReady().then(async () => {
+    ipc.register();
+    createWindow(await loadWindowState());
+  });
+}
+
+/* Sin el lock, cada doble click levanta OTRA Quire: dos procesos, dos ventanas,
+   y la segunda pisándole el estado de ventana a la primera al cerrarse. Con el
+   lock, la instancia nueva le entrega su argv a la que ya está y se muere.
+
+   En desarrollo no se pide, y no es un detalle: el lock es por `userData`, que
+   es el MISMO en dev que en la app instalada. Sin esta excepción, `npm run dev`
+   con Quire abierta se cerraría sola y parecería que la app está rota. */
+if (!DEV && !app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', (_e, argv) => {
+    entregar(rutaDeArgv(argv, app.isPackaged));
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+  arrancar();
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

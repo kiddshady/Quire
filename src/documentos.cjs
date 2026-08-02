@@ -147,6 +147,32 @@ async function olvidarRecientes() {
   return true;
 }
 
+/* ── El documento con el que te abrieron ────────────────────────────────────
+   Viene de la línea de comandos (ver argv.cjs) y hay que hacérselo llegar al
+   renderer. El arranque en frío se resuelve al revés de lo que parece: no se
+   le manda la ruta al renderer —que todavía no existe, o existe pero no
+   terminó de montar sus vistas— sino que se la deja acá y él la viene a buscar
+   cuando está listo. Empujar es una carrera; que lo vengan a buscar, no.
+
+   Con la app ya abierta no hay carrera y main.cjs la manda por evento. Por eso
+   hace falta saber si el renderer ya pasó a reclamar: hasta que no pasó, todo
+   se encola. */
+
+let pendiente = null;
+let reclamado = false;
+
+function encolar(ruta) { pendiente = ruta || null; }
+
+/** Se entrega UNA sola vez: un F5 del renderer no reabre lo de hace media hora. */
+function tomarPendiente() {
+  reclamado = true;
+  const r = pendiente;
+  pendiente = null;
+  return r;
+}
+
+const yaReclamo = () => reclamado;
+
 module.exports = {
   leer,
   elegir,
@@ -156,5 +182,8 @@ module.exports = {
   escribir,
   listarRecientes,
   olvidarRecientes,
+  encolar,
+  tomarPendiente,
+  yaReclamo,
   MAX_BYTES,
 };
