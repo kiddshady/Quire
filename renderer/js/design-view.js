@@ -12,7 +12,7 @@ import { Icons } from './icons.js';
 import { Toast, Menu, Modal } from './overlays.js';
 import Palette from './palette.js';
 import { bindSwitcher } from './motion.js';
-import { mark, status, copy } from './ui.js';
+import { mark, status, copy, colorToken } from './ui.js';
 
 /* ── Las tres perillas ───────────────────────────────────────────────────────
    Los presets del acento. El nombre importa: son las cinco temperaturas que
@@ -284,16 +284,11 @@ function readKnob(name, fallback) {
 }
 
 function pushBackground() {
-  // El color resuelto sale del computed style: --ox-bg es oklch y Electron
-  // solo entiende hex, así que se pinta en un nodo y se lee el rgb resultante.
-  const probe = document.createElement('span');
-  probe.style.cssText = 'position:fixed;left:-9999px;color:var(--ox-bg)';
-  document.body.appendChild(probe);
-  const rgb = getComputedStyle(probe).color.match(/\d+/g);
-  probe.remove();
-  if (!rgb) return;
-  const hex = `#${rgb.slice(0, 3).map((n) => Number(n).toString(16).padStart(2, '0')).join('')}`;
-  window.onyx?.win?.setBackground(hex);
+  /* Mover las perillas re-tinta la app entera, así que el fondo de la ventana
+     tiene que seguirlas o el frame fantasma del restore queda del color viejo.
+     La traducción a hex la hace colorToken() con un canvas — ver ui.js. */
+  const hex = colorToken('--ox-bg');
+  if (hex) window.onyx?.win?.setBackground(hex);
 }
 
 export function wireDesign(rootEl) {

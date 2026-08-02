@@ -26,6 +26,52 @@ export function esc(s) {
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+/* ── Color: de CSS a hex ─────────────────────────────────────────────────────
+   Electron solo entiende hex, y la paleta está en oklch. Traducir es
+   inevitable; hacerlo con un regex, no.
+
+   Esto se pinta en un canvas de 1×1 y lee el píxel A PROPÓSITO. La versión
+   anterior le sacaba los números al texto del color computado, y funcionó
+   durante años porque el navegador siempre devolvía `rgb(10, 11, 13)`. Desde
+   Chromium 144 (Electron 40) el valor computado de una var en oklch se
+   devuelve tal cual:
+
+       getComputedStyle(el).color   →   "oklch(0.149 0.0046 258)"
+       .match(/\d+/g)               →   ["0", "149", "0", "0046", "258"]
+       .slice(0,3) → hex            →   "#009500"          ← VERDE
+
+   El 0.149 del lightness, partido en dos por el punto decimal, terminaba
+   siendo el canal verde. Con ese hex en setBackgroundColor(), la app arrancaba
+   con medio segundo de pantalla verde. Un hex válido, del color equivocado:
+   ninguna validación de forma lo agarra.
+
+   El canvas convierte cualquier notación —rgb, oklch, color(display-p3 …) y lo
+   que venga después— sin que haya nada que parsear.
+   Ver C:\tools\electron-dev-docs\METODO-Flash-Verde-Arranque-Electron-Win11.md */
+
+/** Un color CSS cualquiera, resuelto a `#rrggbb`. */
+export function aHex(colorCSS) {
+  if (!colorCSS) return null;
+  const lienzo = document.createElement('canvas');
+  lienzo.width = 1;
+  lienzo.height = 1;
+  const ctx = lienzo.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = colorCSS;
+  ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+  return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** El valor resuelto de un token de color, en hex. `colorToken('--ox-bg')`. */
+export function colorToken(nombre) {
+  const probe = document.createElement('span');
+  probe.style.cssText = `position:fixed;left:-9999px;color:var(${nombre})`;
+  document.body.appendChild(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return aHex(color);
+}
+
 /* ── Estado: forma + luminancia + movimiento ─────────────────────────────────
    La pieza central del sistema. La FORMA dice qué es la cosa, la LUMINANCIA si
    está viva, y el MOVIMIENTO es exclusivo de lo que está corriendo ahora. Con

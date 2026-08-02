@@ -13,7 +13,7 @@ import { Tooltip, Toast, Menu, Modal } from './overlays.js';
 import Palette from './palette.js';
 import Router from './router.js';
 import { initClickFlash, initScrollFades, raf2 } from './motion.js';
-import { paint, head, empty, esc, attempt, copy } from './ui.js';
+import { paint, head, empty, esc, attempt, copy, colorToken } from './ui.js';
 import { fmtBytes, relTime } from './format.js';
 import { designHTML, wireDesign } from './design-view.js';
 import { S, abrir, cerrar, cargarImpresoras, emitir, alCambiar, impresoraActual } from './estado.js';
@@ -389,37 +389,12 @@ function registrarComandos() {
    manda al proceso principal, así el frame fantasma que pinta el compositor de
    Windows al restaurar sigue camuflado aunque cambie el matiz en tokens.css.
 
-   ── Por qué se pasa por un canvas y no por un regex ────────────────────────
-   Esto antes sacaba los números del color computado con `.match(/\d+/g)`, y
-   funcionaba mientras el navegador devolvía `rgb(10, 11, 13)`. Desde Chromium
-   144 el valor computado de una var en oklch se devuelve TAL CUAL:
-
-       getComputedStyle(el).color  →  "oklch(0.149 0.0046 258)"
-
-   El regex agarraba ["0", "149", "0"] —el 0.149 del lightness partido en dos—
-   y armaba `#009500`. O sea que la app le mandaba VERDE a la ventana, y al
-   arrancar se veía medio segundo de pantalla verde antes del primer frame.
-
-   El canvas convierte cualquier notación de color CSS a píxeles concretos, sea
-   rgb, oklch, color(display-p3 …) o lo que venga después. No hay que parsear
-   nada: se pinta un píxel y se lee. */
+   La traducción a hex la hace colorToken() con un canvas, no un regex. El
+   porqué está en ui.js y no es opcional: parseando el texto, la app le mandaba
+   VERDE a su propia ventana. */
 function sincronizarColorVentana() {
-  const probe = document.createElement('span');
-  probe.style.cssText = 'position:fixed;left:-9999px;color:var(--ox-bg)';
-  document.body.appendChild(probe);
-  const color = getComputedStyle(probe).color;
-  probe.remove();
-  if (!color) return;
-
-  const lienzo = document.createElement('canvas');
-  lienzo.width = 1;
-  lienzo.height = 1;
-  const ctx = lienzo.getContext('2d', { willReadFrequently: true });
-  ctx.fillStyle = color;
-  ctx.fillRect(0, 0, 1, 1);
-  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
-
-  api?.win?.setBackground(`#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`);
+  const hex = colorToken('--ox-bg');
+  if (hex) api?.win?.setBackground(hex);
 }
 
 /* ══ Arranque ════════════════════════════════════════════════════════════════ */
