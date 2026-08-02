@@ -611,6 +611,101 @@ app.whenReady().then(async () => {
     };
   })()`)]);
 
+  /* ── 11. El cartel de las actualizaciones ─────────────────────────────────
+     Se pintan los SIETE estados a mano, sin red y sin electron-updater: lo que
+     interesa es que cada uno diga algo, ofrezca los botones que corresponden y
+     no se cuele ningún glifo unicode. La barra se mide en píxeles y no por su
+     clase — una barra al 42% que pinta 0 px se ve exactamente igual de "bien"
+     en el DOM que una que anda. */
+  notas.push(['actualizar', await js(`(async () => {
+    const A = await import('./js/actualizar.js');
+    const base = {
+      actual: '0.1.2', version: '0.1.3', nombre: 'Quire 0.1.3 — la de prueba',
+      bytes: 98304000, url: 'https://github.com/kiddshady/Quire/releases',
+      progreso: { pct: 0.42, transferido: 41287680, total: 98304000, bps: 2202009 },
+      error: 'No se pudo llegar a GitHub. ¿Hay internet?',
+      motivo: 'La versión portable no se actualiza sola.',
+    };
+    const caja = document.createElement('div');
+    caja.style.cssText = 'position:fixed;left:8px;top:8px;width:440px;z-index:9999';
+    caja.className = 'ox-modal qr-act';
+    const cuerpo = document.createElement('div');
+    cuerpo.className = 'qr-act__cuerpo';
+    caja.appendChild(cuerpo);
+    document.body.appendChild(caja);
+
+    const GLIFOS = /[\\u{1F000}-\\u{1FAFF}\\u{2190}-\\u{27BF}\\u{2B00}-\\u{2BFF}]/u;
+    const fases = ['inactivo','buscando','al-dia','disponible','descargando','listo','error','sin-soporte'];
+    const out = {};
+    for (const fase of fases) {
+      cuerpo.innerHTML = '';
+      const el = A.paso({ ...base, fase });
+      cuerpo.appendChild(el);
+      await new Promise((r) => requestAnimationFrame(r));
+      const t = el.querySelector('.qr-act__titulo');
+      out[fase] = {
+        titulo: (t?.textContent || '').slice(0, 40),
+        sub: !!el.querySelector('.qr-act__sub')?.textContent.trim(),
+        botones: [...el.querySelectorAll('[data-accion]')].map((b) => b.dataset.accion).join(','),
+        marca: !!el.querySelector('.qr-act__marca svg'),
+        glifos: GLIFOS.test(el.textContent),
+      };
+    }
+
+    // La barra, en píxeles: 42% de la pista, no "existe el div".
+    cuerpo.innerHTML = '';
+    const bajando = A.paso({ ...base, fase: 'descargando' });
+    cuerpo.appendChild(bajando);
+    await new Promise((r) => setTimeout(r, 320));   // dejar correr la transición
+    const pista = bajando.querySelector('.qr-prog');
+    const fill = bajando.querySelector('.qr-prog__fill');
+    const anchoPista = pista ? pista.getBoundingClientRect().width : 0;
+    const anchoFill = fill ? fill.getBoundingClientRect().width : 0;
+
+    const barra = {
+      anchoPista: Math.round(anchoPista),
+      anchoFill: Math.round(anchoFill),
+      proporcion: anchoPista ? Math.round(anchoFill / anchoPista * 100) : 0,
+      // Escalado, NO ancho: animar el ancho remaqueta en cada frame.
+      usaTransform: fill ? getComputedStyle(fill).transform !== 'none' : false,
+      subDice: bajando.querySelector('.qr-act__sub')?.textContent,
+    };
+
+    // Los pasos comparten celda de grid: por eso el cruce no salta.
+    cuerpo.innerHTML = '';
+    const a1 = A.paso({ ...base, fase: 'disponible' });
+    const a2 = A.paso({ ...base, fase: 'listo' });
+    cuerpo.append(a1, a2);
+    const r1 = a1.getBoundingClientRect();
+    const r2 = a2.getBoundingClientRect();
+    const superpuestos = Math.abs(r1.top - r2.top) < 2 && Math.abs(r1.left - r2.left) < 2;
+
+    caja.remove();
+    return { estados: out, barra, superpuestos, statusbarExiste: !!document.getElementById('stat-update') };
+  })()`)]);
+
+  {
+    const n = notas[notas.length - 1][1];
+    const esperados = {
+      buscando: '', 'al-dia': 'cerrar', disponible: 'notas,despues,descargar',
+      descargando: 'cerrar', listo: 'cerrar,instalar', error: 'cerrar,buscar',
+      'sin-soporte': 'cerrar,notas', inactivo: 'buscar',
+    };
+    for (const [fase, botones] of Object.entries(esperados)) {
+      const e = n.estados[fase];
+      if (!e) { problemas.push(`actualizar: falta el estado ${fase}`); continue; }
+      if (!e.titulo) problemas.push(`actualizar[${fase}]: sin título`);
+      if (e.botones !== botones) problemas.push(`actualizar[${fase}]: botones ${e.botones} ≠ ${botones}`);
+      if (e.glifos) problemas.push(`actualizar[${fase}]: se coló un glifo unicode`);
+    }
+    if (n.barra.proporcion < 38 || n.barra.proporcion > 46) {
+      problemas.push(`actualizar: la barra al 42% mide ${n.barra.proporcion}%`);
+    }
+    if (!n.barra.usaTransform) problemas.push('actualizar: la barra no usa transform');
+    if (!n.superpuestos) problemas.push('actualizar: los pasos no comparten celda — el cruce va a saltar');
+    if (!n.statusbarExiste) problemas.push('actualizar: falta el item de la statusbar');
+  }
+
   const png = Buffer.alloc(0);
 
   console.log('\n===== HUMO =====');

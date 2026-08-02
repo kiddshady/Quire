@@ -83,6 +83,20 @@ contextBridge.exposeInMainWorld('onyx', {
     },
   },
 
+  /** Actualizaciones. `buscar` no baja nada; `descargar` e `instalar` los pide
+      el usuario. Los cambios de estado llegan por onCambio. */
+  update: {
+    estado: () => call('update:estado'),
+    buscar: (opts) => call('update:buscar', opts),
+    descargar: () => call('update:descargar'),
+    instalar: () => call('update:instalar'),
+    onCambio: (cb) => {
+      const handler = (_e, estado) => cb(estado);
+      ipcRenderer.on('update:cambio', handler);
+      return () => ipcRenderer.off('update:cambio', handler);
+    },
+  },
+
   /** Impresión. Lo que se manda ya tiene que estar impuesto. */
   print: {
     listar: () => call('print:listar'),

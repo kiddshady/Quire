@@ -16,6 +16,7 @@ const { ipcMain, app } = require('electron');
 const store = require('./store.cjs');
 const documentos = require('./documentos.cjs');
 const impresion = require('./impresion.cjs');
+const actualizador = require('./actualizador.cjs');
 
 /* Las colecciones que el renderer puede tocar. Es una lista blanca a
    propósito: sin ella, cualquier bug en el renderer puede crear carpetas
@@ -84,6 +85,15 @@ function register() {
   handle('print:listar', () => impresion.listar());
   handle('print:capacidades', (opts) => impresion.capacidades(opts));
   handle('print:imprimir', (bytes, opciones) => impresion.imprimir(bytes, opciones));
+
+  /* ── Actualizaciones ────────────────────────────────────────────────────
+     Nada de esto arranca solo una descarga ni cierra la app: `descargar` e
+     `instalar` los tiene que pedir el usuario desde el modal. Los cambios de
+     estado van al revés, por 'update:cambio' (ver actualizador.cjs). */
+  handle('update:estado', () => actualizador.leer());
+  handle('update:buscar', (opts) => actualizador.buscar(opts));
+  handle('update:descargar', () => actualizador.descargar());
+  handle('update:instalar', () => actualizador.instalar());
 }
 
 module.exports = { register, COLLECTIONS };

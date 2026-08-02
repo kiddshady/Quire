@@ -68,6 +68,9 @@ const DEFAULT_SETTINGS = {
   modoZoomInicial: 'ancho',       // 'ancho' | 'pagina' | 'fijo'
   reabrirUltimo: true,
 
+  /* Actualizaciones. Buscar no baja nada: la descarga la pide el usuario. */
+  avisarActualizaciones: true,
+
   /* Impresión */
   impresora: null,                // nombre exacto de la última usada
   papelDefecto: 'A4',

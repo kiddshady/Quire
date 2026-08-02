@@ -16,6 +16,7 @@ import { initClickFlash, initScrollFades, raf2 } from './motion.js';
 import { paint, head, empty, esc, attempt, copy, colorToken } from './ui.js';
 import { fmtBytes, relTime } from './format.js';
 import { designHTML, wireDesign } from './design-view.js';
+import * as Actualizar from './actualizar.js';
 import { S, abrir, cerrar, cargarImpresoras, emitir, alCambiar, impresoraActual } from './estado.js';
 import { viewLector, atajosLector } from './views/lector.js';
 import { viewImprimir } from './views/imprimir.js';
@@ -178,6 +179,25 @@ function viewAjustes() {
         </div>
 
         <div class="ox-section">
+          <div class="ox-section__head"><span class="ox-section__title">Actualizaciones</span></div>
+          <div class="ox-card"><div class="ox-card__body ox-col" style="gap:18px">
+            <div class="ox-row" style="gap:12px">
+              <button class="ox-btn ox-btn--secondary ox-flashable" id="set-buscar-update">
+                <i data-icon="download"></i> Buscar ahora
+              </button>
+              <span class="ox-meta ox-grow" id="set-update-estado">${esc(resumenActualizacion())}</span>
+            </div>
+            <label class="ox-row" style="gap:12px">
+              <button class="ox-switch${st.avisarActualizaciones !== false ? ' is-on' : ''}" id="set-avisar"></button>
+              <span class="ox-col" style="gap:2px">
+                <span class="ox-label">Avisarme cuando haya una versión nueva</span>
+                <span class="ox-meta">Busca al arrancar y te muestra un cartel solo si hay algo. Nunca baja nada sin que se lo pidas.</span>
+              </span>
+            </label>
+          </div></div>
+        </div>
+
+        <div class="ox-section">
           <div class="ox-section__head"><span class="ox-section__title">Acerca de</span></div>
           <div class="ox-card"><div class="ox-card__body">
             <div class="ox-kv">
@@ -194,6 +214,21 @@ function viewAjustes() {
     </div>`);
 
   cablearAjustes();
+}
+
+/** En qué anda el actualizador, en una línea. */
+function resumenActualizacion() {
+  const e = Actualizar.leer();
+  switch (e.fase) {
+    case 'buscando': return 'Buscando…';
+    case 'al-dia': return 'Estás en la última versión.';
+    case 'disponible': return `Hay una versión nueva: ${e.version}.`;
+    case 'descargando': return `Bajando ${e.version}… ${Math.round((e.progreso?.pct || 0) * 100)}%`;
+    case 'listo': return `${e.version} lista: reiniciá para instalarla.`;
+    case 'error': return e.error || 'La última búsqueda falló.';
+    case 'sin-soporte': return e.motivo || 'Esta copia no se actualiza sola.';
+    default: return 'Todavía no se buscó.';
+  }
 }
 
 /** El borde muerto de la impresora, en los dos tamaños que más se usan. */
@@ -231,6 +266,19 @@ function cablearAjustes() {
   toggle('set-duplex', 'duplexAsistido');
   toggle('set-margen', 'mostrarNoImprimible');
   toggle('set-reabrir', 'reabrirUltimo');
+  toggle('set-avisar', 'avisarActualizaciones');
+
+  /* Buscar a mano abre el cartel pase lo que pase, incluso para decirte que
+     estás al día: si lo pediste vos, callarse es peor que molestar. */
+  $('set-buscar-update')?.addEventListener('click', () => {
+    api.update.buscar({ manual: true }).catch((err) => Toast.error('No se pudo buscar', err.message));
+  });
+  /* La baja va por onLeave: sin eso, cada visita a Ajustes deja un oyente más
+     apuntando a un nodo que ya no está en el DOM. */
+  Router.onLeave(Actualizar.alCambiar(() => {
+    const el = $('set-update-estado');
+    if (el) el.textContent = resumenActualizacion();
+  }));
 
   $('set-zoom')?.querySelectorAll('.ox-segmented__opt').forEach((b) => {
     b.addEventListener('click', async () => {
@@ -454,6 +502,9 @@ async function boot() {
   /* Con Quire ya abierta, otro doble click no levanta una segunda ventana: el
      proceso nuevo le pasa la ruta a este y se muere (ver main.cjs). */
   api.docs.onAbrir((ruta) => { abrirRuta(ruta); });
+
+  Actualizar.iniciar({ avisar: S.settings.avisarActualizaciones !== false })
+    .catch((err) => console.error('[actualizar]', err.message));
 }
 
 boot();

@@ -958,3 +958,114 @@
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+
+/* ═══ ACTUALIZACIONES ════════════════════════════════════════════════════════
+   Un solo cartel que muta entre estados. El truco de que no salte está en el
+   grid: el paso que se va y el que entra COMPARTEN la misma celda, así que se
+   superponen durante el cruce en vez de empujarse. El min-height cubre la
+   diferencia de alto entre un paso con barra y uno sin ella. */
+
+.qr-act__cuerpo {
+  display: grid;
+  min-height: 196px;
+  padding: var(--ox-5) var(--ox-5) var(--ox-4);
+}
+
+.qr-act__paso {
+  grid-area: 1 / 1;                 /* todos en la misma celda: se cruzan */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Centrado vertical, no arriba: el paso de la descarga no tiene ícono y sin
+     esto el texto de todos los demás saltaría hacia arriba al cruzarse. */
+  justify-content: center;
+  text-align: center;
+  gap: var(--ox-2);
+  animation: qr-act-entra var(--ox-t-3) var(--ox-ease);
+}
+
+/* La salida es más corta que la entrada: el que se va no puede hacer esperar
+   al que llega, o el cruce se siente lento. */
+.qr-act__paso[data-state="closing"] {
+  animation: qr-act-sale 180ms var(--ox-ease-in) both;
+  pointer-events: none;
+}
+
+@keyframes qr-act-entra {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes qr-act-sale {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(-6px); }
+}
+
+.qr-act__marca {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--ox-1);
+  border-radius: var(--ox-r-pill);
+  background: var(--ox-s3);
+  color: var(--ox-accent);
+  box-shadow: var(--ox-hairline);
+}
+
+/* El rojo aparece UNA vez en la app: cuando algo falló. Este es ese lugar. */
+.qr-act__paso--error .qr-act__marca { color: var(--ox-danger); }
+
+.qr-act__titulo {
+  font-size: var(--ox-fs-15);
+  font-weight: var(--ox-w-medium);
+  color: var(--ox-text);
+  line-height: 1.35;
+}
+
+.qr-act__sub {
+  font-size: var(--ox-fs-12);
+  line-height: 1.6;
+  color: var(--ox-text-2);
+  max-width: 34ch;
+}
+
+.qr-act__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--ox-2);
+  margin-top: var(--ox-3);
+}
+
+/* ── Barra de progreso ───────────────────────────────────────────────────────
+   Se escala con transform, no con width: esto llega veinte veces por segundo y
+   animar el ancho remaqueta en cada frame. */
+
+.qr-prog {
+  width: 100%;
+  max-width: 300px;
+  height: 4px;
+  margin-top: var(--ox-2);
+  overflow: hidden;
+  border-radius: var(--ox-r-pill);
+  background: var(--ox-s3);
+}
+
+.qr-prog__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ox-accent);
+  transform-origin: left center;
+  transform: scaleX(var(--qr-pct, 0));
+  transition: transform var(--ox-t-2) var(--ox-ease-soft);
+}
+
+/* El aviso de la statusbar: lo único de la barra en lo que se puede hacer click,
+   así que se distingue por el acento y no solo por el cursor. */
+.qr-stat-act {
+  cursor: pointer;
+  color: var(--ox-accent);
+}
+
+.qr-stat-act .ox-statusbar__value { color: inherit; }

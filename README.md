@@ -50,11 +50,17 @@ carga solo. Con Quire ya abierta, otro doble click reusa la ventana en vez de
 levantar una segunda. El instalador **no** toca las asociaciones de archivo: si
 querés que sea tu lector por defecto, se lo decís vos a Windows.
 
+**Actualizarse sola** — busca al arrancar y avisa solo si hay algo. **Nunca baja
+nada sin que se lo pidas**: el instalador pesa casi 100 MB y hacerlo de prepo en
+la conexión de otro no está bien. La versión portable no se actualiza sola y lo
+dice en pantalla en vez de fallar callada.
+
 ## El mapa
 
 ```
 main.cjs               La ventana, el lock de instancia única y el argv de entrada.
 src/
+  actualizador.cjs     electron-updater contra los releases del repo.
   argv.cjs             El PDF con el que te abrieron. Sin Electron, para testearlo.
   documentos.cjs       Abrir, leer y guardar PDFs. Los bytes van por IPC.
   impresion.cjs        Capacidades reales de la impresora + mandar el papel.
@@ -71,6 +77,7 @@ renderer/
       contorno.js      Puntos con presión → el polígono que ocupa la tinta.
       capa.js          El modelo, la persistencia y el dibujo.
       aplanar.js       Escribe los trazos en el PDF como paths vectoriales.
+    actualizar.js      El cartel que muta entre estados + el aviso de la statusbar.
     views/             Una por vista del rail.
 ```
 
@@ -82,12 +89,12 @@ Sin pdf-lib de por medio se puede testear con Node pelado.
 ## Verificar
 
 ```
-npm run verificar     # las cinco suites, 186 aserciones
+npm run verificar     # las cinco suites, 205 aserciones
 ```
 
 | | |
 |---|---|
-| `npm test` | Node pelado: tokens, escritura atómica, la aritmética de imposición y el parseo de argv |
+| `npm test` | Node pelado: tokens, escritura atómica, la aritmética de imposición, el parseo de argv y las decisiones del actualizador |
 | `npm run imposicion` | Impone de verdad y **vuelve a leer** el PDF para ver qué cayó dónde |
 | `npm run tinta` | El vuelco de la Y, el contorno, el borrador y el historial |
 | `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético |

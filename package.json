@@ -1,7 +1,7 @@
 {
   "name": "quire",
   "productName": "Quire",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Quire — lector de PDF con foco en la impresión: imposición, anotación con tablet y previsualización fiel.",
   "main": "main.cjs",
   "author": "Kidd_Shady",
@@ -25,7 +25,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "test": "node test/tokens.test.mjs && node test/store.test.mjs && node test/plan.test.mjs && node test/argv.test.mjs",
+    "test": "node test/tokens.test.mjs && node test/store.test.mjs && node test/plan.test.mjs && node test/argv.test.mjs && node test/actualizador.test.mjs",
     "smoke": "electron test/renderer.test.cjs",
     "humo": "electron test/humo.cjs",
     "imposicion": "electron test/imposicion.cjs",
@@ -88,5 +88,8 @@
     "portable": {
       "artifactName": "${productName}-Portable-${version}.${ext}"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

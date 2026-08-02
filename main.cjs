@@ -36,6 +36,7 @@ const path = require('path');
 const ipc = require('./src/ipc.cjs');
 const store = require('./src/store.cjs');
 const documentos = require('./src/documentos.cjs');
+const actualizador = require('./src/actualizador.cjs');
 const { rutaDeArgv } = require('./src/argv.cjs');
 
 const DEV = process.argv.includes('--dev');
@@ -199,6 +200,9 @@ function arrancar() {
 
   app.whenReady().then(async () => {
     ipc.register();
+    /* El actualizador se engancha a la ventana por función y no por referencia:
+       cuando esto corre, `win` todavía es null. */
+    actualizador.iniciar(() => win);
     createWindow(await loadWindowState());
   });
 }
