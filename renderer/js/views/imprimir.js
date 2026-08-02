@@ -14,7 +14,7 @@ import { Icons } from '../icons.js';
 import { Toast, Menu, Modal } from '../overlays.js';
 import Router from '../router.js';
 import { paint, head, empty, esc, attempt } from '../ui.js';
-import { raf2 } from '../motion.js';
+import { raf2, bindStepper } from '../motion.js';
 import { plural } from '../format.js';
 import { planCon, mm, aMM } from '../imposicion/plan.js';
 import { imponer, partirDuplex, extraerCaras } from '../imposicion/motor.js';
@@ -316,8 +316,14 @@ function pintarOpciones() {
     <div class="qr-op qr-op--par">
       <div class="ox-field">
         <label class="ox-field__label">Copias</label>
-        <input class="ox-input ox-num" id="op-copias" type="number" min="1" max="${imp?.maxCopias || 999}"
-               value="${p.copias}">
+        <div class="ox-stepper" id="op-copias-stepper">
+          <input class="ox-input ox-num" id="op-copias" type="number" min="1" max="${imp?.maxCopias || 999}"
+                 value="${p.copias}">
+          <div class="ox-stepper__btns">
+            <button class="ox-stepper__btn" data-step="up" tabindex="-1"><i data-icon="chevronUp"></i></button>
+            <button class="ox-stepper__btn" data-step="down" tabindex="-1"><i data-icon="chevronDown"></i></button>
+          </div>
+        </div>
       </div>
       <div class="ox-field">
         <label class="ox-field__label">Papel</label>
@@ -505,6 +511,10 @@ function cablearOpciones() {
     })), { align: 'start' });
   });
 
+  /* Las flechas son nuestras, pero el que manda sigue siendo el input: bindStepper
+     despacha 'change' sobre él, así que este listener no se entera de la
+     diferencia entre escribir el número y apretar la flecha. */
+  bindStepper($('op-copias-stepper'));
   $('op-copias')?.addEventListener('change', (e) => {
     cambiar({ copias: Math.max(1, parseInt(e.target.value, 10) || 1) }, { rehacer: false });
     pintarResumen();

@@ -130,6 +130,96 @@ export function bindSwitcher(root, onChange) {
   return sync;
 }
 
+/* ── Campo numérico ─────────────────────────────────────────────────────────
+   El spinner de `<input type=number>` es de Chromium y está tapado en el CSS.
+   Esto le devuelve las flechas, ya dibujadas por nosotros.
+
+   El input NO se reemplaza: sigue siendo el dueño del valor, del foco y del
+   teclado. Por eso cada paso despacha `input` Y `change` con bubbles — quien
+   escuchaba al campo antes de tener flechas sigue funcionando sin tocar nada.
+
+   Mantener apretado repite, y acelera: un campo de copias que llega a 50 de a
+   un click por vez no lo usa nadie. */
+
+const ESPERA = 380;    // antes de empezar a repetir: distingue click de aguante
+const PASO_LENTO = 110;
+const PASO_RAPIDO = 45;
+const ACELERA_A = 1200;   // ms aguantando antes de pasar a rápido
+
+/**
+ * Cablea un `.ox-stepper` (input + dos flechas).
+ * onChange recibe el valor numérico ya acotado a min/max.
+ */
+export function bindStepper(root, onChange) {
+  const input = root?.querySelector('input[type="number"]');
+  if (!input) return () => {};
+
+  const num = (attr, fallback) => {
+    const v = parseFloat(input.getAttribute(attr));
+    return Number.isFinite(v) ? v : fallback;
+  };
+
+  const leer = () => {
+    const v = parseFloat(input.value);
+    return Number.isFinite(v) ? v : num('min', 0);
+  };
+
+  /** Los topes se releen en cada paso: el max suele depender de otra cosa. */
+  const acotar = (v) => Math.min(num('max', Infinity), Math.max(num('min', -Infinity), v));
+
+  const sync = () => {
+    const v = leer();
+    const arriba = root.querySelector('[data-step="up"]');
+    const abajo = root.querySelector('[data-step="down"]');
+    if (arriba) arriba.disabled = v >= num('max', Infinity);
+    if (abajo) abajo.disabled = v <= num('min', -Infinity);
+  };
+
+  function mover(dir) {
+    const antes = leer();
+    const v = acotar(antes + dir * num('step', 1));
+    if (v === antes) { sync(); return false; }
+    input.value = String(v);
+    sync();
+    // bubbles: los listeners suelen estar en el contenedor, no en el input.
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    onChange?.(v, input);
+    return true;
+  }
+
+  let timer = null;
+  const frenar = () => { clearTimeout(timer); timer = null; };
+
+  function arrancar(dir, desde) {
+    const transcurrido = Date.now() - desde;
+    if (!mover(dir)) { frenar(); return; }
+    timer = setTimeout(() => arrancar(dir, desde), transcurrido > ACELERA_A ? PASO_RAPIDO : PASO_LENTO);
+  }
+
+  root.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('[data-step]');
+    if (!btn || btn.disabled) return;
+    e.preventDefault();                 // que el campo no pierda el foco
+    const dir = btn.dataset.step === 'up' ? 1 : -1;
+    mover(dir);
+    const desde = Date.now();
+    timer = setTimeout(() => arrancar(dir, desde), ESPERA);
+    /* La captura del puntero es lo que hace que soltar CUENTE aunque el dedo se
+       haya ido del botón. Sin esto, arrastrar afuera deja el contador corriendo
+       para siempre. */
+    btn.setPointerCapture?.(e.pointerId);
+  });
+
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    root.addEventListener(ev, frenar);
+  }
+
+  input.addEventListener('input', sync);
+  sync();
+  return sync;
+}
+
 /* ── Revelado de alto (grid 0fr → 1fr) ───────────────────────────────────── */
 export function toggleReveal(el, open) {
   const next = open ?? !el.classList.contains('is-open');

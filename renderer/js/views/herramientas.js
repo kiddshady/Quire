@@ -15,7 +15,7 @@ import { Toast, Modal } from '../overlays.js';
 import Router from '../router.js';
 import { paint, head, empty, esc, attempt } from '../ui.js';
 import { fmtBytes, plural } from '../format.js';
-import { bindSwitcher, scrollFade } from '../motion.js';
+import { bindSwitcher, scrollFade, bindStepper } from '../motion.js';
 import { combinar, dividir, reorganizar } from '../imposicion/motor.js';
 import { aplanarTinta, contarTinta } from '../tinta/aplanar.js';
 import { exportarImagenes, FORMATOS, DPIS, medidaAlDPI } from '../exportar.js';
@@ -235,7 +235,13 @@ function htmlDividir() {
       ${c.tipo === 'cada' ? `
         <div class="ox-field" style="max-width:280px">
           <label class="ox-field__label">Páginas por archivo</label>
-          <input class="ox-input ox-num" id="qr-div-cada" type="number" min="1" max="${S.doc.paginas}" value="${c.cada}">
+          <div class="ox-stepper" id="qr-div-cada-stepper">
+            <input class="ox-input ox-num" id="qr-div-cada" type="number" min="1" max="${S.doc.paginas}" value="${c.cada}">
+            <div class="ox-stepper__btns">
+              <button class="ox-stepper__btn" data-step="up" tabindex="-1"><i data-icon="chevronUp"></i></button>
+              <button class="ox-stepper__btn" data-step="down" tabindex="-1"><i data-icon="chevronDown"></i></button>
+            </div>
+          </div>
         </div>` : `
         <div class="ox-field">
           <label class="ox-field__label">Rangos, uno por archivo</label>
@@ -286,6 +292,7 @@ function cablearDividir() {
     b.addEventListener('click', () => { V.corte.tipo = b.dataset.value; pintarSeccion(); });
   });
 
+  bindStepper(document.getElementById('qr-div-cada-stepper'));
   const cada = document.getElementById('qr-div-cada');
   cada?.addEventListener('input', () => {
     V.corte.cada = Math.max(1, parseInt(cada.value, 10) || 1);

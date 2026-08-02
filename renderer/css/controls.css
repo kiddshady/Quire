@@ -150,6 +150,51 @@
 .ox-inputwrap:focus-within > .ox-icon:first-child { color: var(--ox-text-2); }
 .ox-inputwrap > .ox-icon:first-child ~ .ox-input { padding-left: 30px; }
 
+/* ── Campo numérico ───────────────────────────────────────────────────────────
+   El spinner de `<input type=number>` es de Chromium: no se puede estilar, no
+   respeta la paleta, y aparece y desaparece según el hover. Se tapa SIEMPRE y
+   no solo dentro de `.ox-stepper` — así, olvidarse el envoltorio degrada a un
+   campo limpio en vez de dejar asomar un control del navegador. */
+input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* El envoltorio le devuelve las flechas, ya dibujadas por nosotros. El input
+   sigue siendo un input: escribir a mano, las flechas del teclado y el clamp de
+   min/max los sigue haciendo él. Cablealo con bindStepper(). */
+.ox-stepper { position: relative; display: flex; align-items: center; }
+.ox-stepper > .ox-input { padding-right: 26px; }
+
+.ox-stepper__btns {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  display: flex;
+  flex-direction: column;
+  width: 22px;
+  overflow: hidden;
+  border-radius: 0 var(--ox-r-sm) var(--ox-r-sm) 0;
+}
+
+.ox-stepper__btn {
+  flex: 1 1 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ox-text-4);
+  cursor: pointer;
+  transition: var(--tr-color);
+}
+
+.ox-stepper__btn:hover:not(:disabled) { color: var(--ox-text); background: var(--ox-s3); }
+.ox-stepper__btn:active:not(:disabled) { color: var(--ox-accent); }
+/* Apagado en el tope: el botón sigue ahí para que el campo no cambie de forma. */
+.ox-stepper__btn:disabled { opacity: .25; cursor: default; }
+.ox-stepper__btn .ox-icon { width: 10px; height: 10px; }
+
 /* ── Select propio ────────────────────────────────────────────────────────────
    El <select> nativo abre un popup del sistema imposible de estilar: acá el
    trigger es un botón y la lista es un menú nuestro (menu.js). */

@@ -494,6 +494,60 @@ app.whenReady().then(async () => {
 
   fs.writeFileSync(path.join(RAIZ, 'test', 'humo-imprimir.png'), (await win.webContents.capturePage()).toPNG());
 
+  /* ── 7-bis. El campo de copias ────────────────────────────────────────────
+     Sobre el campo REAL, no sobre la demo de Piezas: lo que importa es que la
+     flecha mueva el plan de impresión, no solo el valor del input. El resumen
+     de la derecha ("N hojas") es la prueba de que el cambio llegó hasta el
+     final de la cadena. */
+  notas.push(['copias', await js(`(async () => {
+    const root = document.getElementById('op-copias-stepper');
+    if (!root) return { error: 'no existe el stepper de copias' };
+    const input = document.getElementById('op-copias');
+    const arriba = root.querySelector('[data-step="up"]');
+    const cifra = () => document.querySelector('.qr-resumen__cifra .ox-stat__value')?.textContent?.trim();
+
+    const antesValor = input.value;
+    const antesHojas = cifra();
+
+    const o = { bubbles: true, pointerId: 1, pointerType: 'mouse' };
+    arriba.dispatchEvent(new PointerEvent('pointerdown', o));
+    arriba.dispatchEvent(new PointerEvent('pointerup', o));
+    await new Promise((r) => setTimeout(r, 260));
+
+    /* HAY QUE VOLVER A CONSULTAR EL DOM. El 'change' repinta el panel de
+       opciones entero, así que las referencias de arriba quedaron apuntando a
+       nodos ya desprendidos — y de un nodo suelto, getComputedStyle devuelve
+       todo vacío y getBoundingClientRect devuelve ceros. Medir eso hace que un
+       componente sano parezca roto. */
+    const root2 = document.getElementById('op-copias-stepper');
+    const input2 = document.getElementById('op-copias');
+    const arriba2 = root2?.querySelector('[data-step="up"]');
+    if (!root2 || !input2 || !arriba2) return { error: 'el repintado se llevó el stepper' };
+
+    const btn = arriba2.getBoundingClientRect();
+    const caja = root2.getBoundingClientRect();
+    return {
+      antesValor, valor: input2.value,
+      antesHojas, hojas: cifra(),
+      // Las flechas tienen que caer DENTRO del campo, no al lado ni encima.
+      flechaDentro: btn.right <= caja.right + 1 && btn.top >= caja.top - 1 && btn.width > 6 && btn.height > 6,
+      apariencia: getComputedStyle(input2).appearance,
+      spinnerNativo: getComputedStyle(input2, '::-webkit-inner-spin-button').appearance,
+      alto: Math.round(btn.height),
+    };
+  })()`)]);
+
+  {
+    const c = notas[notas.length - 1][1];
+    if (c.error) problemas.push('copias: ' + c.error);
+    else {
+      if (c.valor !== '2') problemas.push(`copias: la flecha dejó el campo en ${c.valor}, no en 2`);
+      if (c.hojas === c.antesHojas) problemas.push(`copias: el resumen no se movió (${c.antesHojas})`);
+      if (!c.flechaDentro) problemas.push('copias: las flechas caen fuera del campo');
+      if (c.apariencia !== 'textfield') problemas.push(`copias: el input sigue en appearance ${c.apariencia}`);
+    }
+  }
+
   // ── 8. Organizar páginas ─────────────────────────────────────────────────
   await js(`(async () => (await import('./js/router.js')).default.go('paginas'))()`).catch((e) => problemas.push('ir a paginas: ' + e.message));
   await esperar(1800);
