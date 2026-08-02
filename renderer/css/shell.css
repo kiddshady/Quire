@@ -1,0 +1,271 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONYX — shell
+   El chasis de la ventana: titlebar propia, rail de navegación, área de vista,
+   inspector y statusbar. Todo dibujado por nosotros — nada de frame nativo.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.ox-app {
+  display: grid;
+  grid-template-rows: var(--ox-titlebar) 1fr var(--ox-statusbar);
+  height: 100vh;
+  background: var(--ox-bg);
+}
+
+/* ── Titlebar ──────────────────────────────────────────────────────────────── */
+.ox-titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  padding-left: var(--ox-4);
+  background: var(--ox-bg);
+  box-shadow: inset 0 -1px 0 var(--ox-line);
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 20;
+}
+.ox-titlebar button,
+.ox-titlebar .ox-no-drag { -webkit-app-region: no-drag; }
+
+/* Wordmark: el mark (dos vectores convergiendo) + ONYX en versalitas. */
+.ox-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  color: var(--ox-text-2);
+  transition: var(--tr-color);
+}
+.ox-brand:hover { color: var(--ox-text); }
+.ox-brand__mark { width: 18px; height: 18px; color: var(--ox-accent); }
+.ox-brand__mark .ox-brand__trail { opacity: .34; }
+.ox-brand__name {
+  font-size: var(--ox-fs-11);
+  font-weight: var(--ox-w-semi);
+  letter-spacing: var(--ox-track-caps);
+  text-transform: uppercase;
+}
+
+/* El contexto de la ventana vive en el centro del titlebar, no en el título. */
+.ox-titlebar__context {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  font-size: var(--ox-fs-11);
+  color: var(--ox-text-3);
+  pointer-events: none;
+}
+
+/* Controles de ventana: propios, no los de Windows. */
+.ox-wincontrols { display: flex; margin-left: auto; height: 100%; }
+.ox-wincontrol {
+  width: 46px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--ox-text-3);
+  cursor: default;
+  transition: var(--tr-color);
+}
+.ox-wincontrol:hover { background: var(--ox-wash-1); color: var(--ox-text); }
+.ox-wincontrol:active { background: var(--ox-wash-2); }
+.ox-wincontrol--close:hover { background: var(--ox-danger-dim); color: #fff; }
+.ox-wincontrol .ox-icon { width: 11px; height: 11px; stroke-width: 1.2; }
+
+/* ── Cuerpo ───────────────────────────────────────────────────────────────── */
+.ox-body {
+  display: grid;
+  grid-template-columns: var(--ox-rail) 1fr;
+  min-height: 0;
+}
+
+/* ── Rail de navegación ───────────────────────────────────────────────────── */
+.ox-rail {
+  display: flex;
+  flex-direction: column;
+  background: var(--ox-s1);
+  box-shadow: inset -1px 0 0 var(--ox-line);
+  min-height: 0;
+}
+.ox-rail__top { padding: var(--ox-3) var(--ox-3) var(--ox-2); }
+.ox-rail__nav { flex: 1 1 auto; min-height: 0; padding: 0 var(--ox-3); }
+.ox-rail__group { margin-bottom: var(--ox-1); }
+.ox-rail__group-label {
+  padding: var(--ox-3) var(--ox-2) var(--ox-1);
+  font-size: var(--ox-fs-10);
+  font-weight: var(--ox-w-semi);
+  letter-spacing: var(--ox-track-caps);
+  text-transform: uppercase;
+  color: var(--ox-text-4);
+}
+
+.ox-navitem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  width: 100%;
+  padding: 0 var(--ox-2);
+  height: 32px;
+  border: 0;
+  border-radius: var(--ox-r-sm);
+  background: transparent;
+  color: var(--ox-text-2);
+  font-size: var(--ox-fs-13);
+  text-align: left;
+  cursor: default;
+  transition: var(--tr-color);
+}
+.ox-navitem .ox-icon { color: var(--ox-text-3); transition: color var(--ox-t-1) var(--ox-ease-soft); }
+.ox-navitem:hover { background: var(--ox-wash-1); color: var(--ox-text); }
+.ox-navitem:hover .ox-icon { color: var(--ox-text-2); }
+.ox-navitem.is-active {
+  background: var(--ox-wash-2);
+  color: var(--ox-text);
+  font-weight: var(--ox-w-medium);
+}
+.ox-navitem.is-active .ox-icon { color: var(--ox-accent); }
+
+/* El indicador de activo es un vector corto sobre el borde izquierdo: crece
+   desde el centro en vez de aparecer. */
+.ox-navitem::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 2px;
+  height: 16px;
+  border-radius: var(--ox-r-pill);
+  background: var(--ox-accent);
+  transform: translateY(-50%) scaleY(0);
+  transition: transform var(--ox-t-3) var(--ox-ease);
+}
+.ox-navitem.is-active::before { transform: translateY(-50%) scaleY(1); }
+
+/* Contador a la derecha del item (corridas activas, borradores…) */
+.ox-navitem__count {
+  margin-left: auto;
+  font-size: var(--ox-fs-11);
+  font-variant-numeric: tabular-nums;
+  color: var(--ox-text-4);
+  transition: color var(--ox-t-1) var(--ox-ease-soft);
+}
+.ox-navitem:hover .ox-navitem__count,
+.ox-navitem.is-active .ox-navitem__count { color: var(--ox-text-2); }
+
+/* Pie del rail: salud de proveedores. */
+.ox-rail__foot {
+  padding: var(--ox-3);
+  box-shadow: inset 0 1px 0 var(--ox-line);
+}
+
+/* ── Área principal ───────────────────────────────────────────────────────── */
+.ox-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--ox-bg);
+}
+
+.ox-viewhead {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  padding: var(--ox-5) var(--ox-6) var(--ox-4);
+  flex: 0 0 auto;
+}
+.ox-viewhead__text { min-width: 0; }
+.ox-viewhead__title {
+  font-size: var(--ox-fs-19);
+  font-weight: var(--ox-w-semi);
+  letter-spacing: var(--ox-track-tight);
+  line-height: 1.2;
+}
+.ox-viewhead__sub {
+  font-size: var(--ox-fs-12);
+  color: var(--ox-text-3);
+  margin-top: 2px;
+}
+.ox-viewhead__actions { margin-left: auto; display: flex; align-items: center; gap: var(--ox-2); }
+
+/* Breadcrumb: el separador es un chevron SVG, nunca un "/" ni un "›". */
+.ox-crumbs { display: flex; align-items: center; gap: var(--ox-1); font-size: var(--ox-fs-12); }
+.ox-crumbs__item {
+  color: var(--ox-text-3);
+  padding: 2px var(--ox-1);
+  border-radius: var(--ox-r-xs);
+  transition: var(--tr-color);
+}
+.ox-crumbs__item:hover { color: var(--ox-text); background: var(--ox-wash-1); }
+.ox-crumbs__item:last-child { color: var(--ox-text-2); }
+.ox-crumbs .ox-icon { width: 12px; height: 12px; color: var(--ox-text-4); }
+
+.ox-viewbody { flex: 1 1 auto; min-height: 0; display: flex; }
+/* position:relative para anclar los controles flotantes del lienzo: si viven
+   DENTRO del contenedor que scrollea, se van de pantalla con el contenido. */
+.ox-viewbody__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* ── Inspector (panel derecho) ────────────────────────────────────────────── */
+.ox-inspector {
+  width: var(--ox-inspector);
+  flex: 0 0 auto;
+  background: var(--ox-s1);
+  box-shadow: inset 1px 0 0 var(--ox-line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  transition: width var(--ox-t-4) var(--ox-ease);
+}
+/* El contenido conserva su ancho mientras el panel se cierra: sin esto el
+   texto se reacomoda durante la transición y el colapso se ve como un temblor. */
+.ox-inspector > * { min-width: var(--ox-inspector); }
+.ox-inspector.is-collapsed { width: 0; }
+.ox-inspector__head {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  padding: var(--ox-4) var(--ox-4) var(--ox-3);
+  flex: 0 0 auto;
+}
+.ox-inspector__body { flex: 1 1 auto; min-height: 0; padding-left: var(--ox-4); padding-right: var(--ox-4); }
+.ox-inspector__foot {
+  padding: var(--ox-3) var(--ox-4);
+  box-shadow: inset 0 1px 0 var(--ox-line);
+  display: flex;
+  gap: var(--ox-2);
+}
+
+/* ── Statusbar ────────────────────────────────────────────────────────────── */
+.ox-statusbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-4);
+  padding: 0 var(--ox-4);
+  background: var(--ox-s1);
+  box-shadow: inset 0 1px 0 var(--ox-line);
+  font-size: var(--ox-fs-11);
+  color: var(--ox-text-3);
+}
+.ox-statusbar__item {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  padding: 0 var(--ox-1);
+  height: 100%;
+  transition: var(--tr-color);
+}
+.ox-statusbar__item:hover { color: var(--ox-text-2); }
+.ox-statusbar__item .ox-icon { width: 12px; height: 12px; }
+.ox-statusbar__value { color: var(--ox-text-2); font-variant-numeric: tabular-nums; }

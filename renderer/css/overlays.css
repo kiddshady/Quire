@@ -1,0 +1,287 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONYX — overlays
+   Tooltip, menú, modal, toast y command palette. Todos portaleados a #ox-layer,
+   todos con entrada Y salida (nada se corta al cerrarse), todos propios: ni un
+   title= nativo, ni un confirm() del sistema.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+#ox-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+}
+#ox-layer > * { pointer-events: auto; }
+
+/* ── Tooltip ─────────────────────────────────────────────────────────────────
+   Reemplaza al title= nativo (amarillo, lento, inestilable). Se declara con
+   data-tip / data-tip-side y lo maneja tooltip.js. */
+.ox-tooltip {
+  position: absolute;
+  max-width: 260px;
+  padding: 5px var(--ox-2);
+  border-radius: var(--ox-r-sm);
+  background: var(--ox-s4);
+  color: var(--ox-text);
+  font-size: var(--ox-fs-11);
+  line-height: 1.45;
+  box-shadow: var(--ox-hairline), var(--ox-e3);
+  animation: ox-pop-in var(--ox-t-2) var(--ox-ease) both;
+  will-change: transform, opacity;
+}
+.ox-tooltip[data-state='closing'] { animation: ox-pop-out 100ms var(--ox-ease-in) both; }
+.ox-tooltip__key { margin-left: var(--ox-2); color: var(--ox-text-4); }
+
+/* ── Menú contextual / dropdown ──────────────────────────────────────────── */
+/* Los overlays que scrollean también se esfuman: la regla del corte-nunca no
+   se suspende porque la superficie sea chica. Cada uno lleva un fade a su
+   escala, y su padding vertical lo iguala para que en reposo no coma ítems. */
+.ox-menu.ox-scroll,
+.ox-palette__list,
+.ox-modal__body.ox-scroll { overflow-x: hidden; }
+.ox-menu.ox-scroll        { --ox-fade: 10px; padding-top: 10px; padding-bottom: 10px; }
+.ox-palette__list         { --ox-fade: 18px; padding-top: 18px; padding-bottom: 18px; }
+.ox-modal__body.ox-scroll { --ox-fade: 20px; padding-top: 20px; padding-bottom: 20px; }
+
+.ox-menu {
+  position: absolute;
+  min-width: 180px;
+  max-height: 60vh;
+  padding: var(--ox-1);
+  border-radius: var(--ox-r-md);
+  background: var(--ox-s3);
+  box-shadow: var(--ox-hairline), var(--ox-e4);
+  overflow-y: auto;
+  animation: ox-pop-in var(--ox-t-2) var(--ox-ease) both;
+  transform-origin: var(--origin, top left);
+}
+.ox-menu[data-state='closing'] { animation: ox-pop-out 110ms var(--ox-ease-in) both; }
+.ox-menuitem {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--ox-2);
+  border: 0;
+  border-radius: var(--ox-r-sm);
+  background: transparent;
+  color: var(--ox-text-2);
+  font-size: var(--ox-fs-12);
+  text-align: left;
+  cursor: default;
+  transition: var(--tr-color);
+}
+.ox-menuitem .ox-icon { width: 14px; height: 14px; color: var(--ox-text-4); transition: color var(--ox-t-1) var(--ox-ease-soft); }
+.ox-menuitem:hover, .ox-menuitem.is-active { background: var(--ox-wash-2); color: var(--ox-text); }
+.ox-menuitem:hover .ox-icon, .ox-menuitem.is-active .ox-icon { color: var(--ox-text-2); }
+.ox-menuitem.is-selected .ox-icon:last-child { color: var(--ox-accent); }
+.ox-menuitem--danger { color: var(--ox-danger); }
+.ox-menuitem--danger .ox-icon { color: var(--ox-danger); }
+.ox-menuitem--danger:hover { background: var(--ox-danger-wash); color: var(--ox-danger); }
+.ox-menuitem__key { margin-left: auto; font-size: var(--ox-fs-10); color: var(--ox-text-4); }
+.ox-menu__sep { height: 1px; margin: var(--ox-1) var(--ox-2); background: var(--ox-line); }
+.ox-menu__label {
+  padding: var(--ox-2) var(--ox-2) var(--ox-1);
+  font-size: var(--ox-fs-10);
+  font-weight: var(--ox-w-semi);
+  letter-spacing: var(--ox-track-caps);
+  text-transform: uppercase;
+  color: var(--ox-text-4);
+}
+
+/* ── Modal ───────────────────────────────────────────────────────────────── */
+.ox-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 5, 6, .62);
+  backdrop-filter: blur(2px);
+  animation: ox-fade-in var(--ox-t-3) var(--ox-ease) both;
+}
+.ox-scrim[data-state='closing'] { animation: ox-fade-out var(--ox-t-2) var(--ox-ease-in) both; }
+
+/* El wrapper de la animación es TAMBIÉN el que centra, y esto no es un capricho
+   de estilo: es la única forma de que no se rompa.
+
+   Antes el modal se centraba solo con `position:fixed` + `top:50%` +
+   `translate(-50%,-50%)`, y el wrapper era un div suelto solo para animar. Pero
+   ese wrapper tiene alto 0 (su único hijo estaba fuera de flujo) y —por
+   `animation-fill-mode: both`— conserva un transform computado para siempre,
+   aunque sea la identidad. Un elemento con transform es bloque contenedor de
+   sus descendientes `fixed`, así que ese `top:50%` se resolvía contra 0 px de
+   alto y el modal terminaba medio cuerpo arriba del borde de la ventana.
+
+   Centrando con grid no hay porcentajes que resolver contra nada. */
+.ox-modal__anim {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  animation: ox-lift-in var(--ox-t-3) var(--ox-ease) both;
+}
+/* El wrapper cubre toda la ventana, así que tiene que dejar pasar el click al
+   scrim de abajo; solo el modal en sí lo intercepta. */
+#ox-layer > .ox-modal__anim { pointer-events: none; }
+
+.ox-modal {
+  position: relative;
+  pointer-events: auto;
+  width: min(520px, calc(100vw - 96px));
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-radius: var(--ox-r-xl);
+  background: var(--ox-s3);
+  box-shadow: var(--ox-hairline), var(--ox-e4);
+  overflow: hidden;
+}
+.ox-modal__anim[data-state='closing'] { animation: ox-lift-out var(--ox-t-2) var(--ox-ease-in) both; }
+.ox-modal__head { padding: var(--ox-5) var(--ox-5) var(--ox-3); display: flex; align-items: flex-start; gap: var(--ox-3); }
+.ox-modal__title { font-size: var(--ox-fs-15); font-weight: var(--ox-w-semi); letter-spacing: var(--ox-track-tight); }
+.ox-modal__sub { font-size: var(--ox-fs-12); color: var(--ox-text-3); margin-top: 4px; line-height: var(--ox-lh-loose); }
+.ox-modal__body { padding: 0 var(--ox-5) var(--ox-5); overflow-y: auto; min-height: 0; }
+.ox-modal__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ox-2);
+  padding: var(--ox-3) var(--ox-5);
+  background: var(--ox-s2);
+  box-shadow: inset 0 1px 0 var(--ox-line);
+}
+
+/* ── Toasts ──────────────────────────────────────────────────────────────── */
+.ox-toasts {
+  position: absolute;
+  right: var(--ox-5);
+  bottom: calc(var(--ox-statusbar) + var(--ox-4));
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--ox-2);
+  width: 320px;
+}
+.ox-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ox-3);
+  padding: var(--ox-3);
+  border-radius: var(--ox-r-md);
+  background: var(--ox-s3);
+  box-shadow: var(--ox-hairline), var(--ox-e4);
+  animation: ox-slide-in-r var(--ox-t-3) var(--ox-ease) both;
+  overflow: hidden;
+  position: relative;
+}
+.ox-toast[data-state='closing'] { animation: ox-slide-out-r var(--ox-t-2) var(--ox-ease-in) both; }
+.ox-toast > .ox-icon { color: var(--ox-text-3); margin-top: 1px; }
+.ox-toast__main { flex: 1 1 auto; min-width: 0; }
+.ox-toast__title { font-size: var(--ox-fs-12); font-weight: var(--ox-w-medium); color: var(--ox-text); }
+.ox-toast__text { font-size: var(--ox-fs-11); color: var(--ox-text-3); margin-top: 2px; line-height: var(--ox-lh); user-select: text; }
+.ox-toast--error > .ox-icon { color: var(--ox-danger); }
+.ox-toast--error { box-shadow: inset 0 0 0 1px var(--ox-danger-ring), var(--ox-e4); }
+/* La barra de vida: se consume sola y muestra cuánto le queda. */
+.ox-toast__life {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 1.5px;
+  width: 100%;
+  background: var(--ox-line-3);
+  transform-origin: left;
+  animation: ox-toast-life var(--life, 4000ms) linear forwards;
+}
+.ox-toast--error .ox-toast__life { background: var(--ox-danger-ring); }
+@keyframes ox-toast-life { from { transform: scaleX(1) } to { transform: scaleX(0) } }
+
+/* ── Command palette ─────────────────────────────────────────────────────────
+   El centro de mando de la app. Es la superficie más alta del sistema (s4). */
+/* Mismo patrón que el modal: el wrapper posiciona y anima. Acá el bug no se
+   veía —`top:14vh` es relativo a la ventana pase lo que pase— pero la trampa
+   estaba armada igual, esperando a que alguien cambiara ese 14vh por un %. */
+.ox-palette__anim {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  padding-top: 14vh;
+  animation: ox-lift-in var(--ox-t-3) var(--ox-ease) both;
+}
+#ox-layer > .ox-palette__anim { pointer-events: none; }
+
+.ox-palette {
+  position: relative;
+  pointer-events: auto;
+  width: min(560px, calc(100vw - 96px));
+  max-height: 56vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--ox-r-lg);
+  background: var(--ox-s4);
+  box-shadow: var(--ox-hairline), var(--ox-e4);
+  overflow: hidden;
+}
+.ox-palette__anim[data-state='closing'] { animation: ox-lift-out var(--ox-t-2) var(--ox-ease-in) both; }
+.ox-palette__search {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  padding: var(--ox-3) var(--ox-4);
+  box-shadow: inset 0 -1px 0 var(--ox-line);
+  flex: 0 0 auto;
+}
+.ox-palette__search > .ox-icon { color: var(--ox-text-4); }
+.ox-palette__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ox-text);
+  font-size: var(--ox-fs-15);
+  user-select: text;
+  cursor: text;
+}
+.ox-palette__input::placeholder { color: var(--ox-text-4); }
+.ox-palette__input:focus-visible { box-shadow: none; }
+.ox-palette__list { flex: 1 1 auto; min-height: 0; padding-left: var(--ox-2); padding-right: var(--ox-2); }
+.ox-palette__group {
+  padding: var(--ox-2) var(--ox-2) var(--ox-1);
+  font-size: var(--ox-fs-10);
+  font-weight: var(--ox-w-semi);
+  letter-spacing: var(--ox-track-caps);
+  text-transform: uppercase;
+  color: var(--ox-text-4);
+}
+.ox-palette__item {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  width: 100%;
+  height: 34px;
+  padding: 0 var(--ox-2);
+  border: 0;
+  border-radius: var(--ox-r-sm);
+  background: transparent;
+  color: var(--ox-text-2);
+  font-size: var(--ox-fs-13);
+  text-align: left;
+  cursor: default;
+  transition: var(--tr-color);
+}
+.ox-palette__item .ox-icon { width: 15px; height: 15px; color: var(--ox-text-4); transition: color var(--ox-t-1) var(--ox-ease-soft); }
+.ox-palette__item.is-active { background: var(--ox-wash-2); color: var(--ox-text); }
+.ox-palette__item.is-active .ox-icon { color: var(--ox-accent); }
+.ox-palette__item__hint { margin-left: auto; font-size: var(--ox-fs-10); color: var(--ox-text-4); }
+/* Lo que hace match con lo tipeado se ILUMINA, no se pinta de amarillo. */
+.ox-palette__item mark { background: transparent; color: var(--ox-accent); font-weight: var(--ox-w-semi); }
+.ox-palette__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-4);
+  padding: var(--ox-2) var(--ox-4);
+  box-shadow: inset 0 1px 0 var(--ox-line);
+  font-size: var(--ox-fs-10);
+  color: var(--ox-text-4);
+  flex: 0 0 auto;
+}
+.ox-palette__foot .ox-row { gap: var(--ox-1); }

@@ -1,0 +1,443 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONYX — superficies y estado
+   Cards, listas, tablas, tabs, medidores… y el sistema de estado, que es la
+   pieza central del diseño.
+
+   CÓMO SE LEE EL ESTADO SIN COLOR
+   La FORMA dice qué es la cosa:   ● agente   ◆ decisión/compuerta
+                                    ⬢ fan-out  ■ entrada/salida
+   La LUMINANCIA dice si está viva: corriendo = lo más claro de la pantalla,
+                                    terminado = se apaga y retrocede.
+   El MOVIMIENTO es exclusivo de "corriendo": es lo único que respira.
+   El ROJO aparece una sola vez en toda la app: cuando algo falló.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Marca de estado ──────────────────────────────────────────────────────── */
+.ox-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+.ox-mark__core {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  transition: background-color var(--ox-t-3) var(--ox-ease-soft),
+              box-shadow var(--ox-t-3) var(--ox-ease-soft),
+              transform var(--ox-t-3) var(--ox-ease);
+}
+/* El anillo que respira. Solo existe cuando algo corre. */
+.ox-mark__halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px currentColor;
+  opacity: 0;
+  transition: opacity var(--ox-t-3) var(--ox-ease-soft);
+}
+
+/* Formas — la identidad del nodo */
+.ox-mark--diamond .ox-mark__core { border-radius: 1.5px; transform: rotate(45deg) scale(.84); }
+.ox-mark--diamond .ox-mark__halo { border-radius: 2px; transform: rotate(45deg) scale(.8); }
+.ox-mark--square  .ox-mark__core { border-radius: 1.5px; }
+.ox-mark--square  .ox-mark__halo { border-radius: 3px; }
+.ox-mark--hex     .ox-mark__core {
+  border-radius: 0;
+  width: 9px; height: 10px;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+.ox-mark--hex .ox-mark__halo { clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); box-shadow: none; }
+
+/* Estados */
+.ox-mark[data-state='idle']    { color: var(--ox-text-4); }
+.ox-mark[data-state='idle']    .ox-mark__core { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+
+.ox-mark[data-state='queued']  { color: var(--ox-text-4); }
+.ox-mark[data-state='queued']  .ox-mark__core { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; transform: scale(.8); }
+.ox-mark--diamond[data-state='queued'] .ox-mark__core { transform: rotate(45deg) scale(.7); }
+
+.ox-mark[data-state='running'] { color: var(--ox-accent); }
+.ox-mark[data-state='running'] .ox-mark__halo { opacity: 1; animation: ox-breathe 2.2s var(--ox-ease-both) infinite; }
+
+.ox-mark[data-state='waiting'] { color: var(--ox-text-2); }
+.ox-mark[data-state='waiting'] .ox-mark__core { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+.ox-mark[data-state='waiting'] .ox-mark__halo { opacity: .3; }
+
+.ox-mark[data-state='done']    { color: var(--ox-text-3); }
+
+.ox-mark[data-state='skipped'] { color: var(--ox-text-4); opacity: .5; }
+.ox-mark[data-state='skipped'] .ox-mark__core { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; transform: scale(.6); }
+
+.ox-mark[data-state='failed']  { color: var(--ox-danger); }
+.ox-mark[data-state='failed']  .ox-mark__halo { opacity: .55; }
+
+/* Etiqueta de estado: la marca + su palabra. */
+.ox-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ox-2);
+  font-size: var(--ox-fs-11);
+  color: var(--ox-text-3);
+  white-space: nowrap;
+  transition: color var(--ox-t-2) var(--ox-ease-soft);
+}
+.ox-status[data-state='running'] { color: var(--ox-text); }
+.ox-status[data-state='failed']  { color: var(--ox-danger); }
+.ox-status[data-state='waiting'] { color: var(--ox-text-2); }
+
+/* ── Chip / tag ───────────────────────────────────────────────────────────── */
+.ox-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 var(--ox-2);
+  border-radius: var(--ox-r-xs);
+  background: var(--ox-wash-1);
+  color: var(--ox-text-2);
+  font-size: var(--ox-fs-11);
+  font-weight: var(--ox-w-medium);
+  white-space: nowrap;
+  transition: var(--tr-color);
+}
+.ox-chip .ox-icon { width: 11px; height: 11px; color: var(--ox-text-3); }
+.ox-chip--mono { font-family: var(--ox-mono); font-size: 10.5px; letter-spacing: 0; }
+.ox-chip--outline { background: transparent; box-shadow: var(--ox-hairline); }
+.ox-chip--danger { background: var(--ox-danger-wash); color: var(--ox-danger); }
+.ox-chip--danger .ox-icon { color: var(--ox-danger); }
+
+/* ── Card / panel ─────────────────────────────────────────────────────────────
+   La jerarquía la construye la ELEVACIÓN, no un borde marcado. El hairline
+   existe para definir el filo, no para separar planos. */
+.ox-card {
+  background: var(--ox-s2);
+  border-radius: var(--ox-r-lg);
+  box-shadow: var(--ox-hairline), var(--ox-e2);
+  transition: var(--tr-surface);
+}
+.ox-card--interactive:hover {
+  background: var(--ox-s3);
+  box-shadow: inset 0 0 0 1px var(--ox-line-2), var(--ox-e3);
+  transform: translateY(-1px);
+}
+.ox-card--interactive:active { transform: translateY(0) scale(.995); }
+.ox-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  padding: var(--ox-4) var(--ox-4) var(--ox-3);
+}
+.ox-card__body { padding: 0 var(--ox-4) var(--ox-4); }
+.ox-card__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  padding: var(--ox-3) var(--ox-4);
+  box-shadow: inset 0 1px 0 var(--ox-line);
+}
+
+/* Panel hundido: consola, código, canvas. */
+.ox-sunken {
+  background: var(--ox-sunken);
+  border-radius: var(--ox-r-md);
+  box-shadow: var(--ox-hairline);
+}
+
+/* ── Sección del inspector ────────────────────────────────────────────────── */
+.ox-section { padding: var(--ox-4) 0; box-shadow: inset 0 -1px 0 var(--ox-line); }
+.ox-section:last-child { box-shadow: none; }
+.ox-section__head {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  margin-bottom: var(--ox-3);
+}
+.ox-section__title {
+  font-size: var(--ox-fs-10);
+  font-weight: var(--ox-w-semi);
+  letter-spacing: var(--ox-track-caps);
+  text-transform: uppercase;
+  color: var(--ox-text-4);
+}
+
+/* Par clave/valor */
+.ox-kv {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: var(--ox-2) var(--ox-3);
+  align-items: baseline;
+  font-size: var(--ox-fs-12);
+}
+.ox-kv__k { color: var(--ox-text-4); }
+.ox-kv__v { color: var(--ox-text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; user-select: text; }
+
+/* ── Lista ────────────────────────────────────────────────────────────────── */
+.ox-list { display: flex; flex-direction: column; gap: 2px; }
+.ox-listitem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  min-height: 40px;
+  padding: var(--ox-2) var(--ox-3);
+  border-radius: var(--ox-r-md);
+  background: transparent;
+  text-align: left;
+  border: 0;
+  color: inherit;
+  cursor: default;
+  overflow: hidden;
+  transition: var(--tr-color), transform var(--ox-t-1) var(--ox-ease-soft);
+}
+.ox-listitem:hover { background: var(--ox-wash-1); }
+.ox-listitem.is-selected { background: var(--ox-wash-2); }
+.ox-listitem.is-selected::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  width: 2px; height: 60%;
+  border-radius: var(--ox-r-pill);
+  background: var(--ox-accent);
+  transform: translateY(-50%);
+  animation: ox-fade-in var(--ox-t-2) var(--ox-ease) both;
+}
+/* Flex column explícito: el título y el subtítulo son <span>, y sin esto
+   quedarían en línea uno al lado del otro. */
+.ox-listitem__main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.ox-listitem__title {
+  font-size: var(--ox-fs-13);
+  color: var(--ox-text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ox-listitem__sub {
+  font-size: var(--ox-fs-11);
+  color: var(--ox-text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ox-listitem__aside { display: flex; align-items: center; gap: var(--ox-3); flex: 0 0 auto; }
+
+/* Las acciones de fila se materializan con el hover, no ocupan sitio siempre. */
+.ox-rowactions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transform: translateX(4px);
+  transition: opacity var(--ox-t-2) var(--ox-ease-soft), transform var(--ox-t-2) var(--ox-ease);
+}
+.ox-listitem:hover .ox-rowactions,
+.ox-listitem:focus-within .ox-rowactions,
+.ox-tr:hover .ox-rowactions { opacity: 1; transform: none; }
+
+/* ── Tabla ────────────────────────────────────────────────────────────────── */
+.ox-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--ox-fs-12); }
+.ox-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: var(--ox-2) var(--ox-3);
+  text-align: left;
+  font-size: var(--ox-fs-10);
+  font-weight: var(--ox-w-semi);
+  letter-spacing: var(--ox-track-caps);
+  text-transform: uppercase;
+  color: var(--ox-text-4);
+  background: var(--ox-bg);
+  box-shadow: inset 0 -1px 0 var(--ox-line);
+  white-space: nowrap;
+  user-select: none;
+}
+.ox-table th.is-sortable { transition: color var(--ox-t-1) var(--ox-ease-soft); }
+.ox-table th.is-sortable:hover { color: var(--ox-text-2); }
+.ox-table td {
+  padding: var(--ox-2) var(--ox-3);
+  color: var(--ox-text-2);
+  box-shadow: inset 0 -1px 0 var(--ox-line);
+  user-select: text;
+}
+.ox-tr { transition: background-color var(--ox-t-1) var(--ox-ease-soft); }
+.ox-tr:hover td { background: var(--ox-wash-1); }
+.ox-tr.is-selected td { background: var(--ox-wash-2); }
+.ox-tr.is-failed td:first-child { box-shadow: inset 2px 0 0 var(--ox-danger), inset 0 -1px 0 var(--ox-line); }
+.ox-td--num { text-align: right; font-variant-numeric: tabular-nums; }
+.ox-td--tight { width: 1%; white-space: nowrap; }
+
+/* ── Tabs ─────────────────────────────────────────────────────────────────────
+   El subrayado viaja entre tabs (--tab-x / --tab-w los setea tabs() en app.js). */
+.ox-tabs {
+  position: relative;
+  display: flex;
+  gap: var(--ox-1);
+  box-shadow: inset 0 -1px 0 var(--ox-line);
+}
+.ox-tabs::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  width: var(--tab-w, 0px);
+  border-radius: var(--ox-r-pill);
+  background: var(--ox-accent);
+  transform: translateX(var(--tab-x, 0px));
+  transition: transform var(--ox-t-3) var(--ox-ease), width var(--ox-t-3) var(--ox-ease);
+}
+.ox-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  height: 34px;
+  padding: 0 var(--ox-3);
+  border: 0;
+  background: transparent;
+  color: var(--ox-text-3);
+  font-size: var(--ox-fs-12);
+  font-weight: var(--ox-w-medium);
+  cursor: default;
+  transition: color var(--ox-t-2) var(--ox-ease-soft);
+}
+.ox-tab:hover { color: var(--ox-text-2); }
+.ox-tab.is-active { color: var(--ox-text); }
+.ox-tab__count {
+  font-size: var(--ox-fs-10);
+  font-variant-numeric: tabular-nums;
+  color: var(--ox-text-4);
+  padding: 0 4px;
+  border-radius: var(--ox-r-xs);
+  background: var(--ox-wash-1);
+}
+
+/* ── Medidor / progreso ───────────────────────────────────────────────────── */
+.ox-meter {
+  position: relative;
+  height: 3px;
+  border-radius: var(--ox-r-pill);
+  background: var(--ox-s3);
+  overflow: hidden;
+}
+.ox-meter__fill {
+  height: 100%;
+  width: var(--ox-pct, 0%);
+  border-radius: inherit;
+  background: var(--ox-accent);
+  transition: width var(--ox-t-4) var(--ox-ease), background-color var(--ox-t-3) var(--ox-ease-soft);
+}
+.ox-meter--danger .ox-meter__fill { background: var(--ox-danger); }
+/* Indeterminado: una barra que recorre la pista.
+   Dos detalles que no son cosméticos:
+   · El recorrido va de -100% a 294% de su PROPIO ancho (34% de la pista), que
+     es exactamente lo que hace falta para entrar por un borde y salir por el
+     otro. Pasarse deja la barra fuera de la pista, y la pista vacía se lee
+     como un componente roto, no como "esperando".
+   · Timing lineal, no `ease-both`. Un bucle infinito no tiene principio ni
+     final del que acelerar: la curva solo hace que la barra se quede quieta
+     justo en los extremos, donde no se ve. */
+.ox-meter--indeterminate .ox-meter__fill {
+  width: 34%;
+  animation: ox-meter-sweep 1.5s linear infinite;
+}
+@keyframes ox-meter-sweep {
+  0%   { transform: translateX(-100%) }
+  100% { transform: translateX(294%) }
+}
+
+/* Cifra grande con su rótulo: el bloque de métrica. */
+.ox-stat { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ox-stat__value {
+  font-size: var(--ox-fs-19);
+  font-weight: var(--ox-w-semi);
+  letter-spacing: var(--ox-track-tight);
+  font-variant-numeric: tabular-nums;
+  color: var(--ox-text);
+  line-height: 1.1;
+}
+.ox-stat__label {
+  font-size: var(--ox-fs-10);
+  font-weight: var(--ox-w-medium);
+  letter-spacing: var(--ox-track-caps);
+  text-transform: uppercase;
+  color: var(--ox-text-4);
+}
+.ox-stat__unit { font-size: var(--ox-fs-12); font-weight: var(--ox-w-regular); color: var(--ox-text-3); }
+
+/* ── Avatar del agente ────────────────────────────────────────────────────────
+   Sin fotos ni emojis: un monograma en mono sobre superficie elevada. */
+.ox-avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: var(--ox-r-md);
+  background: var(--ox-s3);
+  box-shadow: var(--ox-hairline);
+  font-family: var(--ox-mono);
+  font-size: 11px;
+  font-weight: var(--ox-w-medium);
+  color: var(--ox-text-2);
+  letter-spacing: -.02em;
+  transition: var(--tr-surface);
+}
+.ox-avatar--lg { width: 36px; height: 36px; font-size: 13px; border-radius: var(--ox-r-lg); }
+
+/* ── Estado vacío ─────────────────────────────────────────────────────────────
+   Nunca una pantalla en blanco: un ícono grande y apagado, una frase y la
+   acción que la resuelve. */
+.ox-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ox-3);
+  padding: var(--ox-10) var(--ox-6);
+  text-align: center;
+  animation: ox-rise-in var(--ox-t-4) var(--ox-ease) both;
+}
+.ox-empty .ox-icon { width: 34px; height: 34px; color: var(--ox-text-4); stroke-width: 1; }
+.ox-empty__title { font-size: var(--ox-fs-15); font-weight: var(--ox-w-medium); color: var(--ox-text-2); }
+.ox-empty__text { font-size: var(--ox-fs-12); color: var(--ox-text-4); max-width: 320px; line-height: var(--ox-lh-loose); }
+
+/* ── Consola de log ───────────────────────────────────────────────────────── */
+.ox-log {
+  font-family: var(--ox-mono);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--ox-text-2);
+  user-select: text;
+}
+.ox-log__line { display: flex; gap: var(--ox-3); padding: 1px 0; animation: ox-fade-in var(--ox-t-2) var(--ox-ease) both; }
+.ox-log__time { color: var(--ox-text-4); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.ox-log__src  { color: var(--ox-text-3); flex: 0 0 auto; min-width: 74px; }
+.ox-log__msg  { min-width: 0; word-break: break-word; }
+.ox-log__line--error .ox-log__msg { color: var(--ox-danger); }
+.ox-log__line--muted .ox-log__msg { color: var(--ox-text-4); }
+
+/* ── Celda de ícono ───────────────────────────────────────────────────────────
+   Para vitrinas y selectores de íconos. El ícono manda y la etiqueta es un
+   susurro que solo se enciende con el hover: una grilla de 80 celdas con el
+   texto siempre a full contraste se vuelve ilegible. */
+.ox-iconcell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ox-2);
+  padding: var(--ox-3) var(--ox-2);
+  border: 0;
+  border-radius: var(--ox-r-md);
+  background: transparent;
+  color: var(--ox-text-3);
+  font: inherit;
+  font-size: 10px;
+  cursor: default;
+  min-width: 0;
+  transition: var(--tr-color);
+}
+.ox-iconcell .ox-icon { color: var(--ox-text-2); transition: color var(--ox-t-1) var(--ox-ease-soft); }
+.ox-iconcell > span { max-width: 100%; }
+.ox-iconcell:hover { background: var(--ox-wash-1); color: var(--ox-text-2); }
+.ox-iconcell:hover .ox-icon { color: var(--ox-accent); }
+.ox-iconcell:active { background: var(--ox-wash-2); }

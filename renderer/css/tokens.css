@@ -1,0 +1,203 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONYX — tokens
+   La única fuente de verdad del sistema. Ningún componente escribe un valor
+   crudo: todo sale de acá. Cambiar el carácter de una app = cambiar este archivo.
+
+   Está escrito para que una app nueva se re-tinta entera tocando CUATRO líneas,
+   arriba de todo: el matiz, la temperatura, el acento y la mono. Lo demás deriva.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ══════════════════════════════════════════════════════════════════════════
+     LAS PERILLAS
+     Lo único que cambia entre una app y otra. El resto de este archivo se
+     deriva de acá y no hace falta tocarlo.
+
+     No las edites a mano: `node tools/retint.mjs --accent cian --mono roboto`.
+     El color base está duplicado en hex en main.cjs y en el splash del
+     index.html (Electron no entiende oklch), y desincronizarlos trae de vuelta
+     el destello blanco al restaurar la ventana. El script toca los tres.
+     ══════════════════════════════════════════════════════════════════════════ */
+
+  /* El matiz de TODA la app, en grados OKLCH. Tiñe hasta el gris más oscuro.
+     El gris matemáticamente puro se lee muerto en pantalla: siempre hay un
+     matiz, la pregunta es cuál.
+       258 = azul frío (el default, sobrio y neutro)
+       30  = cálido, terroso        ·  145 = verde, técnico
+       285 = violeta                ·  200 = cian, eléctrico */
+  --ox-hue: 258;
+
+  /* Cuánta temperatura. Multiplica la croma de toda la escalera.
+     0 = gris absoluto (no recomendado) · 1 = el default · 3 = claramente teñido */
+  --ox-tint: 1;
+
+  /* El acento, como triplete RGB (sin coma: es la sintaxis moderna de rgb()).
+     Se declara así para poder derivar los washes con alfa sin repetir el color.
+     El default es luz: en una paleta acromática el acento ES el blanco.
+       cian    : 34 211 238    ·  violeta : 167 139 250
+       verde   : 74 222 128    ·  ámbar   : 251 191 36 */
+  --ox-accent-rgb: 240 243 247;
+
+  /* La familia monoespaciada: la de los datos exactos, el código y los IDs.
+     Apunta a uno de los tokens `--ox-mono-*` de abajo, nunca directo a un
+     nombre de familia — la indirección es lo que deja cambiarla desde el
+     script en vez de a mano. */
+  --ox-mono: var(--ox-mono-roboto);
+
+  /* Las familias disponibles. Las empaquetadas se declaran en fonts.css; la
+     opción `sistema` no empaqueta nada y usa lo que haya instalado, que es
+     rápido pero se ve distinto en cada máquina. */
+  --ox-mono-roboto:  'Roboto Mono', ui-monospace, monospace;
+  --ox-mono-sistema: 'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace;
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     DERIVADO — de acá para abajo casi nunca hace falta tocar nada.
+     ══════════════════════════════════════════════════════════════════════════ */
+
+  /* ── Superficies ───────────────────────────────────────────────────────────
+     Escalera de elevación. Nunca separamos planos con bordes gruesos: el plano
+     que flota SUBE de superficie y proyecta sombra.
+     La croma crece con la luminancia a propósito — un plano claro necesita más
+     temperatura que uno oscuro para no verse lavado. */
+  --ox-sunken: oklch(13.4% calc(.0032 * var(--ox-tint)) var(--ox-hue));  /* hundido: campos, consola, lienzo */
+  --ox-bg:     oklch(14.9% calc(.0046 * var(--ox-tint)) var(--ox-hue));  /* base de la ventana */
+  --ox-s1:     oklch(17.2% calc(.0070 * var(--ox-tint)) var(--ox-hue));  /* rail, statusbar */
+  --ox-s2:     oklch(20.3% calc(.0093 * var(--ox-tint)) var(--ox-hue));  /* card, panel, fila elevada */
+  --ox-s3:     oklch(23.4% calc(.0106 * var(--ox-tint)) var(--ox-hue));  /* menú, modal, popover, tooltip */
+  --ox-s4:     oklch(27.1% calc(.0126 * var(--ox-tint)) var(--ox-hue));  /* command palette, lo más alto */
+
+  /* El backgroundColor de la BrowserWindow tiene que coincidir con --ox-bg.
+     Electron no entiende oklch, así que main.cjs lleva el hex equivalente y el
+     renderer se lo vuelve a mandar ya calculado al arrancar (ver app.js →
+     syncWindowColor). Si cambiás el matiz, no hace falta tocar main.cjs. */
+
+  /* ── Hairlines ─────────────────────────────────────────────────────────────
+     Para divisores y contornos finos, no para construir jerarquía.
+     Siempre como box-shadow inset: un border real deja hilacha en las esquinas
+     redondeadas con overflow:hidden. */
+  --ox-line:   rgb(255 255 255 / .055);
+  --ox-line-2: rgb(255 255 255 / .09);
+  --ox-line-3: rgb(255 255 255 / .15);
+
+  /* ── Texto: escalera de énfasis ────────────────────────────────────────── */
+  --ox-text:   oklch(93.9% calc(.0046 * var(--ox-tint)) var(--ox-hue));  /* primario — nunca blanco puro */
+  --ox-text-2: oklch(73.3% calc(.0116 * var(--ox-tint)) var(--ox-hue));  /* secundario */
+  --ox-text-3: oklch(55.4% calc(.0138 * var(--ox-tint)) var(--ox-hue));  /* muted: metadatos, labels */
+  --ox-text-4: oklch(42.3% calc(.0142 * var(--ox-tint)) var(--ox-hue));  /* faint: deshabilitado, placeholder */
+
+  /* ── Acento ────────────────────────────────────────────────────────────────
+     Todo deriva del triplete de arriba: cambiarlo re-tinta hovers, focus,
+     selección y estados activos de una. */
+  --ox-accent:     rgb(var(--ox-accent-rgb));
+  --ox-accent-ink: var(--ox-bg);              /* tinta SOBRE el acento */
+  --ox-wash-1:     rgb(var(--ox-accent-rgb) / .05);   /* hover sutil */
+  --ox-wash-2:     rgb(var(--ox-accent-rgb) / .09);   /* hover fuerte / seleccionado */
+  --ox-wash-3:     rgb(var(--ox-accent-rgb) / .15);   /* activo / presionado */
+  --ox-ring:       rgb(var(--ox-accent-rgb) / .55);   /* focus del teclado */
+  --ox-select:     rgb(var(--ox-accent-rgb) / .16);   /* ::selection */
+
+  /* Con un acento oscuro o muy saturado, la tinta encima tiene que ser clara.
+     Descomentá esto si tu acento no es luz:
+       --ox-accent-ink: oklch(97% .01 var(--ox-hue)); */
+
+  /* ── Rojo: reservado para el fallo ─────────────────────────────────────────
+     No es "un color más de la paleta": es el único que dice que algo se rompió.
+     Si aparece decorando, deja de significar. */
+  --ox-danger-rgb: 212 103 107;
+  --ox-danger:      rgb(var(--ox-danger-rgb));
+  --ox-danger-dim:  oklch(47.5% .106 18);
+  --ox-danger-wash: rgb(var(--ox-danger-rgb) / .12);
+  --ox-danger-ring: rgb(var(--ox-danger-rgb) / .45);
+
+  /* ── Tipografía ────────────────────────────────────────────────────────────
+     Sans para toda la interfaz, mono SOLO para dato exacto: IDs, números,
+     rutas, timestamps. El mono en texto corrido se lee técnico de más. */
+  --ox-font: 'Inter', 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI',
+             system-ui, -apple-system, sans-serif;
+  /* --ox-mono vive arriba, entre las perillas: es lo que más se cambia por app.
+     La sans todavía sale del sistema — si querés fijarla, empaquetala en
+     fonts.css igual que la mono y sumale su token acá. */
+
+  --ox-fs-10:  10px;   /* eyebrow / versalitas */
+  --ox-fs-11:  11px;   /* metadatos, statusbar */
+  --ox-fs-12:  12px;   /* labels, secundario */
+  --ox-fs-13:  13px;   /* base de la UI */
+  --ox-fs-15:  15px;   /* título de panel */
+  --ox-fs-19:  19px;   /* título de vista */
+  --ox-fs-26:  26px;   /* display */
+
+  --ox-lh-tight: 1.25;
+  --ox-lh:       1.5;
+  --ox-lh-loose: 1.65;
+
+  --ox-w-regular: 400;
+  --ox-w-medium:  500;
+  --ox-w-semi:    600;
+
+  /* Tracking: negativo en lo grande, generoso en las versalitas.
+     Es el detalle silencioso que separa "editorial" de "bootstrap". */
+  --ox-track-tight:  -.014em;
+  --ox-track-normal:  0;
+  --ox-track-caps:    .13em;
+
+  /* ── Espaciado (escala de 4) ───────────────────────────────────────────── */
+  --ox-1:   4px;
+  --ox-2:   8px;
+  --ox-3:  12px;
+  --ox-4:  16px;
+  --ox-5:  20px;
+  --ox-6:  24px;
+  --ox-7:  32px;
+  --ox-8:  40px;
+  --ox-9:  56px;
+  --ox-10: 72px;
+
+  /* ── Radios: apenas redondeado ─────────────────────────────────────────── */
+  --ox-r-xs:   4px;
+  --ox-r-sm:   6px;
+  --ox-r-md:   8px;
+  --ox-r-lg:  12px;
+  --ox-r-xl:  16px;
+  --ox-r-pill: 999px;
+
+  /* ── Elevación ─────────────────────────────────────────────────────────── */
+  --ox-e1: 0 1px 2px rgb(0 0 0 / .35);
+  --ox-e2: 0 1px 2px rgb(0 0 0 / .40), 0 4px 12px rgb(0 0 0 / .32);
+  --ox-e3: 0 2px 4px rgb(0 0 0 / .45), 0 10px 30px rgb(0 0 0 / .45);
+  --ox-e4: 0 3px 8px rgb(0 0 0 / .50), 0 20px 56px rgb(0 0 0 / .58);
+  /* Contorno fino, combinable con cualquier elevación */
+  --ox-hairline: inset 0 0 0 1px var(--ox-line);
+
+  /* ── Movimiento ────────────────────────────────────────────────────────────
+     Onyx se mueve con seguridad: sale rápido, frena largo. Nada rebota. */
+  --ox-ease:      cubic-bezier(.16, 1, .3, 1);     /* expo-out: el default */
+  --ox-ease-soft: cubic-bezier(.33, 1, .68, 1);    /* cubic-out: micro-hovers */
+  --ox-ease-both: cubic-bezier(.65, 0, .35, 1);    /* in-out: lo que va y vuelve */
+  --ox-ease-in:   cubic-bezier(.55, 0, 1, .45);    /* salidas */
+
+  --ox-t-1: 110ms;   /* hover, color */
+  --ox-t-2: 180ms;   /* el default */
+  --ox-t-3: 280ms;   /* entradas de overlay */
+  --ox-t-4: 420ms;   /* transiciones de vista */
+
+  /* Transiciones nombradas: se componen, nunca se escribe `transition: all`
+     (que anima propiedades que no querías y cuesta caro en repaints). */
+  --tr-color:   color var(--ox-t-1) var(--ox-ease-soft),
+                background-color var(--ox-t-1) var(--ox-ease-soft),
+                box-shadow var(--ox-t-1) var(--ox-ease-soft);
+  --tr-move:    transform var(--ox-t-2) var(--ox-ease);
+  --tr-fade:    opacity var(--ox-t-2) var(--ox-ease-soft);
+  --tr-surface: background-color var(--ox-t-2) var(--ox-ease-soft),
+                box-shadow var(--ox-t-2) var(--ox-ease),
+                transform var(--ox-t-2) var(--ox-ease);
+
+  /* ── Geometría del layout ──────────────────────────────────────────────── */
+  --ox-titlebar:  38px;
+  --ox-statusbar: 26px;
+  --ox-rail:     224px;
+  --ox-inspector: 320px;
+
+  /* Tamaño del esfumado donde el scroll recorta. El contenedor lleva padding
+     ≥ este valor en el eje del scroll para que en reposo no coma ningún ítem. */
+  --ox-fade: 28px;
+}

@@ -1,0 +1,148 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONYX — motion
+   Nada aparece ni desaparece de golpe. El movimiento es lo que comunica causa
+   y efecto; sin él la app se siente barata y sobresalta.
+
+   La firma de Onyx es DIRECCIONAL: lo que pertenece al flujo entra sobre el
+   eje X (izquierda → derecha, el sentido en que corre un pipeline) y lo que es
+   lista o panel entra sobre Y. Un vector tiene dirección, no solo magnitud.
+
+   Regla de oro de las salidas: un nodo que se va del DOM tiene que TERMINAR su
+   animación antes de irse. Eso lo maneja presence() en motion.js, que le pone
+   [data-state="closing"] y espera al animationend.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Keyframes ───────────────────────────────────────────────────────────── */
+
+@keyframes ox-fade-in    { from { opacity: 0 } to { opacity: 1 } }
+@keyframes ox-fade-out   { from { opacity: 1 } to { opacity: 0 } }
+
+/* Entrada de lista / panel: sube y se materializa. */
+@keyframes ox-rise-in    { from { opacity: 0; transform: translateY(8px)  } to { opacity: 1; transform: none } }
+@keyframes ox-rise-out   { from { opacity: 1; transform: none } to { opacity: 0; transform: translateY(4px) } }
+
+/* Entrada sobre el eje del flujo: la firma. */
+@keyframes ox-glide-in   { from { opacity: 0; transform: translateX(-10px) } to { opacity: 1; transform: none } }
+@keyframes ox-glide-out  { from { opacity: 1; transform: none } to { opacity: 0; transform: translateX(6px) } }
+
+/* Overlays: crecen desde su origen, apenas. */
+@keyframes ox-pop-in     { from { opacity: 0; transform: scale(.965) translateY(-4px) } to { opacity: 1; transform: none } }
+@keyframes ox-pop-out    { from { opacity: 1; transform: none } to { opacity: 0; transform: scale(.98) translateY(-2px) } }
+
+/* Modal: entra desde abajo con peso. */
+@keyframes ox-lift-in    { from { opacity: 0; transform: translateY(14px) scale(.985) } to { opacity: 1; transform: none } }
+@keyframes ox-lift-out   { from { opacity: 1; transform: none } to { opacity: 0; transform: translateY(6px) scale(.99) } }
+
+/* Toast: entra desde el borde derecho. */
+@keyframes ox-slide-in-r { from { opacity: 0; transform: translateX(24px) } to { opacity: 1; transform: none } }
+@keyframes ox-slide-out-r{ from { opacity: 1; transform: none } to { opacity: 0; transform: translateX(16px) } }
+
+/* "Corriendo": lo único que respira en toda la pantalla. */
+@keyframes ox-breathe {
+  0%, 100% { opacity: .35; transform: scale(1) }
+  50%      { opacity: 1;   transform: scale(1.06) }
+}
+@keyframes ox-spin { to { transform: rotate(360deg) } }
+
+/* El arco del spinner recorre el círculo en vez de girar rígido. */
+@keyframes ox-arc {
+  0%   { stroke-dasharray: 1 62;  stroke-dashoffset: 0 }
+  50%  { stroke-dasharray: 40 62; stroke-dashoffset: -12 }
+  100% { stroke-dasharray: 1 62;  stroke-dashoffset: -62 }
+}
+
+/* Las aristas vivas del grafo: el guion viaja en el sentido del flujo. */
+@keyframes ox-flow { to { stroke-dashoffset: -24 } }
+
+/* Skeleton: una luz que barre, no un parpadeo. */
+@keyframes ox-shimmer { from { background-position: -180% 0 } to { background-position: 180% 0 } }
+
+/* Click-flash: el destello de confirmación del press. */
+@keyframes ox-flash {
+  from { opacity: .5 }
+  to   { opacity: 0 }
+}
+
+/* Un valor que se actualizó en vivo: parpadeo de luz, sin mover el layout. */
+@keyframes ox-tick {
+  0%   { color: var(--ox-accent) }
+  100% { color: inherit }
+}
+
+/* Fallo: un temblor corto y seco. Se usa UNA vez, cuando algo se rompe. */
+@keyframes ox-shake {
+  0%, 100% { transform: translateX(0) }
+  20%      { transform: translateX(-4px) }
+  40%      { transform: translateX(3px) }
+  60%      { transform: translateX(-2px) }
+  80%      { transform: translateX(1px) }
+}
+
+/* ── Clases de entrada ───────────────────────────────────────────────────────
+   Se aplican al montar. `--i` escalona (stagger) los hijos de una lista:
+   style="--i:3" → arranca 3 × 26 ms después. */
+.ox-in-fade  { animation: ox-fade-in  var(--ox-t-3) var(--ox-ease) both; }
+.ox-in-rise  { animation: ox-rise-in  var(--ox-t-3) var(--ox-ease) both; }
+.ox-in-glide { animation: ox-glide-in var(--ox-t-3) var(--ox-ease) both; }
+.ox-in-pop   { animation: ox-pop-in   var(--ox-t-2) var(--ox-ease) both; }
+
+.ox-in-fade, .ox-in-rise, .ox-in-glide, .ox-in-pop {
+  animation-delay: calc(var(--i, 0) * 26ms);
+}
+
+/* ── Salidas ─────────────────────────────────────────────────────────────────
+   presence() pone data-state="closing" y espera. Las salidas van más rápido
+   que las entradas: irse debe sentirse decidido, llegar debe sentirse suave. */
+[data-state='closing'].ox-in-fade  { animation: ox-fade-out  var(--ox-t-1) var(--ox-ease-in) both; }
+[data-state='closing'].ox-in-rise  { animation: ox-rise-out  var(--ox-t-1) var(--ox-ease-in) both; }
+[data-state='closing'].ox-in-glide { animation: ox-glide-out var(--ox-t-1) var(--ox-ease-in) both; }
+[data-state='closing'].ox-in-pop   { animation: ox-pop-out   var(--ox-t-1) var(--ox-ease-in) both; }
+
+/* ── Click-flash ─────────────────────────────────────────────────────────────
+   Un velo de luz que nace en el press y decae. No es un ripple de Material:
+   no viaja, no tiene centro, solo confirma que el click llegó. */
+.ox-flashable { position: relative; overflow: hidden; }
+.ox-flashable > .ox-flash {
+  position: absolute;
+  inset: 0;
+  background: var(--ox-accent);
+  opacity: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  animation: ox-flash 420ms var(--ox-ease) forwards;
+}
+
+/* ── Revelado de alto ────────────────────────────────────────────────────────
+   El truco grid 0fr→1fr en vez de animar height (que genera jank y exige
+   conocer el alto de antemano). El hijo necesita min-height:0 + overflow. */
+.ox-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--ox-t-3) var(--ox-ease);
+}
+.ox-reveal > * { min-height: 0; overflow: hidden; }
+.ox-reveal.is-open { grid-template-rows: 1fr; }
+
+/* ── Estados vivos ───────────────────────────────────────────────────────── */
+.ox-breathing { animation: ox-breathe 2.2s var(--ox-ease-both) infinite; }
+.ox-spinning  { animation: ox-spin 900ms linear infinite; }
+.ox-ticked    { animation: ox-tick 700ms var(--ox-ease-soft); }
+.ox-shaking   { animation: ox-shake 380ms var(--ox-ease-both); }
+
+/* ── Skeleton ────────────────────────────────────────────────────────────── */
+.ox-skeleton {
+  border-radius: var(--ox-r-sm);
+  background: linear-gradient(
+    100deg,
+    var(--ox-s2) 38%,
+    rgba(255, 255, 255, .045) 50%,
+    var(--ox-s2) 62%
+  );
+  background-size: 220% 100%;
+  animation: ox-shimmer 1.7s var(--ox-ease-both) infinite;
+}
+
+/* ── Transición de vista ─────────────────────────────────────────────────────
+   Al cambiar de sección la vista entra sobre el eje del flujo. Es la misma
+   gramática que los pasos del pipeline: todo en Onyx avanza hacia la derecha. */
+.ox-view { animation: ox-glide-in var(--ox-t-4) var(--ox-ease) both; }

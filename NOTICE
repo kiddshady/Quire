@@ -1,0 +1,17 @@
+Componentes de terceros incluidos en este repositorio
+=====================================================
+
+El código de Onyx está bajo la licencia MIT (ver LICENSE). Lo que sigue viaja
+empaquetado con él y tiene su propia licencia, independiente de la del proyecto.
+
+
+Roboto Mono
+-----------
+Archivos:  renderer/fonts/roboto-mono-*.woff2
+Licencia:  SIL Open Font License 1.1
+Texto:     renderer/fonts/Roboto-Mono-LICENSE.txt
+Copyright: Copyright 2015 The Roboto Mono Project Authors
+
+La OFL exige que este aviso y el texto de la licencia acompañen a la fuente en
+cualquier redistribución, incluida la de una app compilada. Si empaquetás una
+app hecha con Onyx, la licencia tiene que viajar adentro.

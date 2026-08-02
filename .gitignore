@@ -1,0 +1,21 @@
+node_modules/
+dist/
+out/
+
+# Los datos son del usuario, no del repo. Si querés versionar un set de
+# ejemplo, movelo a seed/ y copialo en el primer arranque.
+data/
+*.tmp
+*.corrupto-*
+
+# Capturas que dejan los tests al correr.
+test/*.png
+
+# Temporales del sistema.
+Thumbs.db
+desktop.ini
+
+# renderer/vendor/ SÍ va al repo, a propósito: son pdf.js y pdf-lib copiados de
+# node_modules. Sin ellos la app no arranca, y versionarlos fija la versión
+# exacta con la que se probó — pdfjs 5.x necesita un shim propio para andar en
+# Electron 40 (ver renderer/vendor/pdfjs/compat.mjs).

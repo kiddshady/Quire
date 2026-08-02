@@ -1,0 +1,945 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   QUIRE — lo propio de la app
+   Todo con prefijo `qr-`. El prefijo `ox-` es del framework y no se toca:
+   conviven, y un arreglo de Onyx se puede traer copiando un archivo.
+
+   Ningún valor crudo: color, espacio, radio, sombra y curva salen de tokens.
+   La excepción declarada es el blanco del papel — una hoja es blanca, no es
+   una superficie de la interfaz.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.qr-lector {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ── Barra de herramientas ───────────────────────────────────────────────── */
+
+.qr-barra {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  padding: var(--ox-2) var(--ox-4);
+  background: var(--ox-s1);
+  box-shadow: inset 0 -1px 0 var(--ox-line);
+  flex: 0 0 auto;
+  /* La barra no scrollea con el documento: es chrome, no contenido. */
+  user-select: none;
+}
+
+.qr-paginador {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+}
+
+.qr-paginador__campo {
+  width: 56px;
+  text-align: center;
+  padding-left: var(--ox-2);
+  padding-right: var(--ox-2);
+}
+
+.qr-zoom-valor {
+  min-width: 62px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.qr-lector__cuerpo {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Ancla del panel, que flota en vez de ocupar una columna del flex. */
+  position: relative;
+  /* El hueco del panel se reserva de UNA, sin transición. Ver abajo. */
+  padding-left: var(--qr-panel-w);
+  --qr-panel-w: 208px;
+}
+
+.qr-lector__cuerpo.sin-panel { padding-left: 0; }
+
+/* ── Panel lateral ───────────────────────────────────────────────────────────
+   Se pliega con `transform`, NO con `width`.
+
+   Animar el ancho remaqueta el visor en cada frame, y cada remaquetado dispara
+   el ResizeObserver que rehace la escala y repinta las páginas: durante los
+   280 ms del pliegue, la hoja grande se pintaba y se borraba una docena de
+   veces. Eso es el pestañeo.
+
+   El patrón es el mismo de Umbra y NeonCode: el panel flota y solo anima
+   `transform` y `opacity` —las dos las compone la GPU, sin tocar el layout— y
+   el hueco que deja libre se reserva en UN paso, sin transición. Así el visor
+   remaqueta una sola vez en lugar de sesenta veces por segundo. */
+
+.qr-panel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: var(--qr-panel-w);
+  display: flex;
+  flex-direction: column;
+  background: var(--ox-s1);
+  box-shadow: inset -1px 0 0 var(--ox-line);
+  overflow: hidden;
+  transition: transform var(--ox-t-3) var(--ox-ease),
+              opacity var(--ox-t-2) var(--ox-ease-in);
+}
+
+.qr-panel.is-collapsed {
+  opacity: 0;
+  transform: translateX(-100%);
+  pointer-events: none;
+}
+
+.qr-panel__tabs {
+  display: flex;
+  gap: var(--ox-1);
+  padding: var(--ox-2);
+  flex: 0 0 auto;
+  box-shadow: inset 0 -1px 0 var(--ox-line);
+}
+
+.qr-panel__tab {
+  flex: 1;
+  padding: var(--ox-2) var(--ox-2);
+  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  font-size: var(--ox-fs-11);
+  font-weight: var(--ox-w-medium);
+  color: var(--ox-text-3);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--tr-color);
+}
+
+.qr-panel__tab:hover { color: var(--ox-text-2); background: var(--ox-wash-1); }
+.qr-panel__tab.is-active { color: var(--ox-text); background: var(--ox-wash-2); }
+
+/* Sin .ox-scroll: el scroll es propio justamente para no heredar el esfumado
+   (ver la excepción declarada más abajo, en .qr-visor). */
+.qr-panel__cuerpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--ox-3);
+}
+
+.qr-panel__vacio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ox-3);
+  padding: var(--ox-8) var(--ox-4);
+  text-align: center;
+  color: var(--ox-text-4);
+}
+
+.qr-panel__vacio svg { width: 22px; height: 22px; }
+
+/* ── Miniaturas ──────────────────────────────────────────────────────────── */
+
+.qr-mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ox-1);
+  width: 100%;
+  padding: var(--ox-2);
+  margin-bottom: var(--ox-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  cursor: pointer;
+  transition: var(--tr-color);
+}
+
+.qr-mini:hover { background: var(--ox-wash-1); }
+.qr-mini.is-actual { background: var(--ox-wash-2); }
+
+.qr-mini__hoja {
+  display: block;
+  width: 100%;
+  background: var(--ox-sunken);
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: var(--ox-e1);
+  /* Mientras no hay lienzo, el hueco ya tiene el tamaño final: así la lista no
+     salta a medida que se van pintando las miniaturas. */
+  transition: box-shadow var(--ox-t-2) var(--ox-ease-soft);
+}
+
+.qr-mini:hover .qr-mini__hoja { box-shadow: var(--ox-e2); }
+
+.qr-mini__lienzo {
+  display: block;
+  width: 100%;
+  height: auto;
+  opacity: 0;
+  animation: qr-aparecer var(--ox-t-3) var(--ox-ease) forwards;
+}
+
+.qr-mini__num {
+  font-size: var(--ox-fs-10);
+  color: var(--ox-text-4);
+  font-variant-numeric: tabular-nums;
+  transition: var(--tr-color);
+}
+
+.qr-mini.is-actual .qr-mini__num { color: var(--ox-text-2); }
+
+/* ── Esquema ─────────────────────────────────────────────────────────────── */
+
+.qr-esquema { display: flex; flex-direction: column; gap: 1px; }
+
+.qr-esquema__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ox-2);
+  width: 100%;
+  text-align: left;
+  padding: var(--ox-2);
+  /* El nivel se ve en la sangría, no en un ícono de árbol. */
+  padding-left: calc(var(--ox-2) + var(--nivel, 0) * 12px);
+  background: transparent;
+  border: 0;
+  border-radius: var(--ox-r-xs);
+  color: var(--ox-text-2);
+  font-size: var(--ox-fs-12);
+  cursor: pointer;
+  transition: var(--tr-color);
+}
+
+.qr-esquema__item:hover:not(:disabled) { background: var(--ox-wash-1); color: var(--ox-text); }
+.qr-esquema__item:disabled { color: var(--ox-text-4); cursor: default; }
+.qr-esquema__titulo { flex: 1; min-width: 0; }
+.qr-esquema__pag { font-size: var(--ox-fs-10); color: var(--ox-text-4); }
+
+/* ── El visor ────────────────────────────────────────────────────────────── */
+
+/* ── EXCEPCIÓN DECLARADA: acá NO va el esfumado ──────────────────────────────
+   La regla de la casa es que donde el scroll recorta, el contenido se
+   desvanece. Las dos superficies de visualización de Quire —el visor y las
+   miniaturas— quedan afuera, a propósito.
+
+   El fade existe para decir "hay más interfaz abajo, seguí". Sobre un
+   documento dice otra cosa: que la hoja está impresa más clara en el borde.
+   Y en una app cuyo trabajo es mostrar fielmente lo que va a salir por la
+   impresora, cualquier degradado sobre el papel es una mentira.
+
+   Vale para .qr-visor y .qr-panel__cuerpo. En el resto de la app (ajustes,
+   menús, listas) el esfumado sigue como siempre. */
+
+.qr-visor {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  /* Hundido: el documento flota sobre la mesa, no está pegado a la pared. */
+  background: var(--ox-sunken);
+  outline: none;
+}
+
+.qr-pista {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ox-4);
+  /* Aire arriba y abajo para que la primera y la última hoja no queden
+     pegadas al borde del área de scroll. */
+  padding: var(--ox-6) var(--ox-6);
+  min-height: 100%;
+}
+
+.qr-pliego {
+  position: relative;
+  flex: 0 0 auto;
+  background: #fff;
+  box-shadow: var(--ox-e2);
+  border-radius: 1px;
+  overflow: hidden;
+  transition: box-shadow var(--ox-t-2) var(--ox-ease-soft);
+}
+
+.qr-pliego .qr-hoja {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity var(--ox-t-2) var(--ox-ease-soft);
+}
+
+/* La página aparece con un fade: sin esto, cada canvas que termina de pintar
+   entra de golpe y el scroll se lee como si parpadeara. */
+.qr-pliego.is-pintada .qr-hoja { opacity: 1; }
+
+.qr-pliego.is-fallida::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 1px var(--ox-danger-dim);
+}
+
+/* ── La capa de tinta ────────────────────────────────────────────────────────
+   Va SIEMPRE encima de la página, esté o no activo el modo de anotación: lo
+   anotado tiene que verse mientras leés, igual que se ve en el papel. Lo que
+   cambia con el modo es solo si captura el puntero. */
+
+.qr-tinta {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.qr-visor.is-anotando .qr-tinta {
+  pointer-events: auto;
+  cursor: crosshair;
+  /* Sin esto el stylus arrastra la página en vez de dibujar: el navegador
+     interpreta el movimiento de la punta como un gesto de scroll. */
+  touch-action: none;
+}
+
+/* Anotando, la hoja se despega un poco más: se pasa de leer a intervenir. */
+.qr-visor.is-anotando .qr-pliego { box-shadow: var(--ox-e3); }
+
+/* ── Barra de herramientas de tinta ──────────────────────────────────────── */
+
+.qr-tintabarra {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  padding: var(--ox-2) var(--ox-4);
+  background: var(--ox-s2);
+  box-shadow: inset 0 -1px 0 var(--ox-line);
+  flex: 0 0 auto;
+  user-select: none;
+
+  /* Entra deslizándose desde arriba, como si saliera de la barra de al lado.
+     Sin fill-mode: ver la nota sobre `both` más abajo, en .qr-herr__panel. */
+  animation: qr-barra-baja var(--ox-t-3) var(--ox-ease);
+}
+
+.qr-tintabarra[hidden] { display: none; }
+
+@keyframes qr-barra-baja {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.qr-tintabarra__grupo {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+}
+
+/* El botón de la herramienta activa queda encendido, igual que el de anotar. */
+.ox-iconbtn.is-on {
+  background: var(--ox-wash-2);
+  color: var(--ox-text);
+  box-shadow: inset 0 0 0 1px var(--ox-ring);
+}
+
+.qr-colores { gap: var(--ox-1); }
+
+.qr-color {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ox-r-pill);
+  background: var(--tinta);
+  cursor: pointer;
+  /* Hairline propio: sobre el fondo oscuro, una tinta oscura necesita borde
+     para no desaparecer. Va como inset para no crecer al seleccionarse. */
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16);
+  transition: transform var(--ox-t-2) var(--ox-ease), box-shadow var(--ox-t-2) var(--ox-ease);
+}
+
+.qr-color:hover { transform: scale(1.12); }
+
+.qr-color.is-on {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .3),
+              0 0 0 2px var(--ox-bg),
+              0 0 0 3px var(--ox-accent);
+}
+
+.qr-grosor { min-width: 190px; }
+.qr-grosor .ox-slider { width: 96px; }
+.qr-grosor .ox-chip { min-width: 54px; justify-content: center; }
+
+.qr-tinta-cuenta {
+  min-width: 84px;
+  justify-content: center;
+  transition: var(--tr-color);
+}
+
+.qr-tinta-cuenta.is-vacia { color: var(--ox-text-4); }
+
+.qr-pliego__num {
+  position: absolute;
+  right: var(--ox-2);
+  bottom: var(--ox-2);
+  padding: 2px 6px;
+  border-radius: var(--ox-r-pill);
+  background: rgb(0 0 0 / .42);
+  color: #fff;
+  font-size: var(--ox-fs-10);
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ox-t-2) var(--ox-ease-soft);
+}
+
+.qr-pliego:hover .qr-pliego__num { opacity: 1; }
+
+@keyframes qr-aparecer { to { opacity: 1; } }
+
+/* ═══ IMPRIMIR ═══════════════════════════════════════════════════════════════ */
+
+.qr-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--ox-sunken);
+}
+
+.qr-preview__cuerpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--ox-4);
+  /* Sin fade: es superficie de visualización (ver la excepción de .qr-visor). */
+  overflow: hidden;
+}
+
+/* Mientras se re-impone, la hoja anterior se atenúa en vez de desaparecer:
+   ver el papel apagarse y volver se lee como "está recalculando"; verlo
+   desaparecer se lee como que algo se rompió. */
+.qr-preview.is-trabajando .qr-preview__cuerpo {
+  opacity: .45;
+  transition: opacity var(--ox-t-2) var(--ox-ease-soft);
+}
+
+.qr-preview__cuerpo > * { transition: opacity var(--ox-t-2) var(--ox-ease-soft); }
+
+.qr-pliego--preview {
+  /* La hoja del preview flota más alto que las del lector: es el objeto sobre
+     el que se está decidiendo algo. */
+  box-shadow: var(--ox-e3);
+  animation: qr-aparecer var(--ox-t-3) var(--ox-ease) both;
+}
+
+/* En el lector, el canvas arranca invisible y se revela cuando su render
+   termina: las páginas entran con el scroll y el fade evita el parpadeo.
+
+   Acá NO: en el preview hay una sola hoja, siempre presente, y varias cosas
+   pueden pedir un repintado a la vez (la imposición que termina, el panel que
+   cambia de alto, la ventana que se redimensiona). Si la visibilidad dependiera
+   de qué render gana esa carrera, un render cancelado dejaría la hoja EN
+   BLANCO. El canvas se ve siempre; quien hace la transición es el pliego. */
+.qr-pliego--preview .qr-hoja { opacity: 1; }
+
+.qr-preview__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ox-2);
+  text-align: center;
+  max-width: 320px;
+  color: var(--ox-danger);
+}
+
+.qr-preview__error svg { width: 20px; height: 20px; }
+.qr-preview__error .ox-meta { color: var(--ox-text-3); }
+
+.qr-preview__nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ox-3);
+  padding: var(--ox-3);
+  flex: 0 0 auto;
+  box-shadow: inset 0 1px 0 var(--ox-line);
+  background: var(--ox-bg);
+  min-height: 52px;
+}
+
+.qr-preview__cuenta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ox-2);
+  font-size: var(--ox-fs-12);
+}
+
+/* ── El área que el tóner no alcanza ─────────────────────────────────────────
+   Se dibuja como una BANDA, no como una línea: lo que importa no es dónde está
+   el límite sino cuánto papel queda afuera. Los anchos de borde los calcula
+   marcoNoImprimible() a partir de lo que reportó el driver. */
+
+.qr-noimprimible {
+  position: absolute;
+  inset: 0;
+  border-style: solid;
+  /* Gris sobre el papel blanco. No es rojo a propósito: el rojo significa
+     fallo, y esto es información sobre la impresora, no un error. */
+  border-color: rgb(20 24 33 / .11);
+  pointer-events: auto;
+  animation: qr-aparecer var(--ox-t-3) var(--ox-ease) both;
+}
+
+/* El borde interior marca exactamente hasta dónde llega. */
+.qr-noimprimible::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  outline: 1px dashed rgb(20 24 33 / .34);
+  outline-offset: 0;
+}
+
+/* ── Panel de opciones ───────────────────────────────────────────────────── */
+
+.qr-inspector { width: 336px; }
+
+.qr-inspector .ox-inspector__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ox-5);
+  padding: var(--ox-4);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.qr-op {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ox-2);
+}
+
+.qr-op--par {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: var(--ox-3);
+  align-items: end;
+}
+
+/* ── Los cuatro modos de disposición ─────────────────────────────────────── */
+
+.qr-modos {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--ox-1);
+}
+
+.qr-modo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ox-1);
+  padding: var(--ox-3) var(--ox-1);
+  background: var(--ox-s2);
+  border: 0;
+  border-radius: var(--ox-r-md, var(--ox-r-sm));
+  color: var(--ox-text-3);
+  cursor: pointer;
+  box-shadow: var(--ox-hairline);
+  transition: var(--tr-color), box-shadow var(--ox-t-2) var(--ox-ease-soft);
+}
+
+.qr-modo span {
+  font-size: var(--ox-fs-10);
+  font-weight: var(--ox-w-medium);
+}
+
+.qr-modo svg { width: 18px; height: 18px; }
+.qr-modo:hover { color: var(--ox-text-2); background: var(--ox-wash-1); }
+
+.qr-modo.is-active {
+  color: var(--ox-text);
+  background: var(--ox-wash-2);
+  box-shadow: inset 0 0 0 1px var(--ox-ring);
+}
+
+/* ── Grillas del N-up ────────────────────────────────────────────────────── */
+
+.qr-grillas {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--ox-1);
+}
+
+.qr-grilla {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: var(--ox-2) 0;
+  background: var(--ox-s2);
+  border: 0;
+  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  cursor: pointer;
+  box-shadow: var(--ox-hairline);
+  transition: var(--tr-color);
+}
+
+.qr-grilla__n {
+  font-size: var(--ox-fs-14);
+  font-weight: var(--ox-w-medium);
+  color: var(--ox-text-2);
+  transition: var(--tr-color);
+}
+
+.qr-grilla:hover { background: var(--ox-wash-1); }
+.qr-grilla.is-active { background: var(--ox-wash-2); box-shadow: inset 0 0 0 1px var(--ox-ring); }
+.qr-grilla.is-active .qr-grilla__n { color: var(--ox-text); }
+
+/* ── Pie: resumen y botón ────────────────────────────────────────────────── */
+
+.qr-pie {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ox-3);
+  align-items: stretch;
+}
+
+.qr-resumen { display: flex; flex-direction: column; gap: var(--ox-3); }
+
+.qr-resumen__cifra {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ox-2);
+}
+
+.qr-resumen__cifra .ox-stat__value { font-size: var(--ox-fs-22); }
+.qr-resumen__kv { row-gap: 3px; }
+.qr-pie__boton { width: 100%; justify-content: center; }
+
+.qr-aviso {
+  display: flex;
+  gap: var(--ox-2);
+  align-items: flex-start;
+  padding: var(--ox-2) var(--ox-3);
+  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  background: var(--ox-danger-wash);
+  color: var(--ox-danger);
+  font-size: var(--ox-fs-11);
+  line-height: 1.5;
+  animation: qr-aparecer var(--ox-t-3) var(--ox-ease) both;
+}
+
+.qr-aviso svg { flex: 0 0 auto; margin-top: 1px; }
+.qr-aviso b { font-weight: var(--ox-w-medium); }
+
+/* ── Diagrama de la vuelta del fajo ──────────────────────────────────────── */
+
+.qr-vuelta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ox-4);
+}
+
+.qr-vuelta__svg {
+  width: 100%;
+  max-width: 300px;
+  align-self: center;
+  height: auto;
+  fill: none;
+  stroke: var(--ox-text-3);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.qr-vuelta__pila rect { fill: var(--ox-s2); }
+.qr-vuelta__pila rect:last-of-type { fill: var(--ox-s3); }
+.qr-vuelta__cara { stroke: var(--ox-text-2); }
+.qr-vuelta__flecha { stroke: var(--ox-accent); stroke-width: 1.4; }
+
+/* La pila de la derecha respira: es la que hay que ir a agarrar. */
+.qr-vuelta__pila--vuelta { animation: qr-vuelta-late 2.6s var(--ox-ease-both) infinite; }
+
+@keyframes qr-vuelta-late {
+  0%, 62%, 100% { opacity: .55; }
+  80% { opacity: 1; }
+}
+
+.qr-vuelta__texto { display: flex; flex-direction: column; gap: var(--ox-2); }
+.qr-vuelta__texto p { margin: 0; font-size: var(--ox-fs-12); line-height: 1.6; color: var(--ox-text-2); }
+.qr-vuelta__texto b { font-weight: var(--ox-w-medium); color: var(--ox-text); }
+
+/* ═══ HERRAMIENTAS ═══════════════════════════════════════════════════════════ */
+
+.qr-herr {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.qr-herr__tabs { margin: 0 var(--ox-6); flex: 0 0 auto; }
+
+/* Esfuma abajo y NO arriba: arriba está la línea de las tabs, y ese corte ya
+   está resuelto — un fade encima solo la ensucia. El fade es para el borde que
+   recorta al aire. */
+.qr-herr__cuerpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  --ox-fade: 26px;
+  padding: var(--ox-4) var(--ox-6) 26px;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--ox-fade)), transparent 100%);
+  transition: mask-image var(--ox-t-3) var(--ox-ease-soft);
+}
+
+/* Llegado al final no queda nada recortado: se apaga. */
+.qr-herr__cuerpo.is-bottom { mask-image: none; }
+
+/* ── Sobre el `both` en las animaciones de entrada ───────────────────────────
+   Las que revelan contenido van SIN fill-mode. Con `both`, un keyframe que
+   arranca en `opacity: 0` deja el elemento invisible mientras la animación no
+   progrese, y sin fill-mode el estado en reposo es el normal — se ve igual
+   aunque la animación no llegue a correr. Es un seguro barato.
+
+   (Ojo al diagnosticar esto: si medís la app en una BrowserWindow con
+   `show: false`, Chromium le congela las animaciones y TODO lo que entre
+   animado se mide en `opacity: 0`. Eso es el instrumento, no la app. El test
+   de humo muestra la ventana en x:-20000 justamente para no caer en eso.) */
+
+.qr-herr__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ox-4);
+  max-width: 720px;
+  padding-bottom: var(--ox-8);
+  animation: ox-glide-in var(--ox-t-4) var(--ox-ease);
+}
+
+.qr-herr__intro {
+  margin: 0;
+  font-size: var(--ox-fs-12);
+  line-height: 1.65;
+  color: var(--ox-text-3);
+  max-width: 62ch;
+}
+
+.qr-herr__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ox-4);
+}
+
+.qr-herr__acciones {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  padding-top: var(--ox-3);
+  box-shadow: inset 0 1px 0 var(--ox-line);
+}
+
+/* ── Cola de combinación ─────────────────────────────────────────────────── */
+
+.qr-cola__orden {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: var(--ox-r-pill);
+  background: var(--ox-s3);
+  color: var(--ox-text-3);
+  font-size: var(--ox-fs-10);
+}
+
+/* ── Vista previa del corte ──────────────────────────────────────────────── */
+
+.qr-partes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ox-2);
+}
+
+.qr-partes__lista {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ox-1);
+}
+
+/* ── Selector de resolución ──────────────────────────────────────────────── */
+
+.qr-dpis {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--ox-1);
+  max-width: 460px;
+}
+
+.qr-dpi {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: var(--ox-2) 0;
+  background: var(--ox-s2);
+  border: 0;
+  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  cursor: pointer;
+  box-shadow: var(--ox-hairline);
+  transition: var(--tr-color);
+}
+
+.qr-dpi__n {
+  font-size: var(--ox-fs-13);
+  font-weight: var(--ox-w-medium);
+  color: var(--ox-text-2);
+  transition: var(--tr-color);
+}
+
+.qr-dpi:hover { background: var(--ox-wash-1); }
+.qr-dpi.is-active { background: var(--ox-wash-2); box-shadow: inset 0 0 0 1px var(--ox-ring); }
+.qr-dpi.is-active .qr-dpi__n { color: var(--ox-text); }
+
+.qr-progreso {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  flex: 1 1 auto;
+  max-width: 280px;
+}
+
+.qr-progreso .ox-meter { flex: 1 1 auto; }
+.qr-progreso[hidden] { display: none; }
+
+/* ═══ ORGANIZAR PÁGINAS ══════════════════════════════════════════════════════ */
+
+.qr-org {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.qr-org__barra,
+.qr-org__pie {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  padding: var(--ox-2) var(--ox-6);
+  flex: 0 0 auto;
+  user-select: none;
+}
+
+.qr-org__barra { box-shadow: inset 0 -1px 0 var(--ox-line); }
+.qr-org__pie { box-shadow: inset 0 1px 0 var(--ox-line); gap: var(--ox-3); }
+
+/* Sin esfumado en ningún lado: los dos bordes ya están cerrados por una línea
+   —la barra arriba, el pie abajo—, así que los dos cortes son limpios. */
+.qr-org__grilla {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: var(--ox-4);
+  align-content: start;
+  padding: var(--ox-4) var(--ox-6);
+  background: var(--ox-sunken);
+}
+
+.qr-org__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ox-2);
+  padding: var(--ox-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  cursor: pointer;
+  transition: var(--tr-color), transform var(--ox-t-2) var(--ox-ease-soft);
+}
+
+.qr-org__item:hover { background: var(--ox-wash-1); }
+.qr-org__item.is-sel { background: var(--ox-wash-2); }
+
+.qr-org__hoja {
+  display: block;
+  width: 100%;
+  background: #fff;
+  border-radius: 1px;
+  overflow: hidden;
+  box-shadow: var(--ox-e1);
+  /* El giro se ve en la miniatura antes de escribir nada: el ángulo se aplica
+     acá y la rotación real recién va al PDF cuando se guarda. */
+  transition: box-shadow var(--ox-t-2) var(--ox-ease-soft);
+}
+
+.qr-org__item.is-sel .qr-org__hoja {
+  box-shadow: var(--ox-e2), 0 0 0 2px var(--ox-accent);
+}
+
+.qr-org__lienzo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  animation: qr-aparecer var(--ox-t-3) var(--ox-ease) forwards;
+}
+
+/* La miniatura de una página girada se muestra girada: su contenedor ya tiene
+   el aspect-ratio invertido, así que el lienzo rota adentro. */
+.qr-org__hoja[data-rot="90"] .qr-org__lienzo,
+.qr-org__hoja[data-rot="270"] .qr-org__lienzo {
+  width: 100%;
+  height: 100%;
+}
+
+.qr-org__hoja[data-rot="90"] { transform: none; }
+
+.qr-org__pie2 {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-1);
+  font-size: var(--ox-fs-10);
+  color: var(--ox-text-4);
+}
+
+.qr-org__item.is-sel .qr-org__pie2 { color: var(--ox-text-2); }
+
+.qr-iconbtn-danger:not(:disabled):hover {
+  color: var(--ox-danger);
+  background: var(--ox-danger-wash);
+}
+
+#org-cuenta.is-vacia { color: var(--ox-text-4); }
+
+/* ── Soltar un archivo ───────────────────────────────────────────────────────
+   El realce va sobre un pseudo-elemento de la app entera y no sobre un panel
+   propio: la zona de soltado es toda la ventana, y decirlo con un borde que
+   aparece es más claro que un cartel que tapa lo que estabas leyendo. */
+
+.qr-soltando .ox-app::after {
+  content: '';
+  position: fixed;
+  inset: var(--ox-2);
+  z-index: 400;
+  pointer-events: none;
+  border-radius: var(--ox-r-lg, var(--ox-r-md));
+  box-shadow: inset 0 0 0 2px var(--ox-accent), 0 0 0 100vmax rgb(0 0 0 / .28);
+  /* Sin `both`: su keyframe arranca en opacity 0 (ver la regla de la casa). */
+  animation: qr-soltar-entra var(--ox-t-2) var(--ox-ease);
+}
+
+@keyframes qr-soltar-entra {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}

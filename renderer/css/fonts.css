@@ -1,0 +1,64 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONYX — fuentes empaquetadas
+
+   Las fuentes viajan CON la app, no se toman del sistema. Una app que se ve
+   distinta según lo que el usuario tenga instalado no está terminada: el stack
+   con `font-family: 'X', 'Y', Consolas, monospace` no elige una tipografía,
+   elige una lotería. En esta misma máquina, un stack que empieza con
+   'JetBrains Mono' termina renderizando Cascadia Mono sin avisar.
+
+   ── Para sumar una fuente ──────────────────────────────────────────────────
+   1. Poné el .woff2 en `renderer/fonts/` (y su licencia al lado).
+   2. Declarala acá abajo con su @font-face.
+   3. Agregá su token `--ox-mono-*` o `--ox-sans-*` en tokens.css.
+   Lo que NO hay que hacer es apuntar --ox-mono directo a un nombre de familia:
+   la indirección es lo que permite cambiarla desde retint.mjs.
+
+   ── Por qué los subconjuntos ───────────────────────────────────────────────
+   Cada peso viene partido por `unicode-range`. El navegador descarga solo el
+   trozo que la página realmente usa, y —más importante para nosotros— si un
+   carácter cae fuera de todos los rangos, el navegador lo saca de la fuente de
+   respaldo: media palabra en una tipografía y media en otra. Los rangos son los
+   del paquete original, no escritos a mano.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Roboto Mono · SIL Open Font License 1.1 ──────────────────────────────────
+   La licencia está en renderer/fonts/Roboto-Mono-LICENSE.txt y tiene que
+   viajar con la fuente en cualquier app que la distribuya. */
+
+@font-face {
+  font-family: 'Roboto Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;   /* el texto se ve enseguida con la de respaldo y cambia al cargar */
+  src: url('../fonts/roboto-mono-latin-400-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Roboto Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/roboto-mono-latin-ext-400-normal.woff2') format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+/* El 500 existe porque `.ox-chip--mono` hereda el peso medio del chip. Sin este
+   archivo el navegador falsea la negrita engordando el trazo del 400, y en una
+   monoespaciada eso se nota enseguida. */
+@font-face {
+  font-family: 'Roboto Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/roboto-mono-latin-500-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Roboto Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/roboto-mono-latin-ext-500-normal.woff2') format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}

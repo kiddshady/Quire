@@ -1,0 +1,26 @@
+{
+  "name": "quire",
+  "productName": "Quire",
+  "version": "0.1.0",
+  "description": "Quire — lector de PDF con foco en la impresión: imposición, anotación con tablet y previsualización fiel.",
+  "main": "main.cjs",
+  "author": "Fran",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node test/tokens.test.mjs && node test/store.test.mjs && node test/plan.test.mjs",
+    "smoke": "electron test/renderer.test.cjs",
+    "humo": "electron test/humo.cjs",
+    "imposicion": "electron test/imposicion.cjs",
+    "tinta": "electron test/tinta.cjs",
+    "verificar": "npm test && npm run imposicion && npm run tinta && npm run humo"
+  },
+  "devDependencies": {
+    "electron": "40.10.2"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.7.284"
+  }
+}
