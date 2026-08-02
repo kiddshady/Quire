@@ -666,8 +666,17 @@
 
 .qr-vuelta__pila rect { fill: var(--ox-s2); }
 .qr-vuelta__pila rect:last-of-type { fill: var(--ox-s3); }
-.qr-vuelta__cara { stroke: var(--ox-text-2); }
+
+/* La cara impresa queda mirando para ABAJO en las dos pilas — nunca se da vuelta
+   el fajo. Por eso el texto va punteado: es lo que se intuye a través de la
+   hoja, no lo que se ve. En la pila girada, además, va cabeza abajo. */
+.qr-vuelta__fantasma { stroke: var(--ox-text-3); stroke-dasharray: 2 3; opacity: .5; }
+
+/* El borde de cabecera es lo ÚNICO que se mueve, y es lo que distingue girar
+   media vuelta de dar vuelta la hoja. Va en el acento porque es la instrucción. */
+.qr-vuelta__marca { fill: var(--ox-accent); stroke: none; }
 .qr-vuelta__flecha { stroke: var(--ox-accent); stroke-width: 1.4; }
+.qr-vuelta__eje { fill: var(--ox-accent); stroke: none; opacity: .55; }
 
 /* La pila de la derecha respira: es la que hay que ir a agarrar. */
 .qr-vuelta__pila--vuelta { animation: qr-vuelta-late 2.6s var(--ox-ease-both) infinite; }

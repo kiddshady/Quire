@@ -108,9 +108,23 @@ Todo se probó contra una **HP LaserJet Professional P 1102w**, consultada por
   pasadas. Por eso existe el **dúplex asistido**, que parte el trabajo y muestra
   un diagrama de cómo va el fajo de vuelta a la bandeja.
 
-> Falta la prueba con papel de verdad. El primer trabajo debería ser un folleto
-> de 4 páginas: es una sola hoja y valida de una la imposición, el dúplex y el
-> área imprimible.
+### Cómo se recarga el fajo (corregido con papel, 2 ago 2026)
+
+La bandeja carga **boca arriba** y la hoja sale **boca abajo**: el recorrido le
+da una vuelta de campana. De ahí salen las dos reglas, y ninguna es la que dicen
+los drivers:
+
+- **La pila no se da vuelta nunca.** La cara en blanco ya sale mirando para
+  arriba. Pasarla "como la hoja de un cuaderno" imprime los dorsos encima de los
+  frentes — es el error que costó el primer fajo.
+- **Lado largo → girar media vuelta en el plano**, como un volante, sin
+  levantarla de la mesa. **Lado corto → no girar.** La diferencia entre
+  encuadernar por un lado o por el otro *es* exactamente ese giro de 180°.
+
+El orden de la segunda pasada es un problema aparte y no depende del movimiento:
+la salida apila boca abajo (la última hoja queda arriba) y la entrada toma de
+arriba, así que los dorsos van invertidos. Ver `partirDuplex` en
+`renderer/js/imposicion/motor.js`.
 
 ## La carpeta de datos
 

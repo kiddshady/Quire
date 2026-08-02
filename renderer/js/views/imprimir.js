@@ -379,7 +379,7 @@ function pintarOpciones() {
       ${p.duplex !== 'simplex' ? `
         <span class="ox-meta">
           ${S.settings?.duplexAsistido
-    ? 'Quire imprime los frentes, te avisa cómo dar vuelta el fajo, y manda los dorsos en el orden correcto.'
+    ? 'Quire imprime los frentes, te muestra cómo va el fajo de vuelta a la bandeja, y manda los dorsos en el orden correcto.'
     : 'Se lo pide al driver. Si tu impresora no tiene unidad dúplex, va a mostrar su propio cartel.'}
         </span>` : ''}
     </div>
@@ -711,8 +711,8 @@ async function imprimirDuplexAsistido(bytes, calculo, comun, p) {
   if (r1?.cancelado) return;
 
   const seguir = await Modal.show({
-    title: 'Ahora dale vuelta al fajo',
-    sub: `Salieron ${plural(hojasDePapel, 'hoja', 'hojas')}. Sacalas de la bandeja SIN reordenarlas.`,
+    title: 'Ahora volvé a cargar el fajo',
+    sub: `Salieron ${plural(hojasDePapel, 'hoja', 'hojas')}. Sacalas de la bandeja de salida SIN cambiarles el orden.`,
     body: diagramaVuelta(p.duplex),
     width: 520,
     dismissible: false,
@@ -737,36 +737,91 @@ async function imprimirDuplexAsistido(bytes, calculo, comun, p) {
   });
 }
 
-/** El dibujo de cómo va el papel de vuelta. Todo SVG propio. */
+/**
+ * El dibujo de cómo va el papel de vuelta. Todo SVG propio.
+ *
+ * ── Esto lo corrigió el papel, no la teoría ──────────────────────────────────
+ * Hasta el 2 ago 2026 este cartel decía "girala por el lado largo, como si
+ * pasaras la hoja de un cuaderno" — que es lo que dicen casi todos los drivers,
+ * y que en la P1102w está MAL. Falla de la peor manera posible: la segunda
+ * pasada imprime los dorsos ENCIMA de los frentes y se pierde el fajo entero.
+ *
+ * El movimiento correcto sale de dos hechos del recorrido del papel:
+ *
+ *   1. La bandeja carga BOCA ARRIBA (se imprime la cara que mira al techo) y la
+ *      hoja sale BOCA ABAJO, porque el recorrido le da una vuelta de campana
+ *      alrededor del fusor. O sea: cuando la agarrás, la cara en blanco ya está
+ *      mirando para arriba. Darla vuelta es exactamente lo que la arruina.
+ *
+ *   2. Esa misma vuelta de campana deja el borde de cabecera del lado de acá.
+ *      Para que el dorso salga con la cabeza en el MISMO borde que el frente
+ *      —que es lo que significa encuadernar por el lado largo— ese borde tiene
+ *      que volver a entrar primero: girar 180° EN EL PLANO, como un volante,
+ *      sin despegar la hoja de la mesa.
+ *
+ * De ahí salen las dos únicas variantes, que son complementarias porque la
+ * diferencia entre encuadernar por un lado o por el otro ES, exactamente, ese
+ * giro de 180°:
+ *
+ *      lado largo → girar media vuelta en el plano
+ *      lado corto → no girar, entra tal como salió
+ *
+ * En las dos, la pila NUNCA se da vuelta. Por eso el dibujo marca el borde de
+ * cabecera con un triángulo: es lo único que se mueve, y es lo que distingue
+ * "girar" de "dar vuelta". El texto impreso va punteado en las dos pilas porque
+ * en las dos queda del lado de abajo — lo que se intuye a través de la hoja, no
+ * lo que se ve.
+ */
 function diagramaVuelta(duplex) {
   const porElLargo = duplex !== 'corto';
   const cuerpo = document.createElement('div');
   cuerpo.className = 'qr-vuelta';
+
+  /* La pila de la derecha es la misma hoja después del movimiento. Con el giro,
+     el texto del dorso queda cabeza abajo y la marca pasa al borde de abajo. */
+  const fantasmaDerecha = porElLargo
+    ? 'M210 46h26M194 56h42M194 66h42'
+    : 'M194 46h42M194 56h42M194 66h26';
+  const marcaDerecha = porElLargo
+    ? 'M207 96h16l-8-9z'
+    : 'M207 16h16l-8 9z';
+
   cuerpo.innerHTML = `
-    <svg class="qr-vuelta__svg" viewBox="0 0 260 120" aria-hidden="true">
+    <svg class="qr-vuelta__svg" viewBox="0 0 260 124" aria-hidden="true">
       <g class="qr-vuelta__pila">
         <rect x="14" y="26" width="62" height="80" rx="3"/>
         <rect x="18" y="21" width="62" height="80" rx="3"/>
         <rect x="22" y="16" width="62" height="80" rx="3"/>
-        <path class="qr-vuelta__cara" d="M32 30h42M32 40h42M32 50h26"/>
+        <path class="qr-vuelta__fantasma" d="M32 46h42M32 56h42M32 66h26"/>
+        <path class="qr-vuelta__marca" d="M45 16h16l-8 9z"/>
       </g>
       <g class="qr-vuelta__flecha">
         ${porElLargo
-    ? '<path d="M104 58h44"/><path d="M140 50l9 8-9 8"/><path d="M112 76a26 26 0 0 0 34 0" stroke-dasharray="3 3"/>'
-    : '<path d="M126 84V34"/><path d="M118 44l8-10 8 10"/><path d="M104 62a26 26 0 0 0 0-28" stroke-dasharray="3 3"/>'}
+    /* Flecha circular cerrada sobre su eje: gira en el lugar, no se levanta. */
+    ? '<path d="M141 41A22 22 0 1 1 119 41"/><path d="M114.3 47.8L119 41L110.8 41.7"/>'
+      + '<circle class="qr-vuelta__eje" cx="130" cy="60" r="1.6"/>'
+    : '<path d="M108 60h38"/><path d="M138 52l8 8-8 8"/>'}
       </g>
       <g class="qr-vuelta__pila qr-vuelta__pila--vuelta">
         <rect x="176" y="26" width="62" height="80" rx="3"/>
         <rect x="180" y="21" width="62" height="80" rx="3"/>
         <rect x="184" y="16" width="62" height="80" rx="3"/>
-        <path class="qr-vuelta__dorso" d="M194 30h42M194 40h42M194 50h26" opacity=".28"/>
+        <path class="qr-vuelta__fantasma" d="${fantasmaDerecha}"/>
+        <path class="qr-vuelta__marca" d="${marcaDerecha}"/>
       </g>
     </svg>
     <div class="qr-vuelta__texto">
-      <p><b>Girala por el lado ${porElLargo ? 'largo' : 'corto'}</b>, como si pasaras la hoja de un cuaderno${
-  porElLargo ? '' : ' de arriba hacia abajo'}.</p>
-      <p class="ox-meta">Volvé a ponerlas en la bandeja tal como salieron, sin dar vuelta la pila
-      ni cambiar el orden. Quire ya mandó los dorsos en el orden que corresponde a esa vuelta.</p>
+      <p><b>No las des vuelta.</b> Salieron con la cara impresa para abajo, así que la cara
+      en blanco ya está mirando para arriba — y esa es la que se imprime. Pasarlas como la
+      hoja de un cuaderno es el error clásico: los dorsos caen encima de los frentes.</p>
+      ${porElLargo
+    ? `<p><b>Giralas media vuelta apoyadas en la mesa</b>, como un volante y sin levantarlas:
+       el borde que te quedó cerca es el que tiene que entrar primero.</p>`
+    : `<p><b>No las gires:</b> entran tal como salieron, con el mismo borde hacia la
+       impresora.</p>`}
+      <p class="ox-meta">Tampoco les cambies el orden: los dorsos ya se mandaron invertidos
+      porque la bandeja toma de arriba. Verificado en una HP LaserJet P1102w, que saca la hoja
+      boca abajo; si la tuya la saca boca arriba, además hay que darlas vuelta.</p>
     </div>`;
   return cuerpo;
 }

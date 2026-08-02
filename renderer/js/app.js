@@ -144,7 +144,7 @@ function viewAjustes() {
               <button class="ox-switch${st.duplexAsistido ? ' is-on' : ''}" id="set-duplex"></button>
               <span class="ox-col" style="gap:2px">
                 <span class="ox-label">Dúplex asistido</span>
-                <span class="ox-meta">Quire maneja las dos pasadas y te muestra cómo dar vuelta el fajo, en vez de dejárselo al driver.</span>
+                <span class="ox-meta">Quire maneja las dos pasadas y te muestra cómo va el fajo de vuelta a la bandeja, en vez de dejárselo al driver.</span>
               </span>
             </label>
             <label class="ox-row" style="gap:12px">

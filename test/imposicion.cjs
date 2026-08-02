@@ -238,7 +238,10 @@ app.whenReady().then(async () => {
   console.log('\n6. Dúplex');
   ok('4 caras → 2 frentes y 2 dorsos', r.duplex.frentes.length === 2 && r.duplex.dorsos.length === 2);
   ok('los frentes son las pares 0 y 2', r.duplex.frentes.join() === '0,2', r.duplex.frentes.join());
-  ok('los dorsos van INVERTIDOS (3,1): la pila se da vuelta', r.duplex.dorsos.join() === '3,1', r.duplex.dorsos.join());
+  /* La pila NO se da vuelta (ver diagramaVuelta). Los dorsos van invertidos por
+     otra razón: la salida apila boca abajo y la entrada toma de arriba, así que
+     la primera hoja de la segunda pasada es la última de la primera. */
+  ok('los dorsos van INVERTIDOS (3,1): la salida apila al revés', r.duplex.dorsos.join() === '3,1', r.duplex.dorsos.join());
 
   console.log('\n7. Combinar y dividir');
   ok('dos de 4 páginas dan 8', r.combinar.paginas === 8, String(r.combinar.paginas));

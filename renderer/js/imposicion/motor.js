@@ -155,15 +155,26 @@ function tituloDe(plan, calculo) {
 /**
  * Parte un trabajo en las dos pasadas del dúplex manual.
  *
- * La P1102w no tiene unidad dúplex: imprime un lado, se da vuelta el fajo a
- * mano, y se imprime el otro. Manejarlo nosotros —en vez de dejárselo al
- * driver— permite mostrar de qué lado va el papel y, sobre todo, ordenar la
- * segunda pasada bien.
+ * La P1102w no tiene unidad dúplex: imprime un lado, se recarga el fajo a mano,
+ * y se imprime el otro. Manejarlo nosotros —en vez de dejárselo al driver—
+ * permite mostrar cómo va el papel y, sobre todo, ordenar bien la segunda
+ * pasada.
  *
- * El orden de la vuelta es lo que más se equivoca: al dar vuelta la pila, la
- * hoja que quedó ARRIBA es la última que se imprimió. Si la segunda pasada
- * saliera en el mismo orden que la primera, cada dorso caería en la hoja
- * equivocada. Por eso el reverso va invertido.
+ * El orden es lo que más se equivoca, y no depende de cómo se recarga sino de
+ * dos hechos mecánicos que se combinan:
+ *
+ *   · la bandeja de salida apila BOCA ABAJO, así que la última hoja impresa
+ *     queda ARRIBA de todo;
+ *   · la bandeja de entrada toma de ARRIBA.
+ *
+ * O sea que la primera hoja de la segunda pasada es la ÚLTIMA de la primera. Si
+ * los dorsos salieran en el mismo orden que los frentes, cada uno caería en la
+ * hoja equivocada. Por eso el reverso va invertido.
+ *
+ * Ojo: esto es independiente del movimiento del fajo (ver diagramaVuelta en
+ * views/imprimir.js). Girar la pila media vuelta en el plano no cambia qué hoja
+ * está arriba; darla vuelta SÍ lo cambiaría, y por eso el instructivo insiste
+ * con que no se da vuelta.
  *
  * @returns {{frentes:number[], dorsos:number[], hojasDePapel:number}}
  *   índices (base 0) dentro del PDF impuesto.
