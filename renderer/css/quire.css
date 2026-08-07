@@ -8,6 +8,28 @@
    una superficie de la interfaz.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ── Retoques al shell ───────────────────────────────────────────────────────
+   Sobrescriben clases `ox-` desde acá y no editando shell.css, para que una
+   versión nueva de Onyx se pueda seguir trayendo copiando el archivo.
+
+   Las dos son la misma decisión mirada de los dos lados: la línea horizontal
+   de abajo a la izquierda se va, y aparece una arriba, cerrando el encabezado.
+
+   El pie del rail llevaba una línea que lo separaba de la columna para
+   enmarcar el nombre del documento. Ese nombre ya no se dibuja —lo dice la
+   statusbar justo abajo, y dos filas apiladas con el mismo dato se leen como
+   un error de maquetado— así que la línea quedaba partiendo el rail en dos
+   para enmarcar un hueco. Sin ella el riel baja entero, de un color solo.
+
+   El encabezado de la vista tenía el problema opuesto: el título flotaba sobre
+   el contenido sin nada que dijera dónde termina. */
+
+.ox-rail__foot { box-shadow: none; }
+
+/* Hairline como sombra interior y nunca como `border`: un border deja hilacha
+   en las esquinas cuando el contenedor recorta. Es la regla de la casa. */
+.ox-viewhead { box-shadow: inset 0 -1px 0 var(--ox-line); }
+
 .qr-lector {
   display: flex;
   flex-direction: column;
@@ -517,10 +539,14 @@
 
 .qr-inspector { width: 336px; }
 
+/* El aire entre bloques es exactamente el doble que el de adentro (16 contra 8).
+   Esa proporción es la que hace que se lean como grupos; el eyebrow en
+   versalitas ya separa por su cuenta, así que 20px era pagar dos veces por el
+   mismo corte — 120px del panel, un quinto del total, eran solo huecos. */
 .qr-inspector .ox-inspector__body {
   display: flex;
   flex-direction: column;
-  gap: var(--ox-5);
+  gap: var(--ox-4);
   padding: var(--ox-4);
   overflow-y: auto;
   overflow-x: hidden;
@@ -539,6 +565,17 @@
   align-items: end;
 }
 
+/* Copias y Papel van uno al lado del otro, alineados por abajo. El input decía
+   `min-height: 30px` pero medía 32: los 6px de padding más la interlínea del
+   cuerpo 13 lo empujaban dos píxeles. Contra el select de 30 de al lado eso era
+   un escaloncito en el borde de arriba. Se le fija la altura acá y no en
+   controls.css porque `ox-` es del framework y viaja a las otras apps. */
+.qr-inspector .ox-input {
+  height: 30px;
+  min-height: 0;
+  padding-block: 0;
+}
+
 /* ── Los cuatro modos de disposición ─────────────────────────────────────── */
 
 .qr-modos {
@@ -552,7 +589,7 @@
   flex-direction: column;
   align-items: center;
   gap: var(--ox-1);
-  padding: var(--ox-3) var(--ox-1);
+  padding: var(--ox-2) var(--ox-1);
   background: var(--ox-s2);
   border: 0;
   border-radius: var(--ox-r-md, var(--ox-r-sm));
@@ -562,9 +599,13 @@
   transition: var(--tr-color), box-shadow var(--ox-t-2) var(--ox-ease-soft);
 }
 
+/* La etiqueta va con su interlínea al ras: un line-height de 1.5 sobre 10px son
+   5px de aire fantasma adentro de una ficha que ya es chica, y se sumaban
+   arriba y abajo del texto sin dibujar nada. */
 .qr-modo span {
   font-size: var(--ox-fs-10);
   font-weight: var(--ox-w-medium);
+  line-height: 1.1;
 }
 
 .qr-modo svg { width: 18px; height: 18px; }
@@ -589,7 +630,7 @@
   flex-direction: column;
   align-items: center;
   gap: 1px;
-  padding: var(--ox-2) 0;
+  padding: var(--ox-1) 0;
   background: var(--ox-s2);
   border: 0;
   border-radius: var(--ox-r-sm, var(--ox-r-xs));
@@ -598,12 +639,17 @@
   transition: var(--tr-color);
 }
 
+/* Dos líneas de texto corto: sin apretarles la interlínea, la ficha terminaba
+   más alta que la de modo que tiene arriba — y esa al menos carga un ícono. */
 .qr-grilla__n {
   font-size: var(--ox-fs-14);
   font-weight: var(--ox-w-medium);
+  line-height: 1.15;
   color: var(--ox-text-2);
   transition: var(--tr-color);
 }
+
+.qr-grilla .ox-meta { line-height: 1.15; }
 
 .qr-grilla:hover { background: var(--ox-wash-1); }
 .qr-grilla.is-active { background: var(--ox-wash-2); box-shadow: inset 0 0 0 1px var(--ox-ring); }

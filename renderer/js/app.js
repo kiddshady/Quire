@@ -392,6 +392,11 @@ function actualizarChrome() {
   const nombre = document.getElementById('stat-doc-name');
   if (nombre) nombre.textContent = S.doc ? S.doc.nombre : 'Ningún documento';
 
+  /* La ruta completa se veía al pasar por el pie del rail, que ya no dice nada.
+     Se muda acá, que es donde quedó el nombre del documento. */
+  const statDoc = document.getElementById('stat-doc');
+  if (statDoc) statDoc.dataset.tip = S.doc ? (S.doc.ruta || S.doc.nombre) : 'Documento abierto';
+
   const cuenta = document.getElementById('nav-paginas-count');
   if (cuenta) cuenta.textContent = S.doc ? S.doc.paginas : '';
 
@@ -410,9 +415,12 @@ function actualizarChrome() {
   document.getElementById('stat-version').innerHTML =
     `<span>${esc(S.info?.name || 'Quire')} ${esc(S.info?.version || '')}</span>`;
 
-  document.getElementById('rail-foot').innerHTML = S.doc
-    ? `<span class="ox-meta ox-truncate" data-tip="${esc(S.doc.ruta || '')}">${esc(S.doc.nombre)}</span>`
-    : `<span class="ox-meta ox-truncate">Sin documento</span>`;
+  /* El pie del rail queda vacío A PROPÓSITO: decía el nombre del documento, que
+     es exactamente lo que dice la statusbar tres píxeles más abajo. Dos filas
+     apiladas con el mismo dato se leen como un error de maquetado, no como dos
+     datos. Sin texto y sin la línea de arriba (ver quire.css), el rail baja
+     entero de un color solo. El div sigue existiendo porque le marca el piso al
+     rail y porque alinea con la barra del preview — ver --ox-pie. */
 
   const ctx = document.getElementById('titlebar-context');
   if (ctx) {
