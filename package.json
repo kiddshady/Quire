@@ -37,6 +37,7 @@
     "build": "electron-builder --win --publish never",
     "release": "electron-builder --win --publish always"
   },
+  "comentario-extraResources": "SumatraPDF va en extraResources, o sea FUERA del asar: un .exe adentro del asar no se puede ejecutar. Es lo único que sabe elegir el tamaño de papel — ver vendor/sumatrapdf/LEEME.md y la sección de impresión del README. Este comentario vive en la raíz y no adentro de `build` porque electron-builder valida esa sección contra un esquema y rechaza cualquier clave que no conozca.",
   "comentario-dependencias": "pdf-lib y pdfjs-dist son devDependencies A PROPÓSITO: en runtime la app no las carga de node_modules sino de renderer/vendor/, donde están copiadas y versionadas. Como dependencies, electron-builder las metía en el asar junto con @napi-rs/canvas y compañía — decenas de MB de código que nunca se ejecuta. El paquete pasó de 112 MB a lo que pesa ahora.",
   "devDependencies": {
     "electron": "40.10.2",
@@ -73,13 +74,14 @@
       "!build/marca.svg",
       "!renderer/vendor/cobayo.pdf"
     ],
-    "comentario-extraResources": "SumatraPDF va FUERA del asar porque un .exe adentro del asar no se puede ejecutar. Es lo único que sabe elegir el tamaño de papel: ver vendor/sumatrapdf/LEEME.md y la sección de impresión del README.",
     "extraResources": [
       {
         "from": "vendor/sumatrapdf",
         "to": "sumatrapdf",
         "filter": [
-          "**/*"
+          "**/*",
+          "!SumatraPDF-settings.txt",
+          "!sumatrapdfcache${/*}"
         ]
       }
     ],
