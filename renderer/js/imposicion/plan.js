@@ -128,6 +128,50 @@ export function papelDelPlan(plan, geometrias = []) {
   return { ancho, alto, apaisado: ancho > alto };
 }
 
+/* Los papeles que Electron sabe nombrar, con sus medidas nominales en mm.
+   Se los reconoce por la MEDIDA y no por el nombre, porque el nombre lo pone
+   el driver: la misma hoja llega como "ISOA5", "A5" o "A5 148 x 210 mm" según
+   quién la reporte. */
+const PAPELES_CON_NOMBRE = [
+  ['A0', 841, 1189], ['A1', 594, 841], ['A2', 420, 594], ['A3', 297, 420],
+  ['A4', 210, 297], ['A5', 148, 210], ['A6', 105, 148],
+  ['Letter', 215.9, 279.4], ['Legal', 215.9, 355.6], ['Tabloid', 279.4, 431.8],
+];
+
+/**
+ * Cómo se le pide el papel al driver: qué `pageSize` y con qué orientación.
+ *
+ * Entra la hoja YA GIRADA por el plan —la que devuelve papelDelPlan, la misma
+ * con la que se escribieron las páginas— y salen las dos cosas que Chromium
+ * quiere por separado: el PAPEL, que siempre se nombra parado, y un booleano
+ * de orientación. Dar vuelta el ancho y el alto no alcanza: en Windows la
+ * orientación es un campo del DEVMODE aparte del tamaño de papel.
+ *
+ * Y cuando el tamaño es uno de los conocidos se manda el NOMBRE, no las
+ * medidas. No es cosmético: con un nombre, Chromium lo busca en la lista de
+ * papeles del driver y le fija ese; con un tamaño a medida cae por el camino
+ * de los papeles personalizados, donde el driver se puede quedar con el que ya
+ * tenía configurado. Ahí es donde una A5 se termina componiendo sobre la
+ * geometría de una Carta y todo sale corrido 69 mm — que es, exactamente, la
+ * diferencia de alto entre las dos hojas.
+ */
+export function papelParaElDriver(papel) {
+  const a = aMM(papel.ancho);
+  const b = aMM(papel.alto);
+  const landscape = a > b;
+  const [corto, largo] = landscape ? [b, a] : [a, b];
+
+  const conocido = PAPELES_CON_NOMBRE.find(
+    ([, x, y]) => Math.abs(corto - x) <= 1 && Math.abs(largo - y) <= 1
+  );
+
+  return {
+    landscape,
+    // Un milímetro son mil micrones: no hay nada más que convertir.
+    pageSize: conocido ? conocido[0] : { width: Math.round(corto * 1000), height: Math.round(largo * 1000) },
+  };
+}
+
 /**
  * Dónde se puede dibujar, en puntos.
  *

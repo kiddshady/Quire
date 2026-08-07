@@ -16,7 +16,7 @@ import Router from '../router.js';
 import { paint, head, empty, esc, attempt } from '../ui.js';
 import { raf2, bindStepper } from '../motion.js';
 import { plural } from '../format.js';
-import { planCon, mm, aMM } from '../imposicion/plan.js';
+import { planCon, mm, aMM, papelParaElDriver } from '../imposicion/plan.js';
 import { imponer, partirDuplex, extraerCaras } from '../imposicion/motor.js';
 import { aplanarTinta, contarTinta } from '../tinta/aplanar.js';
 import { abrirDocumento } from '../pdf/documento.js';
@@ -670,11 +670,19 @@ async function imprimirAhora() {
     // Se impone COMPLETO: el preview mostraba solo las primeras hojas.
     const { bytes, calculo } = await imponer(await bytesParaImprimir(), plan(), S.geometrias);
     const p = plan();
+    /* La hoja del CÁLCULO, no la del plan: `p.papel` es el nominal y siempre
+       está vertical, mientras que un folleto o un N-up apaisado salen
+       acostados. Declarar el nominal era mandarle al driver un tamaño que no
+       era el de las páginas del archivo.
+
+       Del par que devuelve papelParaElDriver solo viaja el nombre: la
+       orientación la saca el ayudante de las páginas del PDF, y el intercalado
+       de copias lo decide el driver — no hay por dónde pedirlo. */
+    const hoja = papelParaElDriver(calculo.papel);
     const comun = {
       deviceName: S.impresora,
       copies: p.copias,
-      collate: p.intercalar,
-      pageSize: { width: Math.round(mm(p.papel.ancho) / 72 * 25400), height: Math.round(mm(p.papel.alto) / 72 * 25400) },
+      pageSize: hoja.pageSize,
     };
 
     const asistido = p.duplex !== 'simplex' && S.settings?.duplexAsistido;

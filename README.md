@@ -43,7 +43,11 @@ vectoriales sobre una copia — sin convertir el documento ni partirlo.
 
 **Organizar** — reordenar, rotar, borrar y extraer páginas.
 
-**Combinar, dividir, exportar** — a PNG, JPEG o WEBP con el DPI que elijas.
+**Combinar, dividir, exportar** — a PNG, JPEG o WEBP con el DPI que elijas. Y
+el camino de vuelta: **una imagen también entra como página**. Un PNG, un JPEG
+o un WEBP se suman a la lista de combinar igual que un PDF, y el tamaño de la
+hoja sale de la densidad que el archivo declara — un escaneo a 300 dpi vuelve a
+medir A4. Si no declara nada, sus píxeles se toman como píxeles de pantalla.
 
 **Abrir con doble click** — si lo ponés como lector predeterminado, el PDF se
 carga solo. Con Quire ya abierta, otro doble click reusa la ventana en vez de
@@ -62,13 +66,17 @@ main.cjs               La ventana, el lock de instancia única y el argv de entr
 src/
   actualizador.cjs     electron-updater contra los releases del repo.
   argv.cjs             El PDF con el que te abrieron. Sin Electron, para testearlo.
+  firmas.cjs           Qué es un archivo, por su firma. Sin Electron, para testearlo.
   documentos.cjs       Abrir, leer y guardar PDFs. Los bytes van por IPC.
   impresion.cjs        Capacidades reales de la impresora + mandar el papel.
   ipc.cjs · store.cjs  El puente y el disco (de Onyx).
+vendor/
+  sumatrapdf/          El que manda el papel. Lo único que sabe elegir el tamaño.
 renderer/
   vendor/              pdf.js y pdf-lib, versionados a propósito.
   js/
     pdf/documento.js   Todo lo que sabe de pdf.js vive acá.
+    imagenes.js        La cabecera de un PNG/JPEG: de píxeles a milímetros.
     imposicion/
       plan.js          Geometría pura: entra un plan, salen las hojas. Sin pdf-lib.
       motor.js         Escribe el PDF impuesto. No decide geometría.
@@ -89,12 +97,12 @@ Sin pdf-lib de por medio se puede testear con Node pelado.
 ## Verificar
 
 ```
-npm run verificar     # las cinco suites, 205 aserciones
+npm run verificar     # las cinco suites, 288 aserciones
 ```
 
 | | |
 |---|---|
-| `npm test` | Node pelado: tokens, escritura atómica, la aritmética de imposición, el parseo de argv y las decisiones del actualizador |
+| `npm test` | Node pelado: tokens, escritura atómica, la aritmética de imposición, el parseo de argv, las decisiones del actualizador y las cabeceras de imagen |
 | `npm run imposicion` | Impone de verdad y **vuelve a leer** el PDF para ver qué cayó dónde |
 | `npm run tinta` | El vuelco de la Y, el contorno, el borrador y el historial |
 | `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético |
@@ -140,6 +148,61 @@ los drivers:
 - **Lado largo → girar media vuelta en el plano**, como un volante, sin
   levantarla de la mesa. **Lado corto → no girar.** La diferencia entre
   encuadernar por un lado o por el otro *es* exactamente ese giro de 180°.
+
+### El papel no lo puede mandar Chromium (medido, 7 ago 2026)
+
+**`webContents.print({ silent: true })` siempre spoolea el papel por defecto de
+Chromium para el locale —acá A4— y la app no lo puede mover.** No es una
+sospecha: se midió contra el spooler, con la cola en pausa para no gastar papel.
+
+| cómo se pide | driver | trabajo spooleado |
+|---|---|---|
+| `pageSize: 'A5'` (PDF) | A5 | **A4** 210 × 297 |
+| `pageSize: 148000×210000` (PDF) | A5 | **A4** 210 × 297 |
+| `pageSize: 'A5'` (HTML) | A5 | **A4** 210 × 297 |
+| `pageSize: 148000×210000` (HTML) | A5 | **A4** 210 × 297 |
+| sin `pageSize` (PDF) | A5 | **A4** 210 × 297 |
+| sin `pageSize` (HTML) | A5 | **A4** 210 × 297 |
+| **SumatraPDF, `paper=A5`** | A4 | **A5** 148 × 210 ← el único |
+
+Ni por nombre, ni en micrones, ni omitiéndolo, ni dejándole el papel puesto al
+driver **desde antes de que arranque el proceso**, ni imprimiendo HTML en vez de
+un PDF. Aparte: `print()` ignora `pageSize` incluso para elegir la página que
+emite — con una A5 que tiene un marco a 10 mm de cada borde, pidiéndole A4,
+`printToPDF` devuelve una página **A5** con el marco a 9,8 mm.
+
+El síntoma no parecía un problema de papel, y esa era la trampa: la hoja salía
+**corrida hacia abajo** y le faltaba el final. Una A5 compuesta sobre una A4 se
+corre (297 − 210) / 2 = **43,5 mm**, porque el driver centra la página en su hoja
+y la impresora imagina el papel real desde el borde de arriba. Horizontalmente no
+se notaba porque la P1102w centra el papel en la bandeja. **Imprimir en A4 salía
+bien de casualidad, no por mérito.**
+
+Por eso el trabajo lo manda **SumatraPDF portable**, que sí acepta `paper=`. Se
+lo llama con `noscale`, que es exactamente la regla de la casa: el PDF ya viene
+impuesto y cualquier escalado sería algo que el preview no mostró. Vive en
+`vendor/sumatrapdf/` y va al paquete **fuera del asar** — un `.exe` adentro del
+asar no se puede ejecutar. Es GPLv3: ver `NOTICE` y `vendor/sumatrapdf/LEEME.md`.
+
+Si falta el ejecutable, Quire **no imprime y lo dice**. Caer al camino de
+Chromium sería sacar una hoja corrida sin avisar, que es peor que no imprimir.
+
+Lo que quedó sin poder pedirse: el **intercalado** de copias, que lo decide el
+driver. La orientación no hace falta pedirla — el ayudante la saca de las páginas
+del PDF.
+
+Dos notas para el que venga a depurar esto:
+
+- Para medir sin gastar papel: pausar la cola (`Win32_Printer.Pause()`), mandar
+  el trabajo, leer `Win32_PrintJob.PaperSize`, borrar el trabajo y reanudar.
+  Reanudá desde **afuera** del proceso de Electron, con `try/finally`, y volvé a
+  chequear que la cola quedó vacía: un trabajo que alcanzó el estado
+  "Imprimiendo" no se borra al primer intento.
+- Cargar un PDF por `file://` en una ventana nueva **después de haber destruido
+  otra** se lleva puesto el proceso. Si una sonda muere sin decir nada al llegar
+  a `loadURL`, es eso — no destruyas la ventana anterior.
+
+### Cómo sigue el orden de la segunda pasada
 
 El orden de la segunda pasada es un problema aparte y no depende del movimiento:
 la salida apila boca abajo (la última hoja queda arriba) y la entrada toma de

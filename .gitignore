@@ -19,3 +19,8 @@ desktop.ini
 # node_modules. Sin ellos la app no arranca, y versionarlos fija la versión
 # exacta con la que se probó — pdfjs 5.x necesita un shim propio para andar en
 # Electron 40 (ver renderer/vendor/pdfjs/compat.mjs).
+
+# SumatraPDF escribe sus ajustes al lado del ejecutable cuando corre en modo
+# portable. Es estado de runtime, no parte del ayudante.
+vendor/sumatrapdf/SumatraPDF-settings.txt
+vendor/sumatrapdf/sumatrapdfcache/

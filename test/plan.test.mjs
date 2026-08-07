@@ -10,7 +10,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 import {
-  MM, mm, planCon, resolverRango, paginasDelPlan, papelDelPlan, areaUtil,
+  MM, mm, planCon, resolverRango, paginasDelPlan, papelDelPlan, areaUtil, papelParaElDriver,
   encajar, celdasNup, ordenFolleto, mosaicoPoster, calcularHojas,
 } from '../renderer/js/imposicion/plan.js';
 
@@ -159,6 +159,57 @@ ok('el rango filtra', rango.hojas.length === 3 && rango.hojas[0].colocaciones[0]
 
 const desb = calcularHojas(planCon({ escala: { tipo: 'real' }, imprimible: planHP.imprimible }), doc(2));
 ok('avisa cuando el contenido se sale del área imprimible', desb.resumen.desborde);
+
+/* ── 9. El papel que se le pide al driver ────────────────────────────────────
+   Es el último dato que sale de la app antes del papel de verdad, y el único
+   que el preview no puede mostrar. Si no describe la MISMA hoja que se escribió
+   en el PDF, el driver se pone a encajar por su cuenta y el preview mintió.
+
+   El bug que motivó esto: se mandaban MEDIDAS a medida en vez del nombre, y el
+   driver de Windows se quedaba con el papel que ya tenía configurado (Carta).
+   Una A5 se componía sobre la geometría de una Carta y salía corrida 69 mm,
+   que es la diferencia de alto entre las dos hojas. */
+console.log('\n9. El papel que se le pide al driver');
+{
+  const pedir = (plan, d) => papelParaElDriver(papelDelPlan(plan, d));
+  const A5 = { nombre: 'A5', ancho: 148, alto: 210 };
+
+  const a4 = pedir(planCon(), doc(3));
+  ok('A4 se pide por su NOMBRE, no por sus medidas', a4.pageSize === 'A4', JSON.stringify(a4));
+  ok('y parada', a4.landscape === false);
+
+  const a5 = pedir(planCon({ papel: A5 }), doc(3));
+  ok('A5 también', a5.pageSize === 'A5' && a5.landscape === false, JSON.stringify(a5));
+
+  /* Acá estaba el otro bug: se declaraba el papel NOMINAL, que siempre está
+     vertical, mientras el PDF llevaba páginas acostadas. */
+  const foll = pedir(planCon({ modo: 'folleto' }), doc(4));
+  ok('un folleto A4 pide la hoja ACOSTADA', foll.landscape === true, JSON.stringify(foll));
+  // El PAPEL sigue siendo A4: acostar la hoja es orientación, no otro papel.
+  ok('pero el papel sigue siendo A4', foll.pageSize === 'A4', JSON.stringify(foll));
+
+  const hor = pedir(planCon({ orientacion: 'horizontal' }), doc(3));
+  ok('y la orientación horizontal también acuesta', hor.landscape === true && hor.pageSize === 'A4');
+
+  const cartaMM = { nombre: 'Carta', ancho: 215.9, alto: 279.4 };
+  ok('Carta se reconoce por la medida', pedir(planCon({ papel: cartaMM }), doc(1)).pageSize === 'Letter');
+
+  /* Los drivers reportan medidas redondeadas: una A4 puede llegar como 209,9.
+     Si eso no se reconoce, se cae al camino de papel a medida — el que falla. */
+  const casiA4 = { nombre: 'A4', ancho: 209.9, alto: 297.05 };
+  ok('un A4 con la medida redondeada por el driver sigue siendo A4',
+    pedir(planCon({ papel: casiA4 }), doc(1)).pageSize === 'A4');
+
+  // Un tamaño que no es ninguno de los conocidos sí va por medidas, en micrones.
+  const raro = pedir(planCon({ papel: { nombre: 'Ficha', ancho: 100, alto: 160 } }), doc(1));
+  ok('un papel sin nombre va por medidas, en micrones',
+    raro.pageSize.width === 100000 && raro.pageSize.height === 160000, JSON.stringify(raro));
+
+  const calc = calcularHojas(planCon({ modo: 'folleto', papel: A5 }), doc(4));
+  const delCalculo = papelParaElDriver(calc.papel);
+  ok('el cálculo y el pedido describen la misma hoja',
+    delCalculo.pageSize === 'A5' && delCalculo.landscape === true, JSON.stringify(delCalculo));
+}
 
 function aMMs(pt) { return (pt / MM).toFixed(2) + 'mm'; }
 

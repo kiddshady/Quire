@@ -15,10 +15,11 @@
       escala, no rota y no reordena nada — solo lo entrega. Todo lo que toque
       acá sería una transformación que el preview no mostró.
 
-   El truco de fondo: Chromium sabe rasterizar PDFs. Se carga el archivo en una
-   BrowserWindow oculta con `plugins:true` y se imprime esa ventana. Es la
-   misma ruta que usa el visor de PDF del navegador, así que lo que sale por la
-   impresora es lo que Chromium ya sabe pintar bien.
+   El trabajo NO lo manda Chromium. Se probó y no sirve: su impresión silenciosa
+   spoolea siempre el papel por defecto del locale y no hay forma de moverlo,
+   así que cualquier hoja que no fuera A4 salía corrida. Lo manda SumatraPDF
+   portable, que acepta `paper=`, con `noscale` para que siga sin tocar nada.
+   La medición completa está más abajo, arriba de rutaDelAyudante().
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const { BrowserWindow, app } = require('electron');
@@ -169,6 +170,100 @@ async function listar() {
   });
 }
 
+/* ── Por qué el papel lo manda SumatraPDF y no Chromium ──────────────────────
+   Porque Chromium no puede elegir el tamaño de hoja. Medido contra el spooler,
+   con la cola en pausa para no gastar papel:
+
+     pedido                          driver     trabajo spooleado
+     pageSize: 'A5'          (PDF)   A5     →   A4 210 x 297 mm
+     pageSize: 148000×210000 (PDF)   A5     →   A4 210 x 297 mm
+     pageSize: 'A5'          (HTML)  A5     →   A4 210 x 297 mm
+     pageSize: 148000×210000 (HTML)  A5     →   A4 210 x 297 mm
+     sin pageSize            (PDF)   A5     →   A4 210 x 297 mm
+     sin pageSize            (HTML)  A5     →   A4 210 x 297 mm
+     SumatraPDF, paper=A5            A4     →   A5 148 x 210 mm   ← el único
+
+   `webContents.print({ silent: true })` SIEMPRE spoolea el papel por defecto de
+   Chromium para el locale —acá A4— y no hay forma de moverlo desde la app: ni
+   por nombre, ni en micrones, ni omitiéndolo, ni dejándole el papel puesto al
+   driver desde antes de que arranque el proceso, ni imprimiendo HTML.
+
+   El síntoma no parecía un problema de papel, y esa era la trampa: la hoja
+   salía CORRIDA hacia abajo y le faltaba el final. Una A5 compuesta sobre una
+   A4 se corre (297 − 210) / 2 = 43,5 mm, porque el driver centra la página en
+   su hoja y la impresora imagina el papel real desde el borde de arriba.
+   Imprimir en A4 salía bien de casualidad, no por mérito.
+
+   Así que el trabajo lo manda un ayudante: SumatraPDF portable, que sí acepta
+   `paper=`. Sigue sin escalar, sin rotar y sin reordenar nada —`noscale` es
+   justamente eso—, así que la regla de este módulo no cambia: lo que llega acá
+   ya es, página por página, lo que tiene que salir.
+
+   Ver vendor/sumatrapdf/LEEME.md para la versión, el hash, la firma y la
+   licencia (es GPLv3 y va como programa separado). */
+
+const AYUDANTE_EXE = 'SumatraPDF-3.6.1-64.exe';
+
+/* Empaquetado va a resources/, FUERA del asar: un .exe adentro del asar no se
+   puede ejecutar. En desarrollo sale del repo. */
+function rutaDelAyudante() {
+  return app?.isPackaged
+    ? path.join(process.resourcesPath, 'sumatrapdf', AYUDANTE_EXE)
+    : path.join(__dirname, '..', 'vendor', 'sumatrapdf', AYUDANTE_EXE);
+}
+
+/* Los papeles que SumatraPDF sabe nombrar en `paper=`. Coinciden con los que
+   nombra el plan (ver papelParaElDriver). Lista blanca a propósito: esto se
+   arma dentro de un argumento de línea de comandos. */
+const PAPELES_CON_NOMBRE = new Set(
+  ['A2', 'A3', 'A4', 'A5', 'A6', 'Letter', 'Legal', 'Tabloid', 'Statement', 'Executive']
+);
+
+/**
+ * Los `-print-settings` del trabajo.
+ *
+ * `noscale` es lo primero y lo más importante: el PDF ya viene impuesto y
+ * cualquier escalado de acá sería una transformación que el preview no mostró.
+ */
+function ajustesDeImpresion({ pageSize, copies, duplexMode, monocromo }) {
+  const partes = ['noscale'];
+
+  /* Un papel sin nombre conocido no se puede pedir: SumatraPDF solo entiende
+     nombres. Se cae al del driver, que es lo que pasaba antes con todo. */
+  if (typeof pageSize === 'string' && PAPELES_CON_NOMBRE.has(pageSize)) {
+    partes.push(`paper=${pageSize}`);
+  }
+
+  const n = Math.max(1, Math.min(999, Math.round(copies) || 1));
+  if (n > 1) partes.push(`${n}x`);
+
+  partes.push(duplexMode === 'longEdge' ? 'duplexlong'
+    : duplexMode === 'shortEdge' ? 'duplexshort'
+      : 'simplex');
+
+  // Solo si la impresora no sabe otra cosa: forzarlo en una a color sería
+  // decidir por el usuario algo que no pidió.
+  if (monocromo) partes.push('monochrome');
+
+  return partes.join(',');
+}
+
+/**
+ * La ficha de capacidades de una impresora, o null.
+ *
+ * Devuelve también si la lista se pudo leer, porque las dos cosas se confunden:
+ * "no está en la lista" y "no hay lista" no son lo mismo, y tratarlas igual
+ * dejaría a la app sin imprimir cuando lo que falló fue PowerShell.
+ */
+async function fichaDeImpresora(deviceName) {
+  try {
+    const caps = await capacidades();
+    return { hayLista: caps.length > 0, ficha: caps.find((p) => p.nombre === deviceName) || null };
+  } catch {
+    return { hayLista: false, ficha: null };
+  }
+}
+
 /* ── Mandar el papel ─────────────────────────────────────────────────────── */
 
 async function carpetaTemp() {
@@ -188,8 +283,9 @@ let trabajoN = 0;
  * @param {object} opciones
  *   deviceName  nombre exacto de la impresora
  *   copies      cuántas
- *   collate     intercalar copias
- *   pageSize    'A4' | 'A5' | {width,height} en MICRONES
+ *   pageSize    'A4' | 'A5' | … El NOMBRE, que es lo único que se puede pedir.
+ *               Un objeto en micrones se acepta pero no se puede honrar: cae al
+ *               papel del driver.
  *   duplexMode  'simplex' | 'longEdge' | 'shortEdge'
  *   etiqueta    para el nombre del temporal (diagnóstico)
  */
@@ -197,7 +293,6 @@ async function imprimir(bytes, opciones = {}) {
   const {
     deviceName,
     copies = 1,
-    collate = true,
     pageSize,
     duplexMode = 'simplex',
     etiqueta = 'trabajo',
@@ -205,60 +300,57 @@ async function imprimir(bytes, opciones = {}) {
 
   if (!deviceName) throw new Error('Falta elegir la impresora');
 
+  /* Con `-silent`, el ayudante no protesta si la impresora no existe: se cierra
+     sin hacer nada y sin código de error. Sin este chequeo, Quire diría
+     "mandado a imprimir" y no habría salido nada. */
+  const { hayLista, ficha } = await fichaDeImpresora(deviceName);
+  if (hayLista && !ficha) {
+    throw new Error(`La impresora "${deviceName}" ya no está. Elegí otra.`);
+  }
+
+  const ayudante = rutaDelAyudante();
+  try {
+    await fs.access(ayudante);
+  } catch {
+    /* Sin el ayudante no se imprime, y es a propósito: el camino de Chromium
+       manda cualquier papel como A4, así que "imprimir igual" sería sacar una
+       hoja corrida sin avisar. Que falle acá es más honesto. */
+    throw new Error(
+      `Falta el ayudante de impresión (${AYUDANTE_EXE}). Sin él no se puede elegir el tamaño de papel; reinstalá Quire.`
+    );
+  }
+
   const dir = await carpetaTemp();
   const archivo = path.join(dir, `${String(++trabajoN).padStart(3, '0')}-${etiqueta}.pdf`);
   await fs.writeFile(archivo, Buffer.from(bytes));
 
-  const win = new BrowserWindow({
-    show: false,
-    // Fuera de pantalla y no en 0,0: si algo la mostrara por error, no aparece
-    // un rectángulo blanco en el medio del escritorio.
-    x: -20000,
-    y: -20000,
-    width: 1000,
-    height: 1400,
-    backgroundColor: '#0a0b0d',
-    webPreferences: { plugins: true, sandbox: false, contextIsolation: true, nodeIntegration: false },
+  const ajustes = ajustesDeImpresion({
+    pageSize,
+    copies,
+    duplexMode,
+    monocromo: !!ficha?.soloMonocromo,
   });
 
-  try {
-    await win.loadURL('file:///' + archivo.replace(/\\/g, '/'));
+  await new Promise((resolve, reject) => {
+    execFile(
+      ayudante,
+      [
+        '-print-to', deviceName,
+        '-print-settings', ajustes,
+        '-silent',            // sin carteles de error suyos: los nuestros son nuestros
+        '-exit-when-done',
+        archivo,
+      ],
+      { windowsHide: true, timeout: 120000 },
+      (err) => {
+        if (!err) return resolve();
+        if (err.killed) return reject(new Error('El ayudante de impresión no respondió'));
+        reject(new Error(`La impresora rechazó el trabajo (${err.message})`));
+      }
+    );
+  });
 
-    // El visor de PDF de Chromium monta su <embed> después del load. Sin esta
-    // espera, print() a veces sale con la primera página en blanco.
-    await new Promise((r) => setTimeout(r, 500));
-
-    const resultado = await new Promise((resolve) => {
-      win.webContents.print(
-        {
-          silent: true,             // el diálogo es nuestro, no el del sistema
-          deviceName,
-          printBackground: true,
-          color: false,             // la P1102w es monocromo; pedir color no aporta
-          copies: Math.max(1, Math.min(999, Math.round(copies))),
-          collate,
-          duplexMode,
-          // El PDF ya viene impuesto: cualquier escala o margen de acá lo
-          // rompería y el preview habría mentido.
-          margins: { marginType: 'none' },
-          scaleFactor: 100,
-          ...(pageSize ? { pageSize } : {}),
-        },
-        (ok, motivo) => resolve({ ok, motivo })
-      );
-    });
-
-    if (!resultado.ok) {
-      // "cancelled" es el usuario cerrando el diálogo del driver, no una falla.
-      const m = String(resultado.motivo || '').toLowerCase();
-      if (m.includes('cancel')) return { ok: false, cancelado: true };
-      throw new Error(resultado.motivo || 'La impresora rechazó el trabajo');
-    }
-
-    return { ok: true, archivo };
-  } finally {
-    if (!win.isDestroyed()) win.destroy();
-  }
+  return { ok: true, archivo, ajustes };
 }
 
 /** Borra los temporales de trabajos viejos. Se llama al salir. */

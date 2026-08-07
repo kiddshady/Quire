@@ -40,6 +40,34 @@ Origen:    https://github.com/Hopding/pdf-lib
 Copiado sin modificar desde el paquete npm `pdf-lib`.
 
 
+SumatraPDF
+----------
+Archivos:  vendor/sumatrapdf/SumatraPDF-3.6.1-64.exe
+Licencia:  GNU General Public License, versión 3
+Texto:     vendor/sumatrapdf/LICENSE-GPLv3.txt
+Copyright: Copyright Krzysztof Kowalczyk y colaboradores de SumatraPDF
+Origen:    https://github.com/sumatrapdfreader/sumatrapdf
+Binario:   https://www.sumatrapdfreader.org/dl/rel/3.6.1/SumatraPDF-3.6.1-64.zip
+SHA-256:   719F689B34F47BE8CA105CE8484948474DAFDE0E106BAB599E4A89326070C3D0
+
+Es el ejecutable portable, sin modificar, con firma Authenticode válida a nombre
+de Krzysztof Kowalczyk. Quire lo usa para mandar el papel a la impresora y es lo
+ÚNICO que puede elegir el tamaño de hoja: la impresión silenciosa de Chromium
+spoolea siempre el papel por defecto del locale. Ver vendor/sumatrapdf/LEEME.md.
+
+**Es GPLv3 y Quire es MIT.** Van juntos en el instalador como dos programas
+separados: Quire lo invoca por línea de comandos, no lo enlaza ni lo modifica —
+lo que la GPL llama *mera agregación*, y está permitido. Lo que la licencia sí
+exige, y por eso está escrito acá:
+
+  · el texto de la GPLv3 viaja en el paquete (vendor/sumatrapdf/LICENSE-GPLv3.txt);
+  · el código fuente de SumatraPDF 3.6.1 tiene que estar disponible para quien
+    lo pida. Está publicado en https://github.com/sumatrapdfreader/sumatrapdf
+    y este aviso vale como la oferta escrita que la licencia pide.
+
+Si alguna vez se lo reemplaza o se lo saca, hay que actualizar este bloque.
+
+
 Roboto Mono
 -----------
 Archivos:  renderer/fonts/roboto-mono-*.woff2
