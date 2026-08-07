@@ -455,8 +455,38 @@ app.whenReady().then(async () => {
       resumen: document.querySelector('.qr-resumen__cifra .ox-stat__value')?.textContent,
       nav: document.getElementById('qr-preview-nav')?.textContent.replace(/\\s+/g, ' ').trim(),
       tintaEnElPreview,
+
+      /* El pie del rail y la barra de la vista quedan pegados uno al lado del
+         otro, arriba de la statusbar, y sus bordes superiores se leen como UNA
+         línea cruzando la ventana. Si no miden lo mismo se ve el escalón — eran
+         11,5 px, y en el DOM no se nota: los dos elementos existen, están
+         visibles y cada uno mide lo que le corresponde por su contenido. Solo
+         aparece comparando los dos. */
+      franjaInferior: (() => {
+        const pie = document.querySelector('.ox-rail__foot');
+        const barra = document.querySelector('.qr-preview__nav');
+        if (!pie || !barra) return { error: 'falta alguna de las dos barras' };
+        const a = pie.getBoundingClientRect();
+        const b = barra.getBoundingClientRect();
+        return {
+          altoPie: Math.round(a.height), altoBarra: Math.round(b.height),
+          escalonArriba: Math.round(Math.abs(a.top - b.top)),
+          escalonAbajo: Math.round(Math.abs(a.bottom - b.bottom)),
+        };
+      })(),
     };
   })()`)]);
+
+  {
+    const f = notas[notas.length - 1][1].franjaInferior;
+    if (f?.error) problemas.push('franja: ' + f.error);
+    else if (f) {
+      if (f.escalonArriba !== 0) {
+        problemas.push(`franja: el pie del rail (${f.altoPie} px) y la barra del preview (${f.altoBarra} px) no arrancan a la misma altura: ${f.escalonArriba} px de escalón`);
+      }
+      if (f.escalonAbajo !== 0) problemas.push(`franja: tampoco terminan igual (${f.escalonAbajo} px)`);
+    }
+  }
 
   // Cambiar a folleto: el resumen y el papel tienen que cambiar solos.
   await js(`document.querySelector('.qr-modo[data-value="folleto"]').click()`).catch(() => {});
@@ -619,6 +649,55 @@ app.whenReady().then(async () => {
   })()`)]);
 
   fs.writeFileSync(path.join(RAIZ, 'test', 'humo-herramientas.png'), (await win.webContents.capturePage()).toPNG());
+
+  /* ── 9-bis. La puerta de las imágenes ────────────────────────────────────
+     Combinar acepta PNG/JPEG/WEBP; el lector NO. Es la misma función `leer`
+     con una opción de diferencia, así que lo único que separa las dos cosas es
+     que esa opción esté puesta donde va y en ningún otro lado. Se ejercita por
+     el IPC de verdad, con un PNG escrito en disco por la app misma. */
+  notas.push(['imagenes-ipc', await js(`(async () => {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 32;
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#c33'; cx.fillRect(0, 0, 64, 32);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const bytes = await blob.arrayBuffer();
+
+    const carpeta = ${JSON.stringify(path.join(RAIZ, 'test'))};
+    const ruta = await window.onyx.docs.escribir(carpeta, 'humo-imagen.png', bytes);
+
+    const comoImagen = await window.onyx.docs.leer(ruta, { imagenes: true });
+    let comoDocumento = null;
+    try { await window.onyx.docs.leer(ruta); } catch (e) { comoDocumento = e.message; }
+
+    // Y el PDF de siempre tiene que seguir entrando por las dos puertas.
+    const pdf = await window.onyx.docs.leer(${JSON.stringify(PDF)});
+
+    return {
+      escribio: !!ruta,
+      tipo: comoImagen.tipo,
+      formato: comoImagen.formato,
+      trajoBytes: comoImagen.bytes?.byteLength > 0,
+      // El lector la rechaza, y lo dice.
+      rechazoDelLector: comoDocumento,
+      pdfSigueSiendoPdf: pdf.tipo === 'pdf' && pdf.formato === 'pdf',
+    };
+  })()`).catch((e) => ({ error: e.message }))]);
+
+  {
+    const n = notas[notas.length - 1][1];
+    if (n.error) problemas.push('imagenes-ipc: ' + n.error);
+    else {
+      if (n.tipo !== 'imagen' || n.formato !== 'png') problemas.push(`imagenes-ipc: leyó ${n.formato}/${n.tipo}, no png/imagen`);
+      if (!n.trajoBytes) problemas.push('imagenes-ipc: no llegaron los bytes');
+      if (!/%PDF/.test(n.rechazoDelLector || '')) {
+        problemas.push(`imagenes-ipc: el lector NO rechazó la imagen (${n.rechazoDelLector})`);
+      }
+      if (!n.pdfSigueSiendoPdf) problemas.push('imagenes-ipc: el PDF dejó de reconocerse como PDF');
+    }
+    fs.rmSync(path.join(RAIZ, 'test', 'humo-imagen.png'), { force: true });
+  }
+
   /* ── 10. Abrir un PDF desde la pantalla de inicio ─────────────────────────
      El escenario del bug: parado en "no hay ningún documento", abrís uno y no
      aparece hasta cambiar de vista y volver. La causa era que la vista se

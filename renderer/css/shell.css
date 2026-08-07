@@ -156,9 +156,27 @@
 .ox-navitem:hover .ox-navitem__count,
 .ox-navitem.is-active .ox-navitem__count { color: var(--ox-text-2); }
 
-/* Pie del rail: salud de proveedores. */
+/* Pie del rail: salud de proveedores.
+
+   La sangría de la izquierda NO es la del rail: es la columna de los valores
+   de la statusbar, que va pegada justo abajo. Las dos filas suelen decir lo
+   mismo —en Quire, el nombre del documento abierto— y apiladas con dos
+   arranques distintos se lee como un error de maquetado antes que como dos
+   datos. Ver --ox-statusbar-texto.
+
+   El flex no es decorativo: `overflow` no le aplica a un elemento inline, así
+   que un .ox-truncate suelto acá adentro no truncaba nada — un nombre largo se
+   salía del rail y lo tapaba el fondo del área principal. Se veía cortado al
+   ras y sin puntos suspensivos, que es la manera de cortar que no avisa que
+   cortó. Como ítem flex el span sí es un bloque y el ellipsis aparece. */
 .ox-rail__foot {
-  padding: var(--ox-3);
+  display: flex;
+  align-items: center;
+  /* El alto NO sale del padding: sale del token, porque tiene que ser el mismo
+     que el de la barra de la vista de al lado. Ver --ox-pie. */
+  min-height: var(--ox-pie);
+  min-width: 0;
+  padding: 0 var(--ox-3) 0 var(--ox-statusbar-texto);
   box-shadow: inset 0 1px 0 var(--ox-line);
 }
 
@@ -267,5 +285,8 @@
   transition: var(--tr-color);
 }
 .ox-statusbar__item:hover { color: var(--ox-text-2); }
-.ox-statusbar__item .ox-icon { width: 12px; height: 12px; }
+/* Estos cuatro valores —padding de la barra, padding del ítem, gap y este
+   ancho— son los sumandos de --ox-statusbar-texto. Si tocás uno, tocá el
+   token: hay cosas apoyadas en esa columna. */
+.ox-statusbar__item .ox-icon { width: var(--ox-statusbar-icono); height: var(--ox-statusbar-icono); }
 .ox-statusbar__value { color: var(--ox-text-2); font-variant-numeric: tabular-nums; }

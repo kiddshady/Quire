@@ -197,6 +197,24 @@
   --ox-rail:     224px;
   --ox-inspector: 320px;
 
+  /* La columna donde arrancan los VALORES de la statusbar: el padding de la
+     barra, más el del ítem, más el ícono y su gap. Está acá y no sumado a mano
+     en cada regla porque no es solo un dato de la barra — lo que se apile
+     encima tiene que caer en la misma columna, y si los dos lados hacen la
+     cuenta por su cuenta, tarde o temprano una de las dos se mueve sola. */
+  --ox-statusbar-icono: 12px;
+  --ox-statusbar-texto: calc(var(--ox-4) + var(--ox-1) + var(--ox-statusbar-icono) + var(--ox-2));
+
+  /* La franja que va pegada ARRIBA de la statusbar: el pie del rail y la barra
+     de la vista que esté abierta. Son componentes distintos —uno del shell,
+     otro de cada vista— pero quedan uno al lado del otro y sus líneas de arriba
+     se leen como UNA sola línea cruzando la ventana. Si no miden lo mismo se ve
+     el escalón, y se ve mucho: son dos líneas paralelas a pocos píxeles.
+
+     El número lo manda el contenido más alto, que son los botones redondos de
+     la navegación del preview (28 px + 12 de aire arriba y abajo). */
+  --ox-pie: 52px;
+
   /* Tamaño del esfumado donde el scroll recorta. El contenedor lleva padding
      ≥ este valor en el eje del scroll para que en reposo no coma ningún ítem. */
   --ox-fade: 28px;

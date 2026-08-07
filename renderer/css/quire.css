@@ -476,7 +476,9 @@
   flex: 0 0 auto;
   box-shadow: inset 0 1px 0 var(--ox-line);
   background: var(--ox-bg);
-  min-height: 52px;
+  /* Comparte alto con el pie del rail, que queda pegado a su izquierda: las dos
+     líneas de arriba tienen que ser la misma. Ver --ox-pie. */
+  min-height: var(--ox-pie);
 }
 
 .qr-preview__cuenta {
@@ -853,7 +855,13 @@
 }
 
 .qr-org__barra { box-shadow: inset 0 -1px 0 var(--ox-line); }
-.qr-org__pie { box-shadow: inset 0 1px 0 var(--ox-line); gap: var(--ox-3); }
+/* Mismo alto que el pie del rail, que le queda pegado a la izquierda: las dos
+   líneas de arriba se leen como una sola. Ver --ox-pie. */
+.qr-org__pie {
+  box-shadow: inset 0 1px 0 var(--ox-line);
+  gap: var(--ox-3);
+  min-height: var(--ox-pie);
+}
 
 /* Sin esfumado en ningún lado: los dos bordes ya están cerrados por una línea
    —la barra arriba, el pie abajo—, así que los dos cortes son limpios. */
