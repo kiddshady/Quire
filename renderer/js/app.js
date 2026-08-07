@@ -77,7 +77,14 @@ function cablearArrastre() {
     const archivos = [...(e.dataTransfer?.files || [])];
     const pdf = archivos.find((f) => /\.pdf$/i.test(f.name));
     if (!pdf) {
-      if (archivos.length) Toast.error('Eso no es un PDF', archivos[0].name);
+      /* Soltar acá abre un documento, y una imagen no es un documento. Pero la
+         app SÍ sabe qué hacer con una imagen, así que el aviso dice dónde en
+         vez de terminar en "no". */
+      if (archivos.some((f) => /\.(png|jpe?g|webp)$/i.test(f.name))) {
+        Toast.error('Acá se abren PDFs', 'Para volver imágenes un PDF, andá a Herramientas → Combinar.');
+      } else if (archivos.length) {
+        Toast.error('Eso no es un PDF', archivos[0].name);
+      }
       return;
     }
     const ruta = api.docs.rutaDe(pdf);

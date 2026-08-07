@@ -69,7 +69,7 @@ function register() {
      texto, pero igual conviene no pedirlos dos veces por gusto. */
   handle('docs:elegir', () => documentos.elegir());
   handle('docs:elegir-varios', () => documentos.elegirVarios());
-  handle('docs:leer', (ruta) => documentos.leer(ruta));
+  handle('docs:leer', (ruta, opciones) => documentos.leer(ruta, opciones));
   handle('docs:guardar-como', (bytes, nombre, filtros) => documentos.guardarComo(bytes, nombre, filtros));
   handle('docs:elegir-carpeta', () => documentos.elegirCarpeta());
   handle('docs:escribir', (carpeta, nombre, bytes) => documentos.escribir(carpeta, nombre, bytes));

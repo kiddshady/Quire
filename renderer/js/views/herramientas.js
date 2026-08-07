@@ -7,6 +7,9 @@
    el texto sigue siendo texto y las fuentes viajan enteras. Exportar sí
    rasteriza, porque una imagen es eso — y por eso el DPI es lo primero que se
    elige.
+
+   Combinar además acepta imágenes sueltas, y ahí cada una vale por una página.
+   El camino de vuelta de exportar: lo que sale como PNG puede volver a entrar.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 import { S, alCambiar } from '../estado.js';
@@ -19,7 +22,9 @@ import { bindSwitcher, scrollFade, bindStepper } from '../motion.js';
 import { combinar, dividir, reorganizar } from '../imposicion/motor.js';
 import { aplanarTinta, contarTinta } from '../tinta/aplanar.js';
 import { exportarImagenes, FORMATOS, DPIS, medidaAlDPI } from '../exportar.js';
-import { resolverRango } from '../imposicion/plan.js';
+import { resolverRango, aMM } from '../imposicion/plan.js';
+import { dpiDeclarado, giroDeOrientacion, medidaDePagina, medirImagen, orientacionExif } from '../imagenes.js';
+import { describirTamano } from '../pdf/documento.js';
 
 const api = window.onyx;
 
@@ -91,8 +96,9 @@ function htmlCombinar() {
   return `
     <div class="qr-herr__panel">
       <p class="qr-herr__intro">
-        Los PDFs se unen en el orden de la lista. Las páginas se copian tal cual:
-        el texto sigue siendo texto, no se rasteriza nada.
+        Los archivos se unen en el orden de la lista. Las páginas de un PDF se
+        copian tal cual: el texto sigue siendo texto, no se rasteriza nada. Una
+        imagen entra como una página del tamaño que le da su resolución.
       </p>
 
       ${cola.length ? `
@@ -102,10 +108,7 @@ function htmlCombinar() {
               <span class="qr-cola__orden ox-num">${i + 1}</span>
               <div class="ox-listitem__main">
                 <span class="ox-listitem__title">${esc(d.nombre)}</span>
-                <span class="ox-listitem__sub">
-                  ${d.paginas ? `${plural(d.paginas, 'página', 'páginas')} · ` : ''}${esc(fmtBytes(d.tamano || 0))}
-                  ${d.esActual ? ' · el que está abierto' : ''}
-                </span>
+                <span class="ox-listitem__sub">${subtitulo(d)}</span>
               </div>
               <div class="ox-rowactions">
                 <button class="ox-iconbtn ox-iconbtn--sm" data-cola-sube="${i}" ${i === 0 ? 'disabled' : ''}
@@ -119,20 +122,46 @@ function htmlCombinar() {
         </div>` : `
         <div class="ox-empty" style="margin:24px auto">${Icons.svg('combinar')}
           <div class="ox-empty__title">Todavía no hay nada que unir</div>
-          <div class="ox-empty__text">Agregá dos o más PDFs. Si tenés uno abierto, va primero en la lista.</div>
+          <div class="ox-empty__text">Agregá PDFs, imágenes o las dos cosas. Si tenés un PDF abierto, va primero en la lista.</div>
         </div>`}
 
       <div class="qr-herr__acciones">
         <button class="ox-btn ox-btn--secondary ox-flashable" id="qr-comb-agregar">
-          <i data-icon="plus"></i> Agregar PDFs
+          <i data-icon="plus"></i> Agregar archivos
         </button>
         <div class="ox-spacer"></div>
-        ${cola.length > 1 ? `<span class="ox-meta">${cola.length} documentos · ${paginas || '?'} páginas</span>` : ''}
-        <button class="ox-btn ox-btn--primary ox-flashable" id="qr-comb-hacer" ${cola.length < 2 ? 'disabled' : ''}>
+        ${cola.length > 1 ? `<span class="ox-meta">${plural(cola.length, 'archivo', 'archivos')} · ${plural(paginas, 'página', 'páginas')}</span>` : ''}
+        <button class="ox-btn ox-btn--primary ox-flashable" id="qr-comb-hacer" ${sePuedeCombinar(cola) ? '' : 'disabled'}>
           <i data-icon="combinar"></i> Combinar y guardar
         </button>
       </div>
     </div>`;
+}
+
+/* Con dos archivos siempre hay algo que unir. Con uno solo, únicamente si es
+   una imagen: ahí "combinar" no es unir nada, es convertirla en PDF — que es
+   una cosa que uno quiere hacer y que si no está acá no está en ningún lado. */
+const sePuedeCombinar = (cola) => cola.length > 1 || cola.some((d) => d.tipo === 'imagen');
+
+/** La línea de abajo del ítem: qué es, cuánto mide y cuánto pesa. */
+function subtitulo(d) {
+  const partes = [];
+
+  if (d.tipo === 'imagen') {
+    partes.push(`${String(d.formato).toUpperCase()} · 1 página`);
+    /* Los píxeles solos no dicen nada —¿1240 de ancho es una postal o un
+       afiche?—, así que va también el papel que va a ocupar. Es el número que
+       decide si esto entra en una A4 o hay que reducirlo al imprimir. */
+    if (d.px) partes.push(`${d.px.ancho} × ${d.px.alto} px`);
+    if (d.pagina) partes.push(describirTamano(aMM(d.pagina.ancho), aMM(d.pagina.alto)));
+    if (d.dpi) partes.push(`${d.dpi} dpi`);
+  } else if (d.paginas) {
+    partes.push(plural(d.paginas, 'página', 'páginas'));
+  }
+
+  partes.push(fmtBytes(d.tamano || 0));
+  if (d.esActual) partes.push('el que está abierto');
+  return partes.map(esc).join(' · ');
 }
 
 /** El documento abierto va primero, salvo que ya lo hayas agregado a mano. */
@@ -142,7 +171,7 @@ function colaEfectiva() {
   if (yaEsta) return V.cola;
   return [{
     nombre: S.doc.nombre, ruta: S.doc.ruta, tamano: S.doc.tamano,
-    paginas: S.doc.paginas, esActual: true,
+    paginas: S.doc.paginas, tipo: 'pdf', formato: 'pdf', esActual: true,
   }, ...V.cola];
 }
 
@@ -152,7 +181,12 @@ function cablearCombinar() {
     if (!nuevos?.length) return;
     for (const a of nuevos) {
       if (V.cola.some((d) => d.ruta === a.ruta)) continue;
-      V.cola.push({ nombre: a.nombre, ruta: a.ruta, tamano: a.tamano, bytes: a.bytes });
+      const item = {
+        nombre: a.nombre, ruta: a.ruta, tamano: a.tamano, bytes: a.bytes,
+        tipo: a.tipo || 'pdf', formato: a.formato || 'pdf',
+      };
+      if (item.tipo === 'imagen') Object.assign(item, await describirImagen(a));
+      V.cola.push(item);
     }
     pintarSeccion();
   });
@@ -182,31 +216,55 @@ function cablearCombinar() {
   document.getElementById('qr-comb-hacer')?.addEventListener('click', hacerCombinar);
 }
 
+/**
+ * Lo que la lista necesita saber de una imagen: cuántos píxeles tiene, qué
+ * densidad declara y de qué tamaño va a salir la página.
+ *
+ * Se mide UNA vez, al agregarla, y no en cada repintado: decodificar una foto
+ * de 12 megapíxeles cada vez que alguien mueve un ítem de lugar se siente.
+ *
+ * Si falla, se agrega igual sin la ficha. Que una imagen no se pueda medir no
+ * quiere decir que no se pueda embeber, y aunque tampoco se pueda, el error de
+ * verdad va a salir al combinar, que es cuando importa.
+ */
+async function describirImagen(a) {
+  try {
+    const px = await medirImagen(a.bytes, a.formato);
+    const dpi = dpiDeclarado(a.bytes, a.formato);
+    const giro = giroDeOrientacion(orientacionExif(a.bytes, a.formato));
+    return { paginas: 1, px, dpi, pagina: medidaDePagina(px, dpi, giro) };
+  } catch (err) {
+    console.warn('[combinar] no se pudo medir', a.nombre, err);
+    return { paginas: 1 };
+  }
+}
+
 async function hacerCombinar() {
   const cola = colaEfectiva();
-  if (cola.length < 2) return;
+  if (!sePuedeCombinar(cola)) return;
 
   await conTrabajo('qr-comb-hacer', 'Combinando…', async () => {
     // El documento abierto puede no estar leído: sus bytes están en memoria.
     const docs = [];
     for (const d of cola) {
-      if (d.bytes) { docs.push({ bytes: d.bytes, nombre: d.nombre }); continue; }
+      const ficha = { nombre: d.nombre, tipo: d.tipo || 'pdf', formato: d.formato || 'pdf' };
+      if (d.bytes) { docs.push({ ...ficha, bytes: d.bytes }); continue; }
       if (d.esActual || d.ruta === S.doc?.ruta) {
         // Con la tinta aplanada: lo anotado tiene que viajar al combinado.
-        docs.push({ bytes: await aplanarTinta(S.doc.bytes, S.tinta), nombre: d.nombre });
+        docs.push({ ...ficha, bytes: await aplanarTinta(S.doc.bytes, S.tinta) });
         continue;
       }
-      const leido = await api.docs.leer(d.ruta);
-      docs.push({ bytes: leido.bytes, nombre: d.nombre });
+      const leido = await api.docs.leer(d.ruta, { imagenes: true });
+      docs.push({ ...ficha, bytes: leido.bytes });
     }
 
     const { bytes, indice } = await combinar(docs);
-    const guardado = await api.docs.guardarComo(bytes, sugerirNombre('combinado'));
+    const guardado = await api.docs.guardarComo(bytes, sugerirNombre('combinado', cola[0]?.nombre));
     if (!guardado) return;
 
     Toast.show({
       title: 'Combinado',
-      text: `${indice.length} documentos · ${indice[indice.length - 1].hasta} páginas → ${guardado.nombre}`,
+      text: `${plural(indice.length, 'archivo', 'archivos')} · ${plural(indice[indice.length - 1].hasta, 'página', 'páginas')} → ${guardado.nombre}`,
       icon: 'combinar',
     });
   });
@@ -485,9 +543,12 @@ async function hacerExportar() {
 
 /* ── Común ───────────────────────────────────────────────────────────────── */
 
-function sugerirNombre(sufijo) {
-  const base = (S.doc?.nombre || 'documento').replace(/\.pdf$/i, '');
-  return `${base}-${sufijo}.pdf`;
+/* Sin documento abierto —una lista de puras imágenes— el que le da el nombre
+   al resultado es el primero de la lista: "escaneo-01-combinado.pdf" dice de
+   dónde salió el archivo; "documento-combinado.pdf" no dice nada. */
+function sugerirNombre(sufijo, base = S.doc?.nombre) {
+  const limpio = (base || 'documento').replace(/\.(pdf|png|jpe?g|webp)$/i, '');
+  return `${limpio}-${sufijo}.pdf`;
 }
 
 /** Bloquea el botón mientras dura la operación y muestra el error si falla. */

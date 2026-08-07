@@ -14,6 +14,7 @@ const { dialog, BrowserWindow } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const store = require('./store.cjs');
+const { EXT_IMAGEN, formatoDe } = require('./firmas.cjs');
 
 /* Un PDF arriba de esto casi seguro no es lo que el usuario cree que es, y
    mandarlo por IPC congelaría la app mientras se clona. */
@@ -24,15 +25,25 @@ const FILTROS = [
   { name: 'Todos los archivos', extensions: ['*'] },
 ];
 
+/* Para combinar, donde una imagen vale por una página. El primer filtro es el
+   que arranca elegido, así que va el que sirve para las dos cosas a la vez. */
+const FILTROS_CON_IMAGENES = [
+  { name: 'PDF e imágenes', extensions: ['pdf', ...EXT_IMAGEN] },
+  { name: 'PDF', extensions: ['pdf'] },
+  { name: 'Imágenes', extensions: EXT_IMAGEN },
+  { name: 'Todos los archivos', extensions: ['*'] },
+];
+
 const recientes = store.doc('recientes', { lista: [] });
 
-/** La firma real del archivo, no su extensión: un .pdf puede ser cualquier cosa. */
-function esPDF(bytes) {
-  return bytes.length > 4 && bytes[0] === 0x25 && bytes[1] === 0x50
-      && bytes[2] === 0x44 && bytes[3] === 0x46; // %PDF
-}
-
-async function leer(ruta) {
+/**
+ * Lee un archivo del disco y lo deja listo para mandar por IPC.
+ *
+ * `imagenes` es la puerta para PNG/JPEG/WEBP, y solo la abre Combinar. El
+ * lector sigue aceptando PDF y nada más: abrir una imagen "como documento"
+ * sería otra función y no es esta.
+ */
+async function leer(ruta, { imagenes = false } = {}) {
   if (typeof ruta !== 'string' || !ruta) throw new Error('Ruta inválida');
 
   const stat = await fs.stat(ruta);
@@ -42,9 +53,18 @@ async function leer(ruta) {
   }
 
   const buf = await fs.readFile(ruta);
-  if (!esPDF(buf)) throw new Error('El archivo no empieza con %PDF — no es un PDF válido');
+  const formato = formatoDe(buf);
 
-  await anotarReciente(ruta, stat);
+  if (!imagenes && formato !== 'pdf') {
+    throw new Error('El archivo no empieza con %PDF — no es un PDF válido');
+  }
+  if (!formato) {
+    throw new Error('No se reconoce el archivo: no es un PDF ni una imagen PNG, JPEG o WEBP');
+  }
+
+  /* Los recientes son documentos, no piezas sueltas. Una imagen que se sumó a
+     un combinado no es algo a lo que uno quiera "volver". */
+  if (formato === 'pdf') await anotarReciente(ruta, stat);
 
   return {
     ruta,
@@ -53,6 +73,8 @@ async function leer(ruta) {
     bytes: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
     tamano: stat.size,
     modificado: stat.mtimeMs,
+    formato,
+    tipo: formato === 'pdf' ? 'pdf' : 'imagen',
   };
 }
 
@@ -67,16 +89,16 @@ async function elegir() {
   return leer(r.filePaths[0]);
 }
 
-/** Varios de una: para combinar. */
+/** Varios de una: para combinar. Acá sí entran imágenes. */
 async function elegirVarios() {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
   const r = await dialog.showOpenDialog(win, {
-    title: 'Elegir PDFs',
-    filters: FILTROS,
+    title: 'Elegir PDFs o imágenes',
+    filters: FILTROS_CON_IMAGENES,
     properties: ['openFile', 'multiSelections'],
   });
   if (r.canceled) return [];
-  return Promise.all(r.filePaths.map(leer));
+  return Promise.all(r.filePaths.map((p) => leer(p, { imagenes: true })));
 }
 
 /**

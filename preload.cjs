@@ -60,7 +60,9 @@ contextBridge.exposeInMainWorld('onyx', {
   docs: {
     elegir: () => call('docs:elegir'),
     elegirVarios: () => call('docs:elegir-varios'),
-    leer: (ruta) => call('docs:leer', ruta),
+    /* `{ imagenes: true }` acepta además PNG/JPEG/WEBP. Lo pide Combinar, que
+       las vuelve páginas; el lector abre PDFs y nada más. */
+    leer: (ruta, opciones) => call('docs:leer', ruta, opciones),
     guardarComo: (bytes, nombre, filtros) => call('docs:guardar-como', bytes, nombre, filtros),
     elegirCarpeta: () => call('docs:elegir-carpeta'),
     escribir: (carpeta, nombre, bytes) => call('docs:escribir', carpeta, nombre, bytes),

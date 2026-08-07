@@ -25,7 +25,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "test": "node test/tokens.test.mjs && node test/store.test.mjs && node test/format.test.mjs && node test/plan.test.mjs && node test/argv.test.mjs && node test/actualizador.test.mjs",
+    "test": "node test/tokens.test.mjs && node test/store.test.mjs && node test/format.test.mjs && node test/plan.test.mjs && node test/argv.test.mjs && node test/actualizador.test.mjs && node test/imagenes.test.mjs",
     "smoke": "electron test/renderer.test.cjs",
     "humo": "electron test/humo.cjs",
     "imposicion": "electron test/imposicion.cjs",
@@ -72,6 +72,16 @@
       "!docs/**",
       "!build/marca.svg",
       "!renderer/vendor/cobayo.pdf"
+    ],
+    "comentario-extraResources": "SumatraPDF va FUERA del asar porque un .exe adentro del asar no se puede ejecutar. Es lo único que sabe elegir el tamaño de papel: ver vendor/sumatrapdf/LEEME.md y la sección de impresión del README.",
+    "extraResources": [
+      {
+        "from": "vendor/sumatrapdf",
+        "to": "sumatrapdf",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "win": {
       "target": [

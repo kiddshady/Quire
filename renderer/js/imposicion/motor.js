@@ -22,6 +22,9 @@
 
 import { PDFDocument, degrees, rgb } from '../../vendor/pdf-lib/pdf-lib.mjs';
 import { calcularHojas, mm } from './plan.js';
+import {
+  aPNG, dpiDeclarado, giroDeOrientacion, medidaDePagina, orientacionExif, SE_EMBEBEN_CRUDOS,
+} from '../imagenes.js';
 
 /**
  * Dónde poner el ancla y qué medidas pasarle a drawPage para que el contenido
@@ -242,22 +245,79 @@ export async function reorganizar(bytes, { orden, rotaciones = {} }) {
   return salida.save({ useObjectStreams: true });
 }
 
-/** Une varios PDFs en uno. `docs` es [{bytes, nombre}]. */
+/**
+ * Une varios archivos en un PDF. `docs` es [{bytes, nombre, tipo, formato}].
+ *
+ * Un PDF aporta todas sus páginas, copiadas sin re-renderizar. Una imagen
+ * aporta una sola, del tamaño que le corresponde por su densidad.
+ */
 export async function combinar(docs) {
   const salida = await PDFDocument.create();
   const indice = [];
 
   for (const d of docs) {
-    const doc = await PDFDocument.load(d.bytes, { ignoreEncryption: true });
     const desde = salida.getPageCount();
-    const paginas = await salida.copyPages(doc, doc.getPageIndices());
-    for (const p of paginas) salida.addPage(p);
+
+    if (d.tipo === 'imagen') {
+      await paginaDeImagen(salida, d);
+    } else {
+      const doc = await PDFDocument.load(d.bytes, { ignoreEncryption: true });
+      const paginas = await salida.copyPages(doc, doc.getPageIndices());
+      for (const p of paginas) salida.addPage(p);
+    }
+
     indice.push({ nombre: d.nombre, desde: desde + 1, hasta: salida.getPageCount() });
   }
 
   salida.setProducer('Quire');
-  salida.setTitle(`Combinado · ${docs.length} documentos`);
+  salida.setTitle(`Combinado · ${docs.length} archivos`);
   return { bytes: await salida.save({ useObjectStreams: true }), indice };
+}
+
+/**
+ * Una imagen como página.
+ *
+ * La página se arma alrededor de la imagen y no al revés: nada de meterla en
+ * una A4 con márgenes. El PDF sale del tamaño exacto de lo que trajiste, y si
+ * después hay que llevarlo a un papel, de eso se ocupa la imposición, que es
+ * la que sabe de papeles y ya tiene "Ajustar".
+ *
+ * El giro del EXIF va como /Rotate de la página y no rotando el dibujo: así la
+ * imagen queda embebida tal cual entró —los píxeles no se tocan— y la rotación
+ * es un dato del PDF que cualquiera puede volver a cambiar, incluida la vista
+ * de Páginas de esta misma app.
+ */
+async function paginaDeImagen(salida, d) {
+  const crudos = d.bytes instanceof Uint8Array ? d.bytes : new Uint8Array(d.bytes);
+
+  let img;
+  try {
+    const embebible = SE_EMBEBEN_CRUDOS.includes(d.formato);
+    const bytes = embebible ? crudos : await aPNG(crudos, d.formato);
+    img = d.formato === 'jpeg' ? await salida.embedJpg(bytes) : await salida.embedPng(bytes);
+  } catch (err) {
+    /* Lo que sale de acá abajo es inservible para el que está combinando doce
+       archivos: pdf-lib llega a tirar strings pelados —"The input is not a PNG
+       file!", sin `message`— y un archivo cortado da "Offset is outside the
+       bounds of the DataView". Ninguno dice cuál de los doce es el que falló,
+       que es lo único que hace falta saber para arreglarlo. */
+    throw new Error(
+      `No se pudo leer ${d.nombre} como ${String(d.formato).toUpperCase()}: puede estar dañado o incompleto`,
+      { cause: err }
+    );
+  }
+
+  /* La medida sale de la densidad DECLARADA, leída del archivo original y no
+     del PNG intermedio, que se escribió sin ella. Y va SIN girar: el MediaBox
+     es el rectángulo de los píxeles tal como están, y el /Rotate de abajo es
+     lo que hace que se vea derecho. Girar los dos sería girar dos veces. */
+  const dpi = dpiDeclarado(crudos, d.formato);
+  const giro = giroDeOrientacion(orientacionExif(crudos, d.formato));
+  const { ancho, alto } = medidaDePagina({ ancho: img.width, alto: img.height }, dpi, 0);
+
+  const pagina = salida.addPage([ancho, alto]);
+  pagina.drawImage(img, { x: 0, y: 0, width: ancho, height: alto });
+  if (giro) pagina.setRotation(degrees(giro));
 }
 
 /**

@@ -140,6 +140,113 @@ app.whenReady().then(async () => {
       salida.dividir = partes.map((p) => ({ nombre: p.nombre, paginas: p.paginas, desde: p.desde, hasta: p.hasta }));
     }
 
+    /* ── 8-bis. Imágenes como páginas ──────────────────────────────────────
+       Las imágenes se fabrican acá con un canvas, así son archivos DE VERDAD
+       —PNG, JPEG y WEBP que el navegador encodeó— y no maquetas. Lo que se
+       mide es el tamaño de la página que sale de cada una, que es lo único
+       que la imagen no trae escrito en ningún lado. */
+    {
+      async function imagen(ancho, alto, tipo) {
+        const c = document.createElement('canvas');
+        c.width = ancho; c.height = alto;
+        const cx = c.getContext('2d');
+        cx.fillStyle = '#fff'; cx.fillRect(0, 0, ancho, alto);
+        cx.fillStyle = '#111'; cx.fillRect(3, 3, ancho - 6, alto - 6);
+        const blob = await new Promise((res) => c.toBlob(res, tipo, 0.9));
+        return new Uint8Array(await blob.arrayBuffer());
+      }
+
+      const crc32 = (b) => {
+        let c = 0xffffffff;
+        for (const x of b) { c ^= x; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)); }
+        return (c ^ 0xffffffff) >>> 0;
+      };
+
+      /* Un PNG de canvas no declara densidad: se le mete un pHYs a mano para
+         probar el caso que importa —el escaneo a 300 dpi que tiene que volver
+         a medir A4—. Va justo después del IHDR, que es donde corresponde. */
+      function conPHYs(png, dpi) {
+        const ppm = Math.round(dpi / 0.0254);
+        const chunk = new Uint8Array(21);
+        const dv = new DataView(chunk.buffer);
+        dv.setUint32(0, 9);
+        chunk.set([0x70, 0x48, 0x59, 0x73], 4);          // 'pHYs'
+        dv.setUint32(8, ppm); dv.setUint32(12, ppm);
+        chunk[16] = 1;                                    // unidad: el metro
+        dv.setUint32(17, crc32(chunk.subarray(4, 17)));
+        const corte = 8 + 12 + 13;                        // firma + chunk IHDR
+        const out = new Uint8Array(png.length + chunk.length);
+        out.set(png.subarray(0, corte), 0);
+        out.set(chunk, corte);
+        out.set(png.subarray(corte), corte + chunk.length);
+        return out;
+      }
+
+      /* Y a un JPEG se le mete el APP1 del EXIF con la orientación 6, que es
+         la foto sacada con el teléfono de costado. */
+      function conExif(jpg, orientacion) {
+        const cuerpo = new Uint8Array(30);
+        const dv = new DataView(cuerpo.buffer);
+        cuerpo.set([0x45, 0x78, 0x69, 0x66, 0, 0], 0);   // 'Exif\\0\\0'
+        cuerpo.set([0x4d, 0x4d], 6);                      // 'MM': big endian
+        dv.setUint16(8, 0x2a); dv.setUint32(10, 8);
+        dv.setUint16(14, 1);                              // una entrada
+        dv.setUint16(16, 0x0112); dv.setUint16(18, 3); dv.setUint32(20, 1);
+        dv.setUint16(24, orientacion);
+        const seg = new Uint8Array(4 + cuerpo.length);
+        seg.set([0xff, 0xe1], 0);
+        new DataView(seg.buffer).setUint16(2, cuerpo.length + 2);
+        seg.set(cuerpo, 4);
+        const out = new Uint8Array(jpg.length + seg.length);
+        out.set(jpg.subarray(0, 2), 0);                   // SOI
+        out.set(seg, 2);
+        out.set(jpg.subarray(2), 2 + seg.length);
+        return out;
+      }
+
+      const pantalla = await imagen(192, 96, 'image/png');
+      const escaneo = conPHYs(await imagen(2480, 3508, 'image/png'), 300);
+      const webp = await imagen(96, 48, 'image/webp');
+      const foto = conExif(await imagen(200, 100, 'image/jpeg'), 6);
+
+      const { bytes: b, indice } = await combinar([
+        { bytes, nombre: 'doc.pdf', tipo: 'pdf', formato: 'pdf' },
+        { bytes: pantalla, nombre: 'captura.png', tipo: 'imagen', formato: 'png' },
+        { bytes: escaneo, nombre: 'escaneo.png', tipo: 'imagen', formato: 'png' },
+        { bytes: webp, nombre: 'foto.webp', tipo: 'imagen', formato: 'webp' },
+        { bytes: foto, nombre: 'telefono.jpg', tipo: 'imagen', formato: 'jpeg' },
+      ]);
+
+      const h = await leer(b);
+      salida.imagenes = {
+        indice,
+        paginas: h.length,
+        // Sin densidad: 192 px a 96 dpi son 2 pulgadas = 144 pt.
+        pantalla: { ancho: h[4]?.anchoPt, alto: h[4]?.altoPt },
+        // Con 300 dpi declarados, una A4 escaneada vuelve a medir una A4.
+        escaneo: { ancho: h[5]?.anchoPt, alto: h[5]?.altoPt },
+        // El WEBP pasó por el canvas y salió PNG: si no, no habría página.
+        webp: { ancho: h[6]?.anchoPt, alto: h[6]?.altoPt },
+        // La foto de costado: 200 × 100 px se ven como una página parada.
+        foto: { ancho: h[7]?.anchoPt, alto: h[7]?.altoPt, apaisada: h[7]?.apaisada },
+        // Y el PDF de adelante sigue siendo texto: nada se rasterizó.
+        textoDelPdf: h[0]?.texto,
+      };
+
+      /* pdf-lib tira strings pelados, sin propiedad message: el mensaje que
+         llega al usuario tiene que sobrevivir a eso y, sobre todo, nombrar el
+         archivo que falló. */
+      const rotas = {};
+      for (const [k, item] of Object.entries({
+        png: { bytes: new Uint8Array([1, 2, 3, 4]), nombre: 'rota.png', tipo: 'imagen', formato: 'png' },
+        jpeg: { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0x00]), nombre: 'rota.jpg', tipo: 'imagen', formato: 'jpeg' },
+        webp: { bytes: new Uint8Array([1, 2, 3, 4]), nombre: 'rota.webp', tipo: 'imagen', formato: 'webp' },
+      })) {
+        try { await combinar([item]); rotas[k] = null; } catch (e) { rotas[k] = String(e && e.message); }
+      }
+      salida.imagenRota = rotas;
+    }
+
     // 9. Reorganizar: reordenar, rotar y borrar en una sola operación
     {
       const { reorganizar } = await import('./js/imposicion/motor.js');
@@ -250,6 +357,36 @@ app.whenReady().then(async () => {
   ok('dividir cada 3 sobre 8 da 3 partes', r.dividir.length === 3, String(r.dividir.length));
   ok('la última parte lleva las 2 que sobran', r.dividir[2]?.paginas === 2, JSON.stringify(r.dividir[2]));
   ok('los nombres van numerados', r.dividir[0]?.nombre === 'parte-1.pdf', r.dividir[0]?.nombre);
+
+  console.log('\n7-bis. Imágenes como páginas');
+  const im = r.imagenes;
+  ok('4 páginas de PDF + 4 imágenes dan 8', im.paginas === 8, String(im.paginas));
+  ok('cada imagen aporta una sola página',
+    im.indice.slice(1).every((x) => x.hasta - x.desde === 0), JSON.stringify(im.indice));
+  ok('el PDF de adelante sigue siendo texto', /PAGINA UNO/.test(im.textoDelPdf || ''), im.textoDelPdf);
+  // 192 px a 96 dpi son 2 pulgadas: 144 × 72 pt. Sin margen, sin hoja alrededor.
+  ok('sin densidad declarada, 192 × 96 px dan 144 × 72 pt',
+    im.pantalla.ancho === 144 && im.pantalla.alto === 72, `${im.pantalla.ancho} × ${im.pantalla.alto}`);
+  // Lo que hace que esto valga la pena: un escaneo vuelve a medir lo que medía.
+  ok('un escaneo a 300 dpi vuelve a medir A4',
+    Math.abs(im.escaneo.ancho - 595) <= 1 && Math.abs(im.escaneo.alto - 842) <= 1,
+    `${im.escaneo.ancho} × ${im.escaneo.alto}`);
+  ok('el WEBP llegó a ser página (pasó por el canvas)',
+    im.webp.ancho === 72 && im.webp.alto === 36, `${im.webp.ancho} × ${im.webp.alto}`);
+  /* La foto entra de 200 × 100 px y tiene que SALIR parada: el EXIF decía que
+     estaba de costado. Sin leerlo, la página saldría apaisada y el error
+     recién se vería en el papel. */
+  ok('la foto con EXIF 6 sale parada, no acostada',
+    !im.foto.apaisada && im.foto.alto > im.foto.ancho, JSON.stringify(im.foto));
+  /* Una imagen dañada tiene que avisar, y el aviso tiene que decir CUÁL es:
+     combinando doce archivos, "Offset is outside the bounds of the DataView"
+     no le sirve a nadie. */
+  ok('los tres formatos avisan cuando el archivo está dañado',
+    ['png', 'jpeg', 'webp'].every((k) => /no se pudo leer/i.test(r.imagenRota[k] || '')),
+    JSON.stringify(r.imagenRota));
+  ok('y el aviso nombra el archivo que falló',
+    ['rota.png', 'rota.jpg', 'rota.webp'].every((n) => JSON.stringify(r.imagenRota).includes(n)),
+    JSON.stringify(r.imagenRota));
 
   console.log('\n8. Reorganizar');
   ok('borra la que no está en el orden', r.reorganizar.paginas === 3, String(r.reorganizar.paginas));
