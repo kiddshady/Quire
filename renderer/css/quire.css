@@ -64,6 +64,24 @@
   padding-right: var(--ox-2);
 }
 
+/* El total es un CAMPO, no un texto suelto: ancho reservado y número centrado,
+   igual que el input que tiene al lado. Dos campos gemelos con un "de" en el
+   medio se leen mejor que un campo y una etiqueta que crece.
+
+   Y de paso es lo que deja quieto al divisor que sigue —y con él, al borde del
+   panel—: sin esto, "de 7" y "de 480" miden distinto y toda la barra a partir
+   de ahí se corre 7 px por dígito.
+
+   En `ch` y no en píxeles: 1ch es el avance del "0" de la fuente, y con el
+   tabular-nums de .ox-num todos los dígitos miden eso. Así el reservado son
+   tres dígitos de verdad y no un número atado a la tipografía de hoy.
+   OJO: si cambiás este 3, remedí --qr-panel-w. Son 7 px por dígito. */
+.qr-paginador__total {
+  display: inline-block;
+  min-width: 3ch;
+  text-align: center;
+}
+
 .qr-zoom-valor {
   min-width: 62px;
   justify-content: center;
@@ -78,7 +96,23 @@
   position: relative;
   /* El hueco del panel se reserva de UNA, sin transición. Ver abajo. */
   padding-left: var(--qr-panel-w);
-  --qr-panel-w: 208px;
+  /* Este número no se elige, se mide. La hairline derecha del panel tiene que
+     caer sobre el divisor que separa el paginador del zoom, arriba en la
+     barra: así las dos líneas verticales se leen como una sola que baja, y el
+     panel deja de ser una caja apoyada al lado del visor para ser una columna
+     del mismo cuadriculado.
+
+     Ese divisor cae en x = 228.25, y el panel dibuja su hairline en el ÚLTIMO
+     píxel de su ancho (`inset -1px`), así que el ancho es x + 1, redondeado
+     —dos hairlines de 1px en fracciones distintas las snapea el compositor a
+     píxeles distintos, y una línea corrida medio píxel es justo lo que se ve—.
+
+     Se puede escribir como constante solo porque el total del paginador tiene
+     ancho reservado (.qr-paginador__total). Si le tocás los `ch`, este número
+     cambia 7 px por dígito. Y si alguna vez abrís un documento de más de 999
+     páginas, el total se sale de su caja y la línea se corre: ahí hay que
+     pasar el reservado a 4ch y esto a 236px. */
+  --qr-panel-w: 229px;
   /* Recorta al panel cuando se va: sin esto se desliza FUERA de su área y
      pasa por encima del rail, que no tiene nada que ver con él. El panel se
      mete en su hueco y desaparece ahí, como un cajón. */

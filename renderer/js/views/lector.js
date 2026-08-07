@@ -613,11 +613,13 @@ export function viewLector() {
           <input class="ox-input qr-paginador__campo ox-num" id="qr-pagina-input"
                  value="${S.pagina}" spellcheck="false" aria-label="Página">
           <span class="ox-meta">de</span>
-          <span class="ox-num" id="qr-pagina-total">${S.doc.paginas}</span>
+          <span class="ox-num qr-paginador__total" id="qr-pagina-total">${S.doc.paginas}</span>
         </div>
         <button class="ox-iconbtn ox-iconbtn--sm" id="qr-next" data-tip="Página siguiente"><i data-icon="chevronDown"></i></button>
 
-        <div class="ox-vr"></div>
+        <!-- Este divisor no es solo un divisor: el borde derecho del panel
+             lateral cae justo acá. Ver --qr-panel-w en quire.css. -->
+        <div class="ox-vr" id="qr-vr-zoom"></div>
 
         <button class="ox-iconbtn ox-iconbtn--sm" id="qr-zoom-menos" data-tip="Alejar" data-tip-key="Ctrl −"><i data-icon="zoomOut"></i></button>
         <button class="ox-btn ox-btn--ghost ox-btn--sm qr-zoom-valor" id="qr-zoom-valor" data-tip="Nivel de zoom">100%</button>
