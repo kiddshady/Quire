@@ -315,20 +315,41 @@
   outline: none;
 }
 
+/* Acá NO va `align-items: center`, y es a propósito.
+
+   Centrar con `align-items` recorta. Cuando la hoja es más ancha que el visor
+   —zoom alto, o un apaisado grande— el centrado la desborda por los DOS lados,
+   pero al sobrante de la izquierda no se llega nunca: `scrollLeft` arranca en 0,
+   que es el borde izquierdo de la pista, y ese pedazo vive antes del cero. El
+   borde derecho se alcanza y el izquierdo queda cortado para siempre.
+
+   El centrado se hace con márgenes automáticos en la hoja (ver .qr-pliego).
+   `margin: auto` reparte el espacio que SOBRA, así que cuando no sobra nada
+   colapsa a 0, la hoja se apoya en el inicio y entra entera en el scroll. */
 .qr-pista {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--ox-4);
   /* Aire arriba y abajo para que la primera y la última hoja no queden
      pegadas al borde del área de scroll. */
   padding: var(--ox-6) var(--ox-6);
   min-height: 100%;
+  /* La pista crece con la hoja en vez de quedarse del ancho del visor: es lo
+     que hace que el scroll llegue hasta el final y que el aire lateral exista
+     también del lado de allá. El `min-width` la mantiene ocupando todo el visor
+     cuando la hoja es más angosta, que es justo cuando hay que centrar. */
+  width: max-content;
+  min-width: 100%;
 }
 
 .qr-pliego {
   position: relative;
   flex: 0 0 auto;
+  /* El centrado horizontal de la hoja vive acá y no en la pista: ver el porqué
+     arriba de .qr-pista. Con márgenes automáticos, la hoja que no entra deja de
+     centrarse en vez de desbordar hacia un lugar al que el scroll no llega. */
+  margin-inline: auto;
   background: #fff;
   box-shadow: var(--ox-e2);
   border-radius: 1px;
