@@ -21,6 +21,7 @@ import { paint, head, empty, esc } from '../ui.js';
 import { raf2 } from '../motion.js';
 import { HERRAMIENTAS, COLORES } from '../tinta/capa.js';
 import { cablearTinta } from '../tinta/editor.js';
+import { registrar as registrarSeleccion, olvidar as olvidarSeleccion, olvidarTodo as olvidarSelecciones } from '../pdf/seleccion.js';
 
 /* Cuánto se pinta fuera de la ventana, en pantallas. Con 0.6 el scroll rápido
    alcanza a mostrar el hueco; con 2 se pinta de más y en documentos pesados se
@@ -34,6 +35,7 @@ const V = {
   visor: null,
   observador: null,
   renders: new Map(),      // nº de página → tarea de render en curso
+  textos: new Map(),       // nº de página → tarea de capa de texto en curso
   pintadas: new Set(),
   desuscribir: null,
   panel: 'miniaturas',     // 'miniaturas' | 'esquema'
@@ -109,6 +111,10 @@ function pintar(contenedor) {
   });
   V.renders.set(n, tarea);
 
+  /* La capa de texto NO espera al canvas: no depende de él y así el texto está
+     listo para arrastrar apenas aparece la página. */
+  montarTexto(contenedor, n);
+
   tarea.promesa
     .then(async (r) => {
       if (!r) return;                       // cancelado
@@ -123,6 +129,45 @@ function pintar(contenedor) {
       contenedor.classList.add('is-fallida');
     })
     .finally(() => V.renders.delete(n));
+}
+
+/**
+ * Pone la capa de texto encima de una página: los spans transparentes que
+ * hacen que el texto del PDF se pueda arrastrar con el mouse y copiar.
+ *
+ * Es DOM, no bitmap, así que su costo lo paga la virtualización igual que el de
+ * los canvas: una página con mucho texto son miles de spans, pero solo existen
+ * los de las páginas que están en pantalla.
+ */
+function montarTexto(contenedor, n) {
+  const div = contenedor.querySelector('.qr-texto');
+  if (!div || V.textos.has(n)) return;
+
+  /* El div sobrevive a la virtualización, así que puede llegar acá ya
+     registrado —al reescalar, por ejemplo—. Sin soltarlo primero, la cola de la
+     selección queda huérfana: capaTexto() vacía el div y se la lleva puesta. */
+  olvidarSeleccion(div);
+
+  const tarea = S.doc.capaTexto(n, {
+    contenedor: div,
+    escala: escalaActual(),
+    rotacionExtra: S.rotacion,
+  });
+  V.textos.set(n, tarea);
+
+  tarea.promesa
+    .then((r) => { if (r) registrarSeleccion(div); })
+    .catch((err) => {
+      // Cancelar es lo normal al hacer scroll: no es un error a mostrar.
+      if (err?.name === 'AbortException') return;
+      console.error(`[texto] página ${n}:`, err);
+    })
+    /* Solo se borra si el que está anotado sigue siendo ESTE. Liberar y volver
+       a pintar rápido —scroll de ida y vuelta— deja a la tarea vieja
+       terminando después de que la nueva se anotó: borrando a ciegas, la nueva
+       queda huérfana, nadie la puede cancelar y el próximo pintar() arma una
+       segunda capa encima. Dos capas son el texto duplicado al copiar. */
+    .finally(() => { if (V.textos.get(n) === tarea) V.textos.delete(n); });
 }
 
 /**
@@ -174,7 +219,15 @@ function liberar(contenedor) {
   V.pintadas.delete(n);
   V.editores.get(n)?.destruir();
   V.editores.delete(n);
+  V.textos.get(n)?.cancelar();
+  V.textos.delete(n);
   contenedor.classList.remove('is-pintada');
+
+  /* Los spans se van con la página. Vaciar el div a mano y no dejar que el
+     próximo render lo pise: mientras la página está fuera de pantalla, miles de
+     spans invisibles siguen siendo miles de nodos en el árbol. */
+  const texto = contenedor.querySelector('.qr-texto');
+  if (texto) { olvidarSeleccion(texto); texto.replaceChildren(); }
 
   // Poner width en 0 libera el bitmap. Sin esto los canvas siguen ocupando su
   // memoria aunque ya no se vean, y la virtualización no sirve de nada.
@@ -187,6 +240,9 @@ function liberarTodo() {
   V.pintadas.clear();
   for (const e of V.editores.values()) e.destruir();
   V.editores.clear();
+  for (const t of V.textos.values()) t.cancelar();
+  V.textos.clear();
+  olvidarSelecciones();
   V.observador?.disconnect();
   V.observador = null;
 }
@@ -203,6 +259,7 @@ function construirPaginas() {
     return `
       <div class="qr-pliego" data-pagina="${g.numero}" style="width:${ancho}px;height:${alto}px">
         <canvas class="qr-hoja"></canvas>
+        <div class="qr-texto"></div>
         <canvas class="qr-tinta"></canvas>
         <span class="qr-pliego__num">${g.numero}</span>
       </div>`;
@@ -238,6 +295,10 @@ function reescalar({ anclarEn = null } = {}) {
   V.pintadas.clear();
   for (const e of V.editores.values()) e.destruir();
   V.editores.clear();
+  /* La capa de texto sí se rehace: sus spans están calzados sobre las letras a
+     la escala vieja, y un span corrido no se ve pero se selecciona mal. */
+  for (const t of V.textos.values()) t.cancelar();
+  V.textos.clear();
   V.observador?.disconnect();
   V.observador = null;
 

@@ -63,6 +63,16 @@ export function describirTamano(anchoMM, altoMM) {
   return `${conocido.nombre}${conocido.apaisado ? ' apaisado' : ''} · ${medida}`;
 }
 
+/**
+ * Deja un texto sacado del PDF listo para el portapapeles.
+ *
+ * Un PDF guarda "ﬁ" como un solo glifo y "ﬀ" como otro: pegados tal cual, el
+ * buscador del editor de destino no los encuentra nunca. Los nulos aparecen en
+ * archivos generados por herramientas que rellenan de más, y cortan el pegado
+ * en seco a la mitad.
+ */
+export const normalizarTexto = (s) => pdfjs.normalizeUnicode(String(s)).replace(/\0/g, '');
+
 class Documento {
   constructor(pdf, meta) {
     this._pdf = pdf;
@@ -212,6 +222,65 @@ class Documento {
     return {
       plano: contenido.items.map((i) => i.str).join(''),
       items: contenido.items,
+    };
+  }
+
+  /**
+   * Arma la capa de texto de una página: un span transparente por fragmento,
+   * puesto exactamente encima de las letras que pintó el canvas. Eso es lo que
+   * hace que el texto del PDF se pueda arrastrar con el mouse y copiar — la
+   * selección es la del navegador, cayendo sobre spans que no se ven.
+   *
+   * El contrato es el mismo que el de `render()`: `promesa` y `cancelar()`.
+   * Quien la pide es responsable de cancelarla si la página se fue de pantalla.
+   *
+   * La escala va SIN dpr, al revés que en `render()` y en `viewport()`: acá lo
+   * que se posiciona es DOM, que ya se mide en píxeles CSS. Multiplicar por el
+   * dpr dejaría los spans al doble de tamaño, corridos de las letras.
+   */
+  capaTexto(n, { contenedor, escala = 1, rotacionExtra = 0 }) {
+    let capa = null;
+    let cancelado = false;
+
+    const promesa = (async () => {
+      const page = await this._pagina(n);
+      if (cancelado) return null;
+
+      const rotacion = ((page.rotate || 0) + rotacionExtra) % 360;
+      const viewport = page.getViewport({ scale: escala, rotation: rotacion });
+
+      /* pdf.js escribe el ancho de la capa como
+         `round(down, var(--total-scale-factor) * <pt>px, var(--scale-round-x))`.
+         `--total-scale-factor` sale de estas dos (ver .qr-texto en quire.css);
+         sin ellas la expresión no resuelve y la capa se queda sin tamaño. */
+      contenedor.style.setProperty('--scale-factor', escala);
+      contenedor.style.setProperty('--user-unit', viewport.userUnit || 1);
+      contenedor.replaceChildren();
+
+      capa = new pdfjs.TextLayer({
+        /* `disableNormalization` deja el texto CRUDO, con sus ligaduras y sus
+           formas raras. Normalizarlo acá rompería la correspondencia con lo que
+           se ve; se normaliza al copiar, que es cuando importa — ver
+           normalizarTexto() y seleccion.js. */
+        textContentSource: page.streamTextContent({
+          includeMarkedContent: true,
+          disableNormalization: true,
+        }),
+        container: contenedor,
+        viewport,
+      });
+
+      await capa.render();
+      if (cancelado) return null;
+      return { fragmentos: capa.textDivs.length };
+    })();
+
+    return {
+      promesa,
+      cancelar() {
+        cancelado = true;
+        try { capa?.cancel(); } catch { /* ya había terminado */ }
+      },
     };
   }
 

@@ -31,7 +31,12 @@ transformación ahí sería algo que el preview no mostró.
 ## Qué hace
 
 **Leer** — scroll continuo virtualizado (un PDF de 400 páginas no come más
-memoria que uno de 4), zoom, miniaturas, marcadores, rotación.
+memoria que uno de 4), zoom, miniaturas, marcadores, rotación, y **seleccionar
+el texto para copiarlo** — arrastrando con el mouse, cruzando páginas si hace
+falta. Lo que se pega sale normalizado: las ligaduras que el PDF guarda como un
+solo glifo (`ﬁ`, `ﬀ`) vuelven a ser letras sueltas, así se pueden volver a
+buscar. En un PDF escaneado no hay nada que seleccionar: son fotos de páginas,
+no texto.
 
 **Imponer** — simple, múltiple (N-up), póster y folleto, con escala, rangos,
 orientación y dúplex. El preview dibuja el **área que el tóner no alcanza**, que
@@ -76,6 +81,7 @@ renderer/
   vendor/              pdf.js y pdf-lib, versionados a propósito.
   js/
     pdf/documento.js   Todo lo que sabe de pdf.js vive acá.
+    pdf/seleccion.js   Que arrastrar sobre el texto se sienta como arrastrar.
     imagenes.js        La cabecera de un PNG/JPEG: de píxeles a milímetros.
     imposicion/
       plan.js          Geometría pura: entra un plan, salen las hojas. Sin pdf-lib.
@@ -97,7 +103,7 @@ Sin pdf-lib de por medio se puede testear con Node pelado.
 ## Verificar
 
 ```
-npm run verificar     # las cinco suites, 288 aserciones
+npm run verificar     # las seis suites, 321 aserciones
 ```
 
 | | |
@@ -105,6 +111,7 @@ npm run verificar     # las cinco suites, 288 aserciones
 | `npm test` | Node pelado: tokens, escritura atómica, la aritmética de imposición, el parseo de argv, las decisiones del actualizador y las cabeceras de imagen |
 | `npm run imposicion` | Impone de verdad y **vuelve a leer** el PDF para ver qué cayó dónde |
 | `npm run tinta` | El vuelco de la Y, el contorno, el borrador y el historial |
+| `npm run seleccion` | Rasteriza la página y compara: los spans invisibles tienen que caer sobre las letras |
 | `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético |
 | `npm run apertura` | Lanza la app **como proceso**, con un PDF en la línea de comandos |
 
@@ -122,6 +129,15 @@ elemento existe. Dos trampas aprendidas a los golpes, ya resueltas en el test:
   animado se mide en `opacity: 0` — el test denuncia bugs que no existen.
 - `capturePage()` devuelve el último frame *compuesto*, que puede ser anterior al
   último repintado. Hay que esperar antes de capturar.
+
+`seleccion` mide por la misma razón, y es el caso donde más se nota: la capa de
+texto son spans **invisibles**, así que cualquier assert de DOM la da por buena
+esté donde esté. El test rasteriza la página, busca los píxeles negros de las
+letras y compara contra el rectángulo del span; y con el texto seleccionado
+cuenta cuánto cuerpo le queda al glifo, porque el bug real que apareció fue que
+Chromium le pintaba a los spans su propio color de selección y las letras del
+canvas quedaban **huecas**, rellenas de claro. Se veía perfecto en el DOM y
+espantoso en pantalla; el glifo perdía el 71% de sus píxeles oscuros.
 
 ## La impresora de referencia
 

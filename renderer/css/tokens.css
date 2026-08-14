@@ -96,6 +96,16 @@
   --ox-ring:       rgb(var(--ox-accent-rgb) / .55);   /* focus del teclado */
   --ox-select:     rgb(var(--ox-accent-rgb) / .16);   /* ::selection */
 
+  /* La selección sobre una superficie CLARA — en Quire, el papel del PDF.
+     No puede derivar del acento: en una paleta acromática el acento ES el
+     blanco, y blanco al 16% sobre una hoja blanca no existe. Deriva del MATIZ,
+     que es el otro parámetro que sí viaja: la única parte de la app donde el
+     hue se ve como color y no como un gris tibio.
+     El .28 está elegido contra texto negro sobre blanco — es donde se lee como
+     selección y todavía se lee la letra debajo. Con --ox-tint:0 cae a un gris
+     al 28%, que es lo que esa perilla promete. */
+  --ox-select-claro: oklch(62% calc(.19 * var(--ox-tint)) var(--ox-hue) / .28);
+
   /* Con un acento oscuro o muy saturado, la tinta encima tiene que ser clara.
      Descomentá esto si tu acento no es luz:
        --ox-accent-ink: oklch(97% .01 var(--ox-hue)); */

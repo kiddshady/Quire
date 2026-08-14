@@ -43,6 +43,11 @@ triplete los re-tinta a todos.
 `--ox-accent-ink` es la tinta **sobre** el acento. Con un acento oscuro o muy
 saturado hay que subirla.
 
+`--ox-select-claro` es la excepción: la selección sobre una superficie **clara**
+—en Quire, el papel del PDF—. No deriva del acento sino del **matiz**, porque en
+una paleta acromática el acento es el blanco y blanco sobre blanco no existe. Es
+el único lugar donde `--ox-hue` se ve como color y no como un gris tibio.
+
 ### Rojo
 
 `--ox-danger`, `--ox-danger-dim`, `--ox-danger-wash`, `--ox-danger-ring`.

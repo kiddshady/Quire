@@ -376,6 +376,126 @@
   box-shadow: inset 0 0 0 1px var(--ox-danger-dim);
 }
 
+/* ── La capa de texto ────────────────────────────────────────────────────────
+   Un span TRANSPARENTE por cada fragmento de texto del PDF, posicionado justo
+   encima de las letras que pintó el canvas. No se ve ninguno: lo que se ve es
+   la selección del navegador cayendo sobre ellos. Así el texto de un PDF se
+   arrastra y se copia como el de cualquier página.
+
+   Las reglas de acá abajo son la hoja de estilos de la capa de texto de pdf.js,
+   traducida a los nombres de la casa. No son decorativas: los spans se ubican
+   con porcentajes y se dimensionan con `calc()` sobre variables que la librería
+   escribe a mano, así que sacar una es correr todo el texto de lugar. */
+
+.qr-texto {
+  position: absolute;
+  top: 0;
+  left: 0;
+  text-align: initial;
+  line-height: 1;
+  overflow: clip;
+  transform-origin: 0 0;
+  /* Debajo de la tinta, que va después en el DOM y no lleva z-index. */
+  z-index: 0;
+  /* Alto contraste de Windows no tiene por qué repintar texto invisible. */
+  forced-color-adjust: none;
+
+  /* pdf.js escribe el tamaño de la capa como
+     `round(down, var(--total-scale-factor) * <pt>px, var(--scale-round-x))`.
+     Las cuatro de abajo son las que hacen que esa expresión resuelva; sin ellas
+     es inválida, la capa se queda sin ancho y no se selecciona nada.
+     `--scale-factor` y `--user-unit` los pone capaTexto() en el elemento. */
+  --user-unit: 1;
+  --total-scale-factor: calc(var(--scale-factor) * var(--user-unit));
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+
+  /* Chromium impone un tamaño de letra mínimo. pdf.js lo mide y compensa
+     achicando por transform, y para eso necesita las tres variables. */
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.qr-texto :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  /* El body es user-select:none — ver la sección de copiabilidad en base.css.
+     Esto es contenido, y no hay contenido más copiable que el texto del PDF. */
+  user-select: text;
+  transform-origin: 0% 0%;
+}
+
+.qr-texto > :not(.markedContent),
+.qr-texto .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.qr-texto .markedContent { display: contents; }
+
+/* Las imágenes etiquetadas como texto no se seleccionan: arrastrarlas daría un
+   pedazo de portapapeles vacío. */
+.qr-texto span[role="img"] { user-select: none; cursor: default; }
+
+/* La rotación del lector. La capa se arma SIEMPRE en la orientación original de
+   la página —los porcentajes de cada span son contra la página sin girar— y se
+   gira entera desde acá. El ángulo lo escribe pdf.js en el atributo. */
+.qr-texto[data-main-rotation="90"]  { transform: rotate(90deg) translateY(-100%); }
+.qr-texto[data-main-rotation="180"] { transform: rotate(180deg) translate(-100%, -100%); }
+.qr-texto[data-main-rotation="270"] { transform: rotate(270deg) translateX(-100%); }
+
+/* Acá NO va --ox-select: ese está calibrado contra el fondo oscuro de la app y
+   sobre una hoja blanca no se ve. Ver --ox-select-claro en tokens.css.
+
+   El `color: transparent` NO es redundante con el del span, y esto se ve solo
+   mirando una captura: declarando únicamente el fondo, Chromium le pinta al
+   texto seleccionado SU color de selección —el del esquema oscuro del sistema,
+   porque la app no declara ninguno— y las letras del span dejan de ser
+   invisibles. Encima de las del canvas, que son negras, eso las rellena de
+   claro y quedan HUECAS: se leen como letras de contorno. Repetirlo acá le dice
+   a Chromium que el texto seleccionado tampoco se pinta, y lo único que cambia
+   al seleccionar es el velo. */
+.qr-texto ::selection {
+  background: var(--ox-select-claro);
+  color: transparent;
+}
+/* Los saltos de línea son nodos reales: sin esto, cada uno pinta una barrita al
+   final del renglón y la selección se ve dentada. */
+.qr-texto br::selection { background: transparent; }
+
+/* La cola de la selección. Entre span y span hay huecos —interlineado,
+   márgenes, el aire entre columnas— y al cruzarlos el navegador salta al
+   siguiente nodo con texto, que suele ser el último de la página: arrastrás
+   tres palabras y se pinta la hoja entera. Este div se reinserta pegado al
+   cursor y estirado, así que el salto cae adentro de él. El porqué largo está
+   arriba de seleccion.js. */
+.qr-texto__cola {
+  display: block;
+  position: absolute;
+  /* Fuera de un arrastre vive aplastado contra el borde de abajo: cero alto,
+     no le estorba a nadie. */
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+
+/* Con el arrastre en curso se despliega y cubre la página entera. */
+.qr-texto.is-seleccionando .qr-texto__cola { top: 0; }
+
+/* Anotando, el texto suelta el puntero: el lápiz viene a dibujar, no a
+   seleccionar. `pointer-events` frena el arrastre y `user-select` frena que la
+   punta del stylus deje media palabra pintada al apoyarse. */
+.qr-visor.is-anotando .qr-texto { pointer-events: none; }
+.qr-visor.is-anotando .qr-texto :is(span, br) { user-select: none; }
+
 /* ── La capa de tinta ────────────────────────────────────────────────────────
    Va SIEMPRE encima de la página, esté o no activo el modo de anotación: lo
    anotado tiene que verse mientras leés, igual que se ve en el papel. Lo que
