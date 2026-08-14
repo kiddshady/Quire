@@ -451,8 +451,10 @@
 .qr-texto[data-main-rotation="180"] { transform: rotate(180deg) translate(-100%, -100%); }
 .qr-texto[data-main-rotation="270"] { transform: rotate(270deg) translateX(-100%); }
 
-/* Acá NO va --ox-select: ese está calibrado contra el fondo oscuro de la app y
-   sobre una hoja blanca no se ve. Ver --ox-select-claro en tokens.css.
+/* Acá NO va --ox-select: ese es el acento tendido, y el acento de esta paleta
+   es casi blanco — sobre una hoja blanca deja el papel en 253 de 255. La
+   selección sobre papel es el mismo gesto invertido: oscurece en vez de
+   aclarar. Ver --ox-select-claro en tokens.css.
 
    El `color: transparent` NO es redundante con el del span, y esto se ve solo
    mirando una captura: declarando únicamente el fondo, Chromium le pinta al
