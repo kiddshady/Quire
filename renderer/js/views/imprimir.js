@@ -263,8 +263,7 @@ function pintarResumen() {
 
   el.innerHTML = `
     <div class="qr-resumen__cifra">
-      <span class="ox-stat__value ox-num">${hojasTotales}</span>
-      <span class="ox-stat__label">${plural(hojasTotales, 'hoja de papel', 'hojas de papel')}</span>
+      <span class="ox-stat__value ox-num">${plural(hojasTotales, 'hoja de papel', 'hojas de papel')}</span>
     </div>
     <div class="ox-kv qr-resumen__kv">
       <span class="ox-kv__k">Páginas</span><span class="ox-kv__v ox-num">${r.paginasOriginales}</span>
