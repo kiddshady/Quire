@@ -89,6 +89,40 @@ export function designHTML() {
         <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px">
           ${swatch('Hundido', '--ox-sunken')}${swatch('Base', '--ox-bg')}${swatch('Rail', '--ox-s1')}
           ${swatch('Panel', '--ox-s2')}${swatch('Flotante', '--ox-s3')}${swatch('Máximo', '--ox-s4')}
+        </div>
+
+        <!-- LAS DOS FORMAS DE LA TARJETA, y están las dos a propósito.
+
+             El cuerpo llevaba padding-top en cero para no repetir el aire que
+             el encabezado ya pone. Con encabezado se veía perfecto; SIN él, el
+             contenido quedaba pegado al borde de arriba: 0 px contra 16 abajo,
+             que es como estaban las cuatro tarjetas de Ajustes.
+
+             Sobrevivió porque acá se mostraba UNA tarjeta y con padding inline,
+             salteándose el componente. La vitrina existe para ver las piezas y
+             era el único lugar donde la pieza rota no se veía. Si una variante
+             no está en esta página, no está verificada. -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px">
+          <div class="ox-card">
+            <div class="ox-card__head">
+              <span class="ox-grow" style="font-size:var(--ox-fs-13)">Con encabezado</span>
+              <button class="ox-iconbtn" data-tip="Más">${Icons.svg('more')}</button>
+            </div>
+            <div class="ox-card__body">
+              <div class="ox-kv">
+                <span class="ox-kv__k">Estado</span><span class="ox-kv__v">Listo</span>
+                <span class="ox-kv__k">Versión</span><span class="ox-kv__v ox-mono">1.4.0</span>
+              </div>
+            </div>
+          </div>
+          <div class="ox-card">
+            <div class="ox-card__body">
+              <div class="ox-kv">
+                <span class="ox-kv__k">Sin head</span><span class="ox-kv__v">El cuerpo pone su aire</span>
+                <span class="ox-kv__k">Arriba</span><span class="ox-kv__v ox-mono">= abajo</span>
+              </div>
+            </div>
+          </div>
         </div>`)}
 
       ${section('Tipografía', 'Sans para toda la interfaz, mono <b>solo</b> para dato exacto: IDs, números, rutas, timestamps. El mono en texto corrido se ve técnico de más; la sans en una columna de números la desalinea.', `

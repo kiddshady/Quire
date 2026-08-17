@@ -839,6 +839,54 @@ app.whenReady().then(async () => {
     if (!n.statusbarExiste) problemas.push('actualizar: falta el item de la statusbar');
   }
 
+  /* ── Las dos formas de la tarjeta ─────────────────────────────────────────
+     `.ox-card__body` llevaba `padding-top: 0` para no repetir el aire que el
+     `__head` ya pone. Con encabezado quedaba perfecto; SIN encabezado el
+     contenido se pegaba al borde de arriba — 0 px contra 16 abajo, que es como
+     se veían las cuatro tarjetas de Ajustes.
+
+     Se mide sobre Piezas y no sobre Ajustes a propósito: la vitrina es donde
+     viven las dos formas, y esto sobrevivió justamente porque ahí se mostraba
+     UNA tarjeta con padding inline, salteándose el componente. */
+  await js(`(async () => (await import('./js/router.js')).default.go('piezas'))()`)
+    .catch((e) => problemas.push('ir a piezas: ' + e.message));
+  await esperar(700);
+
+  notas.push(['tarjetas', await js(`(() => {
+    const cuerpos = [...document.querySelectorAll('.ox-card__body')].map((b) => {
+      const s = getComputedStyle(b);
+      return {
+        head: b.previousElementSibling?.classList.contains('ox-card__head') || false,
+        arriba: parseFloat(s.paddingTop),
+        abajo: parseFloat(s.paddingBottom),
+      };
+    });
+    return {
+      total: cuerpos.length,
+      sinHead: cuerpos.filter((c) => !c.head),
+      conHead: cuerpos.filter((c) => c.head),
+    };
+  })()`)]);
+
+  {
+    const n = notas.at(-1)[1];
+    // Las dos formas tienen que estar: una variante que no está en la vitrina
+    // no está verificada, y es exactamente así como esto pasó desapercibido.
+    if (!n.sinHead.length) problemas.push('tarjetas: la vitrina no muestra la tarjeta SIN encabezado');
+    if (!n.conHead.length) problemas.push('tarjetas: la vitrina no muestra la tarjeta CON encabezado');
+    for (const c of n.sinHead) {
+      if (!(c.arriba > 0)) problemas.push(`tarjetas: sin encabezado, el cuerpo no pone aire arriba (${c.arriba} px)`);
+      else if (c.arriba !== c.abajo) problemas.push(`tarjetas: sin encabezado, arriba ${c.arriba} ≠ abajo ${c.abajo}`);
+    }
+    /* Y el arreglo NO puede romper el caso que ya estaba bien: con encabezado,
+       repetir el padding separaría el cuerpo de su propio título. Un "arreglo"
+       que le pusiera aire a los dos casos pasaría igual un test que solo mirara
+       "mayor que cero". */
+    for (const c of n.conHead) {
+      if (c.arriba !== 0) problemas.push(`tarjetas: con encabezado, el cuerpo repite el aire (${c.arriba} px)`);
+    }
+  }
+
   const png = Buffer.alloc(0);
 
   console.log('\n===== HUMO =====');
