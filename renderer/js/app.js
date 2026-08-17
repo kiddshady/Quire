@@ -412,9 +412,6 @@ function actualizarChrome() {
     impVal.textContent = S.impresora || '—';
   }
 
-  document.getElementById('stat-version').innerHTML =
-    `<span>${esc(S.info?.name || 'Quire')} ${esc(S.info?.version || '')}</span>`;
-
   /* El pie del rail queda vacío A PROPÓSITO: decía el nombre del documento, que
      es exactamente lo que dice la statusbar tres píxeles más abajo. Dos filas
      apiladas con el mismo dato se leen como un error de maquetado, no como dos
