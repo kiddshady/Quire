@@ -28,9 +28,12 @@
 
   <rect x="0" y="0" width="16" height="16" rx="3.4" fill="url(#fondo)"/>
 
-  <!-- Un hairline interior, el mismo recurso que usa el chrome de la app. -->
-  <rect x="0.35" y="0.35" width="15.3" height="15.3" rx="3.1"
-        fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="0.7"/>
+  <!-- Acá iba un hairline interior, como el que usa el chrome de la app. Se
+       sacó a propósito: la baldosa va sin bordes. Ojo si se piensa en volver a
+       ponerlo, porque no es el pelo que el nombre sugiere: el viewBox mide 16
+       unidades y esto rasteriza a 1024, o sea 64 px por unidad, así que un
+       stroke-width de 0.7 daba una banda de ~45 px que se leía como un marco
+       gris alrededor de todo el ícono. -->
 
   <!-- La marca, centrada y con aire.
        Ojo con la escala: a 16 px la marca ocupa casi toda su caja porque no hay
