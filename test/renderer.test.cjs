@@ -59,24 +59,18 @@ app.whenReady().then(async () => {
   ok('los <i data-icon> se reemplazaron por SVG', !(await js(`!!document.querySelector('i[data-icon]')`)));
   ok('la vista inicial pintó algo', (await js(`document.getElementById('view').children.length`)) > 0);
 
-  console.log('\n2. Crear por la UI real: modal → disco');
-  await click('#btn-new');
-  await sleep(600);
-  ok('el modal de creación abre', await js(`!!document.querySelector('.ox-modal')`));
-  await js(`(() => { document.getElementById('f-name').value='Humo';
-    document.getElementById('f-note').value='creado por el test'; return true; })()`);
-  await click('.ox-modal__foot .ox-btn--primary');
-  await sleep(1200);
+  /* Acá venían dos secciones que probaban la app demo de Onyx: crear un ítem
+     por el modal (`#btn-new`, `#f-name`, la colección `items`) y abrir su
+     detalle con el router. Quire reemplazó todo eso por el lector de PDF, así
+     que no existe ninguno de esos nodos y el test cortaba en el primer paso.
 
-  const creado = await js(`window.onyx.col('items').list().then(l => l.find(i => i.name === 'Humo') || null)`);
-  const id = creado?.id;
-  ok('quedó en disco con id asignado', !!id, JSON.stringify(creado));
-  ok('la nota viajó entera', creado?.note === 'creado por el test');
-  ok('el router saltó a su detalle', await js(`!!document.querySelector('.ox-inspector')`));
-  ok('los ajustes persisten', (await js(`window.onyx.settings.save({ densidad:'amplia' }).then(s => s.densidad)`)) === 'amplia');
+     Lo que SÍ vale de este archivo es lo que mide primitivos del framework
+     sobre Piezas —dónde caen los overlays, la fuente empaquetada, el re-tintado
+     y las reglas de oro—, y eso se conserva entero. Los flujos propios de Quire
+     los cubre humo.cjs, que es además el que corre en `npm run verificar`. */
 
-  console.log('\n3. Todas las vistas montan');
-  for (const v of ['items', 'piezas', 'ajustes', 'inicio']) {
+  console.log('\n2. Todas las vistas montan');
+  for (const v of ['lector', 'paginas', 'imprimir', 'herramientas', 'piezas', 'ajustes']) {
     await click(`[data-view="${v}"]`);
     await sleep(700);
     const hijos = await js(`document.getElementById('view').children.length`);
@@ -84,18 +78,14 @@ app.whenReady().then(async () => {
     ok(`${v}: pinta y queda activa en el rail`, hijos > 0 && activo, `hijos=${hijos} activo=${activo}`);
   }
 
-  console.log('\n4. Router con parámetro');
-  await click('[data-view="items"]');
-  await sleep(600);
-  ok('el ítem aparece en la lista', await click(`[data-open="${id}"]`));
-  await sleep(800);
-  ok('abre el detalle', await js(`!!document.querySelector('.ox-inspector')`));
-  ok('el rail sigue marcando la sección padre', await js(`!!document.querySelector('[data-view="items"].is-active')`));
-  ok('las migas llevan de vuelta', await js(`!!document.querySelector('[data-goto="items"]')`));
-  ok('la titlebar muestra el contexto', (await js(`document.getElementById('titlebar-context').textContent.trim()`)) === 'Humo');
+  console.log('\n3. Overlays: dónde caen, no solo si existen');
+  // Los anclas de overlay viven en Piezas: el menú de la app demo (`[data-menu
+  // ="item"]`) ya no existe, pero la vitrina tiene el suyo y sirve igual —
+  // lo que se mide es dónde ATERRIZA el menú, no de qué botón cuelga.
+  await click('[data-view="piezas"]');
+  await sleep(900);
 
-  console.log('\n5. Overlays: dónde caen, no solo si existen');
-  await click('[data-menu="item"]');
+  await click('#demo-menu');
   await sleep(400);
   const menu = await js(`(() => { const m=document.querySelector('.ox-menu'); if(!m) return null;
     const r=m.getBoundingClientRect(); return {t:Math.round(r.top),l:Math.round(r.left),b:Math.round(r.bottom),rt:Math.round(r.right)}; })()`);
@@ -110,8 +100,6 @@ app.whenReady().then(async () => {
   ok('la paleta abre centrada y visible', pal && pal.t > 0 && Math.abs(pal.cx - W / 2) < 4, JSON.stringify(pal));
   await click('.ox-scrim'); await sleep(400);
 
-  await click('[data-view="piezas"]');
-  await sleep(900);
   await click('#demo-modal');
   await sleep(600);
   const modal = await js(`(() => { const m=document.querySelector('.ox-modal'); if(!m) return null;
@@ -139,7 +127,7 @@ app.whenReady().then(async () => {
   await sleep(500);
   ok('y un click afuera también lo cierra', !(await abierto()));
 
-  console.log('\n6. El medidor indeterminado nunca se va de la pista');
+  console.log('\n4. El medidor indeterminado nunca se va de la pista');
   // Una barra que se sale de su pista se lee como un componente roto, no como
   // "esperando". Se muestrea el recorrido entero en vez de mirar un instante.
   const fuera = await js(`(async () => {
@@ -157,7 +145,7 @@ app.whenReady().then(async () => {
   })()`);
   ok('siempre hay barra sobre la pista', Array.isArray(fuera) && fuera.length === 0, JSON.stringify(fuera));
 
-  console.log('\n7. La fuente empaquetada carga de verdad');
+  console.log('\n5. La fuente empaquetada carga de verdad');
   /* Éste es el chequeo que evita el fracaso silencioso: con CSP estricta y
      protocolo file://, un @font-face con la ruta mal puesta no tira error —
      el navegador cae a la de respaldo y todo "se ve bien". Por eso no alcanza
@@ -193,7 +181,7 @@ app.whenReady().then(async () => {
   ok('cambiar la mono cambia lo que se pinta',
     (await js(`getComputedStyle(document.querySelector('#mono-sample')).fontFamily`)) !== antesMono);
 
-  console.log('\n8. Las perillas re-tintan de verdad');
+  console.log('\n6. Las perillas re-tintan de verdad');
   const antes = await js(`getComputedStyle(document.body).backgroundColor`);
   await js(`(() => { const h=document.getElementById('knob-hue'); h.value=30; h.dispatchEvent(new Event('input')); return true; })()`);
   await sleep(300);
@@ -202,7 +190,7 @@ app.whenReady().then(async () => {
   await sleep(300);
   ok('el reset vuelve al original', (await js(`getComputedStyle(document.body).backgroundColor`)) === antes);
 
-  console.log('\n9. Las reglas de oro');
+  console.log('\n7. Las reglas de oro');
   const glifos = await js(`(() => {
     const malo = /[\\u2190-\\u21FF\\u2300-\\u23FF\\u25A0-\\u27BF\\u2B00-\\u2BFF\\uFE0F\\u{1F300}-\\u{1FAFF}]/u;
     const out = []; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -218,9 +206,9 @@ app.whenReady().then(async () => {
   ok('::selection propia', reglas.seleccion);
   ok('focus ring propio (:focus-visible)', reglas.focus);
 
-  // El test no puede dejar basura en los datos.
-  if (id) await js(`window.onyx.col('items').remove(${JSON.stringify(id)})`);
-  await js(`window.onyx.settings.save({ densidad:'comoda' })`);
+  /* No hay limpieza que hacer: este archivo ya no escribe nada en disco. La
+     que había borraba el ítem que creaba la app demo y reponía el ajuste
+     `densidad`, y ninguna de las dos cosas existe en Quire. */
 
   console.log(`\n═══ ${pass} ok · ${fail} fallas ═══`);
   console.log(errores.length ? `CONSOLA:\n  ${errores.join('\n  ')}` : 'CONSOLA: limpia');
