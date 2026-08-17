@@ -131,7 +131,18 @@
   gap: var(--ox-3);
   padding: var(--ox-4) var(--ox-4) var(--ox-3);
 }
-.ox-card__body { padding: 0 var(--ox-4) var(--ox-4); }
+/* EL CUERPO PONE SU PROPIO AIRE DE ARRIBA.
+
+   Antes era `padding: 0 var(--ox-4) var(--ox-4)`, y ese cero de arriba estaba
+   pensado para el caso de abajo: con un `__head` encima, el aire ya lo puso él
+   y repetirlo separaría el cuerpo de su propio título.
+
+   Pero una tarjeta SIN head —`<div class="ox-card"><div class="ox-card__body">`,
+   que es la forma más común— se quedaba sin nada arriba: 0 px contra 16 abajo,
+   con el contenido pegado al borde superior. Las cuatro tarjetas de Ajustes son
+   de esa forma, y era ahí donde se veía. */
+.ox-card__body { padding: var(--ox-4); }
+.ox-card__head + .ox-card__body { padding-top: 0; }
 .ox-card__foot {
   display: flex;
   align-items: center;
