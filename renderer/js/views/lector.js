@@ -520,8 +520,13 @@ function pintarBarraTinta() {
               data-tip="Deshacer" data-tip-key="Ctrl Z"><i data-icon="undo"></i></button>
       <button class="ox-iconbtn ox-iconbtn--sm" id="qr-tinta-rehacer"
               data-tip="Rehacer" data-tip-key="Ctrl Y"><i data-icon="redo"></i></button>
+      <!-- Neutro, no rojo: el peligro se dice en el cartel que confirma, que es
+           donde de verdad se decide. Un botón rojo fijo en la barra le gastaría
+           al rojo su único trabajo, que es avisar cuando algo pasa. -->
+      <button class="ox-iconbtn ox-iconbtn--sm" id="qr-tinta-limpiar"
+              data-tip="Borrar toda la tinta"><i data-icon="trash"></i></button>
       <button class="ox-iconbtn ox-iconbtn--sm" id="qr-tinta-menu"
-              data-tip="Más"><i data-icon="more"></i></button>
+              data-tip="Más opciones"><i data-icon="more"></i></button>
     </div>
 
     <span class="ox-chip qr-tinta-cuenta" id="qr-tinta-cuenta"></span>`;
@@ -562,40 +567,64 @@ function cablearBarraTinta() {
   document.getElementById('qr-tinta-deshacer')?.addEventListener('click', deshacerTinta);
   document.getElementById('qr-tinta-rehacer')?.addEventListener('click', rehacerTinta);
 
+  document.getElementById('qr-tinta-limpiar')?.addEventListener('click', borrarTodaLaTinta);
+
   document.getElementById('qr-tinta-menu')?.addEventListener('click', (e) => {
     Menu.show(e.currentTarget, [
       {
         label: `Borrar la tinta de la página ${S.pagina}`,
         icon: 'borrador',
         disabled: !S.tinta.trazos(S.pagina).length,
-        onSelect: () => {
-          S.tinta.limpiarPagina(S.pagina);
-          V.editores.get(S.pagina)?.redibujar();
-          actualizarBarraTinta();
-        },
+        onSelect: borrarTintaDeLaPagina,
       },
       { sep: true },
       {
+        /* La misma acción que el botón de al lado, a propósito: el botón es
+           para encontrarla, el menú para el que ya sabe que está acá. Los dos
+           llaman a la MISMA función — dos entradas está bien, dos copias de la
+           lógica es como se desincronizan. */
         label: 'Borrar toda la tinta del documento',
         icon: 'trash',
         danger: true,
         disabled: S.tinta.vacia,
-        onSelect: async () => {
-          const ok = await Modal.confirm({
-            title: '¿Borrar toda la tinta?',
-            sub: `Se van ${S.tinta.cuenta} trazos de ${S.tinta.paginasConTinta().length} páginas. El PDF no se toca — nunca se tocó.`,
-            confirmLabel: 'Borrar todo',
-            danger: true,
-          });
-          if (!ok) return;
-          await S.tinta.borrarTodo();
-          for (const ed of V.editores.values()) ed.redibujar();
-          actualizarBarraTinta();
-          Toast.show({ title: 'Tinta borrada', icon: 'borrador' });
-        },
+        onSelect: borrarTodaLaTinta,
       },
     ], { align: 'end' });
   });
+}
+
+/** Borra lo anotado en la página que estás mirando. Se deshace con Ctrl+Z. */
+function borrarTintaDeLaPagina() {
+  if (!S.tinta?.limpiarPagina(S.pagina)) return;
+  V.editores.get(S.pagina)?.redibujar();
+  actualizarBarraTinta();
+}
+
+/**
+ * Borra la tinta del documento entero, con confirmación.
+ *
+ * Pregunta y no se deshace: `borrarTodo()` vacía también el historial y borra
+ * el archivo guardado, así que un Ctrl+Z después no la trae de vuelta. Por eso
+ * el cartel dice CUÁNTO se va — "¿estás seguro?" a secas no le da a nadie con
+ * qué decidir.
+ */
+async function borrarTodaLaTinta() {
+  if (!S.tinta || S.tinta.vacia) return;
+
+  const trazos = S.tinta.cuenta;
+  const paginas = S.tinta.paginasConTinta().length;
+  const ok = await Modal.confirm({
+    title: '¿Borrar toda la tinta?',
+    sub: `Se van ${trazos} ${trazos === 1 ? 'trazo' : 'trazos'} de ${paginas} ${paginas === 1 ? 'página' : 'páginas'}, y esto no se deshace. El PDF no se toca — nunca se tocó.`,
+    confirmLabel: 'Borrar todo',
+    danger: true,
+  });
+  if (!ok) return;
+
+  await S.tinta.borrarTodo();
+  for (const ed of V.editores.values()) ed.redibujar();
+  actualizarBarraTinta();
+  Toast.show({ title: 'Tinta borrada', icon: 'borrador' });
 }
 
 function actualizarBarraTinta() {
@@ -608,6 +637,8 @@ function actualizarBarraTinta() {
   }
   document.getElementById('qr-tinta-deshacer')?.toggleAttribute('disabled', !S.tinta.historial.length);
   document.getElementById('qr-tinta-rehacer')?.toggleAttribute('disabled', !S.tinta.deshechos.length);
+  // Sin nada dibujado no hay nada que borrar, y un botón que no hace nada miente.
+  document.getElementById('qr-tinta-limpiar')?.toggleAttribute('disabled', S.tinta.vacia);
 }
 
 function deshacerTinta() {
@@ -646,7 +677,7 @@ export function viewLector() {
      no repintaba nada —Router.go('lector') es un no-op si ya estás en
      'lector'— y el documento recién se veía al cambiar de vista y volver. */
   Router.onLeave(alCambiar((que) => {
-    if (que === 'documento') Router.refresh();
+    if (que === 'documento') Router.refresh({ animar: true });
     else if (que === 'tinta' && V.tintaActiva) actualizarBarraTinta();
   }));
 

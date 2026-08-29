@@ -17,7 +17,11 @@ import { paint, head, empty, esc, attempt, copy, colorToken } from './ui.js';
 import { fmtBytes, relTime } from './format.js';
 import { designHTML, wireDesign } from './design-view.js';
 import * as Actualizar from './actualizar.js';
-import { S, abrir, cerrar, cargarImpresoras, emitir, alCambiar, impresoraActual } from './estado.js';
+import {
+  S, abrir, cerrar, activar, activarRelativa, rutasAbiertas, guardarTodo,
+  cargarImpresoras, emitir, alCambiar, impresoraActual, MAX_PESTANAS,
+} from './estado.js';
+import * as Pestanas from './pestanas.js';
 import { viewLector, atajosLector } from './views/lector.js';
 import { viewImprimir } from './views/imprimir.js';
 import { viewPaginas } from './views/paginas.js';
@@ -41,15 +45,51 @@ async function abrirRuta(ruta) {
 async function cargar(archivo) {
   await attempt(async () => {
     await abrir(archivo);
-    await api.settings.save({ ultimoDocumento: archivo.ruta });
     Toast.show({
       title: archivo.nombre,
       text: `${S.doc.paginas} ${S.doc.paginas === 1 ? 'página' : 'páginas'} · ${fmtBytes(archivo.tamano)}`,
       icon: 'quire',
     });
-    registrarComandos();
     Router.go('lector');
-  }, { errorTitle: 'No se pudo leer el PDF' });
+  }, { errorTitle: 'No se pudo abrir el PDF' });
+}
+
+/* Qué documentos quedan abiertos, para rearmar la sesión al arrancar. Se
+   escribe desde UN solo lado —la suscripción a 'pestanas', en boot()— y no
+   desde cada sitio que abre o cierra: la franja también cierra pestañas por su
+   cuenta, y con dos caminos uno de los dos se olvida. */
+const recordarSesion = () =>
+  api.settings.save({ ultimosDocumentos: rutasAbiertas() }).catch(() => {});
+
+/**
+ * Vuelve a abrir las pestañas de la sesión anterior.
+ *
+ * En orden y de a una, no todas juntas: la primera de la lista es la que
+ * estabas mirando, y abrirla sola primero te la deja en pantalla mientras las
+ * otras siguen cargando. En paralelo llegarían desordenadas y la franja
+ * quedaría barajada respecto de cómo la dejaste.
+ *
+ * Un archivo que ya no está se saltea sin decir nada: que Quire arranque con
+ * un cartel de error porque moviste un PDF la semana pasada es peor que
+ * arrancar con una pestaña menos. Al terminar, lo que se pudo abrir se vuelve
+ * a guardar, así la lista se limpia sola.
+ */
+async function restaurarSesion() {
+  const rutas = (S.settings.ultimosDocumentos || []).slice(0, MAX_PESTANAS);
+  if (!rutas.length) return;
+
+  for (const ruta of rutas) {
+    try {
+      await abrir(await api.docs.leer(ruta));
+    } catch (err) {
+      console.warn('[sesión] no se pudo reabrir', ruta, err.message);
+    }
+  }
+
+  /* La activa quedó siendo la ÚLTIMA que se abrió, y tiene que ser la primera
+     de la lista: es la que estabas leyendo. */
+  const primera = S.pestanas[0];
+  if (primera) activar(primera.id);
 }
 
 /* Arrastrar un PDF a la ventana. Chromium abriría el archivo REEMPLAZANDO la
@@ -370,6 +410,9 @@ function cablearShell() {
   });
 
   document.addEventListener('keydown', (e) => {
+    /* Las pestañas van ANTES que atajosLector: Ctrl+Tab tiene que cambiar de
+       documento aunque el foco esté en el visor. */
+    if (atajosPestanas(e)) return;
     if (atajosLector(e)) return;
     const enCampo = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
     if (e.ctrlKey && e.key.toLowerCase() === 'o' && !enCampo) { e.preventDefault(); abrirConDialogo(); }
@@ -377,14 +420,67 @@ function cablearShell() {
     if (e.ctrlKey && e.key.toLowerCase() === 'w' && S.doc) { e.preventDefault(); cerrarDocumento(); }
   });
 
+  Pestanas.cablear({ alAbrir: abrirConDialogo });
+
+  /* La ventana ya canceló su cierre y está esperando. Se guarda la tinta de
+     todas las pestañas y la sesión, y recién ahí se contesta.
+
+     El `finally` es lo importante: si guardar explota, hay que contestar
+     IGUAL. Callarse dejaría la ventana esperando hasta el timeout del main —
+     tres segundos de app trabada al cerrar, por un error que ya está perdido. */
+  api?.win?.onAntesDeCerrar(async () => {
+    try {
+      await Promise.all([guardarTodo(), recordarSesion()]);
+    } catch (err) {
+      console.error('[cerrar] no se pudo guardar todo:', err);
+    } finally {
+      api.win.listoParaCerrar();
+    }
+  });
+
   cablearArrastre();
+}
+
+/**
+ * Ctrl+Tab para pasar al de al lado, Ctrl+1..4 para ir a uno derecho.
+ * Devuelve true si se comió la tecla.
+ *
+ * Ctrl+Tab no se puede dejar pasar ni cuando hay un solo documento: el default
+ * de Chromium mueve el foco por la página, y en una app de escritorio eso se
+ * ve como que el anillo del teclado salta a cualquier lado sin razón.
+ */
+function atajosPestanas(e) {
+  if (!e.ctrlKey || e.altKey || e.metaKey) return false;
+
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    activarRelativa(e.shiftKey ? -1 : 1);
+    return true;
+  }
+
+  /* Los dígitos van por `e.code` y no por `e.key`: en un teclado latino el
+     pavé numérico y la fila de arriba mandan el mismo carácter, pero con Ctrl
+     apretado algunos layouts cambian `key` por el símbolo de la tecla. */
+  const digito = /^(Digit|Numpad)([1-9])$/.exec(e.code);
+  if (digito) {
+    const n = Number(digito[2]);
+    if (n > MAX_PESTANAS) return false;
+    e.preventDefault();
+    const p = S.pestanas[n - 1];
+    if (p) activar(p.id);
+    return true;
+  }
+
+  return false;
 }
 
 async function cerrarDocumento() {
   await cerrar();
-  await api.settings.save({ ultimoDocumento: null }).catch(() => {});
-  registrarComandos();
-  Router.go('lector');
+  /* Al lector solo si no quedó ninguno: cerrar una pestaña estando en Imprimir
+     te deja en Imprimir, con el documento que pasó a estar activo. Sacarte de
+     la vista que elegiste sería tratar el cierre como si fuera un cambio de
+     tarea, y no lo es. */
+  if (!S.doc) Router.go('lector');
 }
 
 /** Todo lo que vive fuera de la vista: statusbar, contadores del rail, contexto. */
@@ -419,15 +515,23 @@ function actualizarChrome() {
      entero de un color solo. El div sigue existiendo porque le marca el piso al
      rail y porque alinea con la barra del preview — ver --ox-pie. */
 
+  /* El nombre del documento en el titlebar solo mientras NO haya franja. Con
+     las pestañas a la vista lo estaría diciendo tres veces en veinte píxeles
+     —pestaña, titlebar, statusbar— y eso ya no se lee como tres datos sino
+     como un error de maquetado. Es la misma razón por la que el pie del rail
+     quedó vacío. */
   const ctx = document.getElementById('titlebar-context');
   if (ctx) {
-    ctx.innerHTML = S.doc
+    ctx.innerHTML = S.doc && S.pestanas.length < 2
       ? `${Icons.svg('quire', 'ox-icon--sm')}<span>${esc(S.doc.nombre)}</span>`
       : '';
   }
 }
 
 function registrarComandos() {
+  const abiertas = S.pestanas;
+  const activaId = S.pestana?.id;
+
   Palette.clear();
   Palette.register([
     { id: 'abrir', group: 'Documento', icon: 'folder', label: 'Abrir un PDF…', hint: 'Ctrl O', run: abrirConDialogo },
@@ -435,6 +539,26 @@ function registrarComandos() {
       { id: 'cerrar', group: 'Documento', icon: 'close', label: 'Cerrar el documento', hint: 'Ctrl W', run: cerrarDocumento },
       { id: 'imprimir', group: 'Documento', icon: 'printer', label: 'Imprimir…', hint: 'Ctrl P', run: () => Router.go('imprimir') },
     ] : []),
+
+    /* Los otros abiertos, por nombre. Con cuatro pestañas de nombres parecidos
+       —cuatro apuntes de la misma materia— escribir dos letras acá es más
+       rápido y más seguro que contar posiciones para el Ctrl+número.
+
+       El activo no está en la lista: es a donde ya estás, y un comando que no
+       hace nada solo ocupa un renglón. El índice sale del map, ANTES de
+       filtrarlo, para que el atajo que se muestra sea el que de verdad
+       funciona. */
+    ...abiertas
+      .map((p, i) => ({
+        id: `pestana-${p.id}`,
+        group: 'Documentos abiertos',
+        icon: 'file',
+        label: p.doc?.nombre || 'documento.pdf',
+        hint: `Ctrl ${i + 1}`,
+        run: () => activar(p.id),
+      }))
+      .filter((_, i) => abiertas[i].id !== activaId),
+
     { id: 'nav-lector', group: 'Ir a', icon: 'book', label: 'Documento', run: () => Router.go('lector') },
     { id: 'nav-paginas', group: 'Ir a', icon: 'grid', label: 'Páginas', run: () => Router.go('paginas') },
     { id: 'nav-imprimir', group: 'Ir a', icon: 'printer', label: 'Imprimir', run: () => Router.go('imprimir') },
@@ -472,7 +596,9 @@ async function boot() {
     const [info, settings] = await Promise.all([api.info(), api.settings.get()]);
     S.info = info;
     S.settings = settings;
-    S.modoZoom = settings.modoZoomInicial || 'ancho';
+    /* Acá NO va `S.modoZoom = …`: S.modoZoom es de la pestaña activa y todavía
+       no hay ninguna, así que escribirlo no haría nada. El zoom de arranque lo
+       lee cada pestaña al nacer, de S.settings — ver nuevaPestana(). */
   } catch (err) {
     paint(empty({ icon: 'alert', title: 'No se pudo iniciar', text: err.message }));
     console.error(err);
@@ -483,6 +609,16 @@ async function boot() {
   actualizarChrome();
   alCambiar(actualizarChrome);
   Router.onChange(actualizarChrome);
+
+  /* Todo lo que depende de QUÉ hay abierto cuelga de un solo aviso, y por eso
+     da igual quién abrió o cerró: el diálogo, un arrastre, la cruz de una
+     pestaña o el doble click en el explorador pasan todos por acá. */
+  alCambiar((que) => {
+    if (que !== 'pestanas') return;
+    registrarComandos();
+    recordarSesion();
+  });
+
   Router.go('lector');
 
   // El splash se va recién cuando ya hay algo pintado debajo.
@@ -503,13 +639,8 @@ async function boot() {
      tardaría lo mismo en cargar para después ser reemplazado. */
   const pedido = await api.docs.pendiente().catch(() => null);
 
-  if (pedido) {
-    abrirRuta(pedido);
-  } else if (S.settings.reabrirUltimo && S.settings.ultimoDocumento) {
-    api.docs.leer(S.settings.ultimoDocumento)
-      .then((archivo) => abrir(archivo).then(registrarComandos))
-      .catch(() => api.settings.save({ ultimoDocumento: null }).catch(() => {}));
-  }
+  if (pedido) abrirRuta(pedido);
+  else if (S.settings.reabrirUltimo) restaurarSesion();
 
   /* Con Quire ya abierta, otro doble click no levanta una segunda ventana: el
      proceso nuevo le pasa la ruta a este y se muere (ver main.cjs). */

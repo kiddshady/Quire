@@ -73,25 +73,42 @@ export function go(name, param = null) {
     b.classList.toggle('is-active', b.dataset.view === navKey));
 
   route.view(param);
-
-  // La transición de vista se reinicia a mano: sin el reflow intermedio el
-  // navegador no vuelve a disparar la animación al re-agregar la clase.
-  if (host) {
-    host.classList.remove('ox-view');
-    void host.offsetWidth;
-    host.classList.add('ox-view');
-  }
+  animarEntrada();
 
   listeners.forEach((fn) => fn({ ...current }, from));
   return true;
 }
 
-/** Vuelve a montar la vista actual (después de un cambio de datos de fondo). */
-export function refresh() {
+/**
+ * La transición de vista se reinicia a mano: sin el reflow intermedio el
+ * navegador no vuelve a disparar la animación al re-agregar la clase.
+ */
+function animarEntrada() {
+  if (!host) return;
+  host.classList.remove('ox-view');
+  void host.offsetWidth;
+  host.classList.add('ox-view');
+}
+
+/**
+ * Vuelve a montar la vista actual (después de un cambio de datos de fondo).
+ *
+ * `animar` distingue los dos usos que tiene esto, que se ven iguales y no lo
+ * son. Refrescar porque cambió un dato de la vista —elegiste otra impresora,
+ * reiniciaste el orden de las páginas— es una actualización EN EL LUGAR, y
+ * deslizar la pantalla entera por eso sobreactúa. Refrescar porque cambió el
+ * documento es otra cosa: llegó contenido nuevo, igual que al navegar, y sin
+ * la animación la vista salta de golpe.
+ *
+ * Por defecto NO anima, que es como se comportaba antes de que existiera el
+ * parámetro: así ningún llamador viejo cambia de conducta sin que se lo pidan.
+ */
+export function refresh({ animar = false } = {}) {
   const route = routes.get(current.name);
   if (!route) return;
   release();
   route.view(current.param);
+  if (animar) animarEntrada();
 }
 
 /** Se avisa después de cada navegación: (a, desde) => {} */

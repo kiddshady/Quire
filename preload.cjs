@@ -34,6 +34,16 @@ contextBridge.exposeInMainWorld('onyx', {
       ipcRenderer.on('win:maximized', handler);
       return () => ipcRenderer.off('win:maximized', handler);
     },
+
+    /* El aviso de que la ventana se está por cerrar. El main ya canceló ese
+       primer cierre y está esperando: hay que guardar lo pendiente y contestar
+       con `listoParaCerrar()`, o la ventana se cierra sola a los 3 segundos. */
+    onAntesDeCerrar: (cb) => {
+      const handler = () => cb();
+      ipcRenderer.on('app:antes-de-cerrar', handler);
+      return () => ipcRenderer.off('app:antes-de-cerrar', handler);
+    },
+    listoParaCerrar: () => ipcRenderer.send('app:guardado'),
   },
 
   settings: {

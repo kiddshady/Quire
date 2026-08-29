@@ -10,8 +10,9 @@
 
    Por eso acá no se prueba una función: se lanza la app DE VERDAD, con la ruta
    en la línea de comandos, y se mira si el documento se cargó. La señal es
-   `ultimoDocumento` en settings.json, que solo se escribe cuando un PDF
-   terminó de abrirse en la vista (ver cargar() en renderer/js/app.js).
+   `ultimosDocumentos` en settings.json, que solo se escribe cuando una pestaña
+   terminó de abrirse (ver recordarSesion() en renderer/js/app.js). Se mira la
+   PRIMERA de la lista, que es la pestaña activa: la que quedó en pantalla.
 
    Corre con Node pelado, no con Electron: lo que hace es lanzar procesos.
 
@@ -68,7 +69,7 @@ async function abrio(ruta, ms = 30000) {
   const hasta = Date.now() + ms;
   while (Date.now() < hasta) {
     try {
-      if (JSON.parse(fs.readFileSync(SETTINGS, 'utf8')).ultimoDocumento === ruta) return true;
+      if (JSON.parse(fs.readFileSync(SETTINGS, 'utf8')).ultimosDocumentos?.[0] === ruta) return true;
     } catch { /* todavía no existe o está a medio escribir */ }
     await esperar(250);
   }

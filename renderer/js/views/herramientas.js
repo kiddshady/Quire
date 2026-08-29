@@ -65,7 +65,7 @@ export function viewHerramientas() {
   // El fade de abajo se apaga solo al llegar al final del scroll.
   scrollFade(document.getElementById('herr-cuerpo'));
 
-  const off = alCambiar((que) => { if (que === 'documento') Router.refresh(); });
+  const off = alCambiar((que) => { if (que === 'documento') Router.refresh({ animar: true }); });
   Router.onLeave(off);
 }
 

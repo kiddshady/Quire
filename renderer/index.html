@@ -74,6 +74,17 @@
     </div>
   </header>
 
+  <!-- ── Pestañas ─────────────────────────────────────────────────────────
+       Vive fuera de la vista porque el documento activo es estado de la APP,
+       no del lector: cambiar de pestaña también cambia lo que ven Páginas,
+       Imprimir y Herramientas.
+
+       Nunca lleva `hidden`. Con un solo documento se esconde plegando su alto
+       a 0, y eso no es un capricho de animación: un `display:none` la sacaría
+       de ser ítem del grid de .ox-app, y el cuerpo caería en la fila de alto
+       automático que le tocaba a ella. -->
+  <nav class="qr-tabs" id="qr-tabs" aria-label="Documentos abiertos"></nav>
+
   <div class="ox-body">
 
     <!-- ── Rail ──────────────────────────────────────────────────────────── -->

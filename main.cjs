@@ -56,6 +56,11 @@ const MIN_H = 600;
 /** @type {BrowserWindow | null} */
 let win = null;
 
+/* En false, el primer `close` se cancela para darle al renderer su chance de
+   guardar; en true, el cierre pasa derecho. Se levanta cuando el renderer
+   avisa que terminó, o cuando se le acaba el tiempo. Ver win.on('close'). */
+let puedeCerrar = false;
+
 /* ── Estado de la ventana ────────────────────────────────────────────────────
    Recordar tamaño y posición entre sesiones. La trampa: si el monitor donde
    estaba ya no existe, la posición guardada deja la ventana en la nada. Por
@@ -101,6 +106,8 @@ function saveWindowState() {
 }
 
 function createWindow(state) {
+  // Una ventana nueva vuelve a deberle a su renderer la chance de guardar.
+  puedeCerrar = false;
   win = new BrowserWindow({
     // Nace fuera de pantalla: el flash del compositor ocurre donde nadie lo ve.
     x: -20000,
@@ -158,6 +165,47 @@ function createWindow(state) {
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (e) => e.preventDefault());
+
+  /* ── Cerrar sin perder el último trazo ────────────────────────────────────
+     La capa de tinta guarda con 900 ms de retardo, así que dibujar y cerrar
+     enseguida perdía lo último. Y `beforeunload` en el renderer no sirve para
+     esto: es síncrono, y ahí hay que escribir varios archivos por IPC.
+
+     Así que el cierre se ataja acá: se le pide al renderer que vacíe lo
+     pendiente y se espera su aviso. El primer close se cancela; el que llega
+     después de 'app:guardado' pasa derecho.
+
+     El timeout NO es opcional. Sin él, un renderer colgado —o que murió y no
+     va a contestar nunca— deja una ventana que no se puede cerrar, y la única
+     salida es el administrador de tareas. Ante la duda se cierra: perder el
+     último trazo es malo, no poder cerrar la app es peor. */
+  let guardando = false;
+  win.on('close', (e) => {
+    if (puedeCerrar || !win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+    e.preventDefault();
+    if (guardando) return;            // ya se lo pedimos; que termine
+    guardando = true;
+
+    /* Los dos caminos —el aviso del renderer y el timeout— pasan por acá, y
+       los dos SUELTAN el listener. Dejarlo colgado si cerramos por timeout
+       significa que la próxima ventana arranca con un oyente de la anterior
+       esperando un mensaje que ya no es para él. */
+    const listo = () => {
+      clearTimeout(reloj);
+      ipcMain.off('app:guardado', listo);
+      if (puedeCerrar) return;
+      puedeCerrar = true;
+      if (win && !win.isDestroyed()) win.close();
+    };
+
+    const reloj = setTimeout(() => {
+      console.error('[cerrar] el renderer no contestó en 3 s: se cierra igual');
+      listo();
+    }, 3000);
+
+    ipcMain.on('app:guardado', listo);
+    win.webContents.send('app:antes-de-cerrar');
+  });
 
   win.on('closed', () => { win = null; });
 }

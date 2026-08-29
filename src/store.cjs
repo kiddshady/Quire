@@ -59,7 +59,7 @@ const SETTINGS_FILE = path.join(ROOT, 'settings.json');
 /* ── Ajustes de tu app ───────────────────────────────────────────────────────
    Editá esto: es el único lugar donde se declara qué guarda tu app. Lo que
    agregues acá aparece solo en instalaciones viejas gracias a withDefaults. */
-const SCHEMA = 1;
+const SCHEMA = 2;
 
 const DEFAULT_SETTINGS = {
   schema: SCHEMA,
@@ -81,13 +81,26 @@ const DEFAULT_SETTINGS = {
      más predecible, y permite mostrar de qué lado va el fajo al darlo vuelta. */
   duplexAsistido: true,
 
-  ultimoDocumento: null,
+  /* Las rutas de las pestañas abiertas al cerrar, en su orden, con la activa
+     primera. Es una lista y no una ruta sola desde que Quire abre varios
+     documentos a la vez. */
+  ultimosDocumentos: [],
 };
 
 /** Migraciones: cada función lleva el archivo de la versión N a la N+1.
     Se ejecutan en cadena, así que un archivo de v0 llega a la actual solo. */
 const MIGRATIONS = {
-  // 0: (data) => ({ ...data, campoNuevo: valorDerivado(data), schema: 1 }),
+  /* 1 → 2: `ultimoDocumento` (una ruta o null) pasa a ser `ultimosDocumentos`
+     (la lista de pestañas). Al actualizar, el PDF que estabas leyendo vuelve a
+     abrirse igual que antes: es la lista de un solo elemento. */
+  1: (data) => {
+    const { ultimoDocumento, ...resto } = data;
+    return {
+      ...resto,
+      ultimosDocumentos: ultimoDocumento ? [ultimoDocumento] : [],
+      schema: 2,
+    };
+  },
 };
 
 /* ── Primitivas ──────────────────────────────────────────────────────────── */

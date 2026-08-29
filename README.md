@@ -112,14 +112,16 @@ npm run verificar     # las seis suites, 321 aserciones
 | `npm run imposicion` | Impone de verdad y **vuelve a leer** el PDF para ver qué cayó dónde |
 | `npm run tinta` | El vuelco de la Y, el contorno, el borrador y el historial |
 | `npm run seleccion` | Rasteriza la página y compara: los spans invisibles tienen que caer sobre las letras |
+| `npm run pestanas` | Abre varios PDFs: que el estado sea de cada pestaña y que el worker compartido sobreviva a cerrar una |
+| `npm run cerrar` | Levanta la app entera y la cierra: que el último trazo llegue al disco **y que la ventana siga cerrándose** |
 | `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético |
 | `npm run apertura` | Lanza la app **como proceso**, con un PDF en la línea de comandos |
 
 `apertura` es el único que lanza la app entera desde afuera, y existe por un bug
 que ninguna otra suite podía ver: el doble click abría Quire vacía porque nadie
 miraba `process.argv`. Todo lo observable —el ícono, la asociación, la ventana—
-andaba bien. La señal que mira es `ultimoDocumento` en disco, que solo se escribe
-cuando un PDF terminó de abrirse de verdad.
+andaba bien. La señal que mira es `ultimosDocumentos` en disco, que solo se escribe
+cuando una pestaña terminó de abrirse de verdad.
 
 El humo mide **dónde cae** cada cosa y si el canvas tiene tinta — no solo si el
 elemento existe. Dos trampas aprendidas a los golpes, ya resueltas en el test:

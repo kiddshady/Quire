@@ -55,7 +55,7 @@ export function viewPaginas() {
   // Antes del early return: la pantalla vacía tiene que reaccionar cuando
   // aparece un documento (ver la nota en lector.js).
   Router.onLeave(alCambiar((que) => {
-    if (que === 'documento') { reiniciar(); Router.refresh(); }
+    if (que === 'documento') { reiniciar(); Router.refresh({ animar: true }); }
   }));
 
   if (!S.doc) {

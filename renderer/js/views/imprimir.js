@@ -848,7 +848,7 @@ function diagramaVuelta(duplex) {
 export function viewImprimir() {
   // Antes del early return: la pantalla vacía tiene que reaccionar cuando
   // aparece un documento (ver la nota en lector.js).
-  Router.onLeave(alCambiar((que) => { if (que === 'documento') Router.refresh(); }));
+  Router.onLeave(alCambiar((que) => { if (que === 'documento') Router.refresh({ animar: true }); }));
 
   if (!S.doc) {
     paint(head({ title: 'Imprimir' }) + empty({

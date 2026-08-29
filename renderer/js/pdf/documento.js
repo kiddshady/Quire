@@ -21,6 +21,24 @@ const VENDOR = new URL('../../vendor/pdfjs/', import.meta.url).href;
 
 pdfjs.GlobalWorkerOptions.workerSrc = VENDOR + 'worker-shim.mjs';
 
+/**
+ * UN worker para todos los documentos abiertos.
+ *
+ * Librado a su suerte, pdf.js levanta un worker por documento: con cuatro
+ * pestañas serían cuatro hilos, cada uno con su copia del código de pdf.js
+ * cargada. Pasándole el nuestro, las cuatro comparten uno solo.
+ *
+ * Y no se lo lleva puesto cerrar una pestaña, aunque `destroy()` termine en
+ * `this._worker?.destroy()`. La clave está en getDocument: `_worker` se
+ * completa SOLO en la rama que lo crea él —`if (!worker) { worker =
+ * PDFWorker.create(...); task._worker = worker }`—. Si el worker viene de
+ * afuera esa rama no corre, `_worker` queda en null, y el destroy no encuentra
+ * nada que destruir. O sea: quien trae el worker es el dueño de su vida. Este
+ * vive lo que vive la app y no lo cierra nadie.
+ */
+let workerCompartido = null;
+const worker = () => (workerCompartido ??= new pdfjs.PDFWorker({ name: 'quire' }));
+
 /* PDF mide en puntos (1/72"). El papel se piensa en milímetros. */
 export const PT_A_MM = 25.4 / 72;
 export const MM_A_PT = 72 / 25.4;
@@ -342,6 +360,7 @@ export async function abrirDocumento(bytes, meta = {}) {
 
   const tarea = pdfjs.getDocument({
     data: paraPdfJs,
+    worker: worker(),
     cMapUrl: VENDOR + 'cmaps/',
     cMapPacked: true,
     standardFontDataUrl: VENDOR + 'standard_fonts/',
