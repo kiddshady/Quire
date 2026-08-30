@@ -586,7 +586,9 @@ function sincronizarColorVentana() {
 async function boot() {
   Icons.mount(document);
   Tooltip.init();
-  Palette.init();
+  /* El placeholder dice el vocabulario de ESTA app. El default de Onyx solo
+     promete comandos; aca adentro tambien se salta entre los PDF abiertos. */
+  Palette.init({ placeholder: 'Buscar comandos y documentos…' });
   initClickFlash();
   initScrollFades();
   cablearShell();

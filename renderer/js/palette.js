@@ -13,6 +13,22 @@ import { exit, scrollFade } from './motion.js';
 const commands = [];
 let open = null;
 
+/* ── Qué dice el campo vacío ─────────────────────────────────────────────────
+
+   Estuvo hardcodeado con «Buscar comandos, pipelines, agentes…» — vocabulario
+   de la app para la que se escribió esta paleta, que se vino de arriba con la
+   plantilla. Toda app que salga de Onyx lo arrastra, y en Quire, donde no hay
+   ni pipelines ni agentes, el placeholder promete dos cosas que no existen. Lo
+   peor es dónde se esconde: en un componente que nadie vuelve a abrir, detrás
+   de un texto que solo se lee cuando el campo está vacío.
+
+   Así que el default es genérico —lo único que Onyx sabe con certeza es que
+   acá se buscan comandos— y cada app pone el suyo por `init()`. Es la misma
+   regla que `Icons.add()`: extender la pieza, no editarla, para que traerse una
+   versión nueva de Onyx no pise lo propio. */
+const PLACEHOLDER = 'Buscar comandos…';
+let placeholder = PLACEHOLDER;
+
 /** Registra comandos. { id, label, group, icon, hint, run } */
 export function register(list) {
   commands.push(...list);
@@ -184,7 +200,7 @@ export function show() {
     <div class="ox-palette" role="dialog" aria-modal="true">
       <div class="ox-palette__search">
         ${Icons.svg('search', 'ox-icon--lg')}
-        <input class="ox-palette__input" placeholder="Buscar comandos, pipelines, agentes…" spellcheck="false" autocomplete="off">
+        <input class="ox-palette__input" placeholder="${placeholder.replace(/"/g, '&quot;')}" spellcheck="false" autocomplete="off">
       </div>
       <div class="ox-palette__list ox-scroll"></div>
       <div class="ox-palette__foot">
@@ -209,8 +225,20 @@ export function show() {
 
 export function toggle() { open ? close() : show(); }
 
-/** Cablea Ctrl+K / Cmd+K globalmente. */
-export function init() {
+/**
+ * Cablea Ctrl+K / Cmd+K globalmente.
+ *
+ * `placeholder` es lo que dice el campo vacío. Poné el vocabulario de TU app:
+ * el default solo puede prometer comandos, porque es lo único que Onyx sabe que
+ * hay acá adentro.
+ *
+ *   Palette.init({ placeholder: 'Buscar comandos y documentos…' })
+ */
+export function init({ placeholder: texto } = {}) {
+  // Una cadena vacía vuelve al default: un campo sin ninguna pista es peor que
+  // uno con una genérica.
+  placeholder = String(texto || '').trim() || PLACEHOLDER;
+
   window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
