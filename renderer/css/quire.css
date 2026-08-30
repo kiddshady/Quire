@@ -320,7 +320,12 @@
 
 .qr-panel__tab {
   flex: 1;
-  padding: var(--ox-2) var(--ox-2);
+  /* El horizontal es la mitad del vertical, y eso se midió, no se eligió: con
+     tres pestañas y el ancho del panel clavado en 236px (ver --qr-panel-w, que
+     tampoco se elige), "Marcadores" llegaba a su ancho mínimo con 0,2px de
+     sobra. Como el texto va centrado, el padding lateral no se ve — lo único
+     que hace es decidir a partir de qué ancho la palabra se recorta. */
+  padding: var(--ox-2) var(--ox-1);
   border-radius: var(--ox-r-sm, var(--ox-r-xs));
   font-size: var(--ox-fs-11);
   font-weight: var(--ox-w-medium);
@@ -437,6 +442,128 @@
 
 /* ── El visor ────────────────────────────────────────────────────────────── */
 
+/* ── Buscar ──────────────────────────────────────────────────────────────────
+   La única pestaña del panel que no es una lista y nada más: arriba el campo,
+   fijo, y abajo los resultados con su propio scroll. Sin esa separación el
+   campo se iría de pantalla al tercer resultado, que es justo cuando uno
+   quiere corregir lo que escribió. */
+
+.qr-panel__cuerpo.es-buscar {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* El padding pasa a cada mitad: el campo tiene el suyo y la lista el suyo,
+     porque la línea que los separa tiene que cruzar el panel de lado a lado. */
+  padding: 0;
+}
+
+.qr-buscar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ox-2);
+  padding: var(--ox-3);
+  /* Esta línea es el límite de arriba de la lista, y por eso la lista NO lleva
+     esfumado de ese lado: donde ya hay una línea, el corte está explicado y el
+     degradado encima solo la ensucia. */
+  box-shadow: inset 0 -1px 0 var(--ox-line);
+}
+
+.qr-buscar__campo { width: 100%; }
+
+.qr-buscar__barra {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-1);
+  /* Los botones son de 24px y el contador un renglón de 11: la altura la
+     manda el botón, y fijarla evita que la fila salte de alto al pasar de "—"
+     a "12 de 340". */
+  min-height: 24px;
+}
+
+.qr-buscar__cuenta {
+  font-variant-numeric: tabular-nums;
+  transition: color var(--ox-t-2) var(--ox-ease-soft);
+}
+.qr-buscar__cuenta.is-vacia { color: var(--ox-text-4); }
+
+.qr-buscar__lista {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--ox-2) var(--ox-3) var(--ox-3);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* La aclaración de que acá solo se encuentra texto de verdad. Va más chica y
+   más apagada que el resto del vacío: es la letra chica, no el mensaje. */
+.qr-buscar__nota {
+  font-size: var(--ox-fs-10);
+  line-height: var(--ox-lh);
+  color: var(--ox-text-4);
+  text-wrap: pretty;
+}
+
+.qr-buscar__pie {
+  padding: var(--ox-3) var(--ox-2) var(--ox-2);
+  color: var(--ox-text-4);
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.qr-hit {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ox-2);
+  width: 100%;
+  padding: var(--ox-2);
+  border: 0;
+  border-radius: var(--ox-r-sm);
+  background: transparent;
+  color: var(--ox-text-3);
+  font-size: var(--ox-fs-11);
+  line-height: var(--ox-lh);
+  text-align: left;
+  cursor: pointer;
+  transition: var(--tr-color);
+}
+
+.qr-hit:hover { background: var(--ox-wash-1); color: var(--ox-text-2); }
+.qr-hit.is-actual { background: var(--ox-wash-2); color: var(--ox-text-2); }
+
+.qr-hit__texto {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Dos renglones y el resto se corta. Una fila que crece con el párrafo hace
+     que la lista deje de poder recorrerse de un vistazo, que es para lo único
+     que sirve una lista de resultados. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Lo que coincide se ILUMINA, no se pinta de amarillo. El amarillo es de la
+   hoja, donde hay papel debajo; acá arriba resaltar es subir de énfasis, igual
+   que en la paleta de comandos. */
+.qr-hit mark {
+  background: transparent;
+  color: var(--ox-text);
+  font-weight: var(--ox-w-medium);
+}
+
+.qr-hit__pag {
+  flex: 0 0 auto;
+  font-size: var(--ox-fs-10);
+  color: var(--ox-text-4);
+  font-variant-numeric: tabular-nums;
+}
+.qr-hit:hover .qr-hit__pag,
+.qr-hit.is-actual .qr-hit__pag { color: var(--ox-text-3); }
+
 /* ── EXCEPCIÓN DECLARADA: acá NO va el esfumado ──────────────────────────────
    La regla de la casa es que donde el scroll recorta, el contenido se
    desvanece. Las dos superficies de visualización de Quire —el visor y las
@@ -490,6 +617,10 @@
 .qr-pliego {
   position: relative;
   flex: 0 0 auto;
+  /* Grupo de composición propio. Lo pide el `mix-blend-mode: multiply` de las
+     marcas de la búsqueda: sin aislar, el resaltador se mezclaría con la mesa
+     que hay atrás de la hoja en vez de con la hoja. */
+  isolation: isolate;
   /* El centrado horizontal de la hoja vive acá y no en la pista: ver el porqué
      arriba de .qr-pista. Con márgenes automáticos, la hoja que no entra deja de
      centrarse en vez de desbordar hacia un lugar al que el scroll no llega. */
@@ -641,6 +772,64 @@
    punta del stylus deje media palabra pintada al apoyarse. */
 .qr-visor.is-anotando .qr-texto { pointer-events: none; }
 .qr-visor.is-anotando .qr-texto :is(span, br) { user-select: none; }
+
+/* ── Las marcas de la búsqueda ───────────────────────────────────────────────
+   Un rectángulo por pedazo de coincidencia, medido con un Range sobre los spans
+   de la capa de texto y pintado acá al lado. El porqué de medir en vez de
+   envolver está arriba de marcarPagina(), en lector.js.
+
+   Va DEBAJO de la capa de texto y debajo de la tinta: lo anotado a mano tapa al
+   resaltado, como en el papel. Y encima del lienzo, obviamente, que es donde
+   están las letras.
+
+   El color es el del RESALTADOR de la barra de tinta, el mismo #f1c40f, y eso
+   no es una coincidencia ni un segundo acento: sobre la hoja ya hay una paleta
+   —la de los trazos— y un resaltado de búsqueda pertenece a esa y no a la de la
+   interfaz. El acento de la app es casi blanco; tendido sobre papel blanco no
+   se vería. La regla del acento único vale para el chrome, que es donde puede
+   competir con algo. */
+
+.qr-marcas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Se apaga entera al borrar la consulta: así lo resaltado no desaparece de
+     un frame para el otro. Ver limpiarMarcas(). */
+  opacity: 0;
+  transition: opacity var(--ox-t-2) var(--ox-ease-soft);
+
+  --qr-marca: rgb(241 196 15 / .40);
+  --qr-marca-viva: rgb(241 196 15 / .88);
+  --qr-marca-borde: rgb(146 104 0 / .55);
+}
+
+.qr-marcas.is-visible { opacity: 1; }
+
+.qr-marca {
+  position: absolute;
+  border-radius: 1px;
+  background: var(--qr-marca);
+  /* Multiply es lo que lo vuelve un resaltador de verdad: amarillo por blanco
+     da amarillo, y amarillo por el negro de la letra sigue dando negro. Con un
+     alfa a secas, la tinta se aclara y el texto queda lavado justo donde uno
+     está mirando. Necesita el `isolation` del pliego para no mezclarse con lo
+     que hay atrás de la hoja. */
+  mix-blend-mode: multiply;
+  animation: qr-marca-entra var(--ox-t-2) var(--ox-ease-soft) both;
+}
+
+/* La coincidencia en la que estás. El borde no es decoración: con veinte
+   marcas en pantalla, "más amarilla" no alcanza para encontrar de un vistazo
+   cuál es la que el contador está numerando. */
+.qr-marca.is-actual {
+  background: var(--qr-marca-viva);
+  box-shadow: inset 0 0 0 1px var(--qr-marca-borde);
+}
+
+@keyframes qr-marca-entra {
+  from { opacity: 0; transform: scaleY(.72); }
+  to   { opacity: 1; transform: none; }
+}
 
 /* ── La capa de tinta ────────────────────────────────────────────────────────
    Va SIEMPRE encima de la página, esté o no activo el modo de anotación: lo

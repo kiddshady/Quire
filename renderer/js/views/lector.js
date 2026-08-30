@@ -22,6 +22,7 @@ import { raf2 } from '../motion.js';
 import { HERRAMIENTAS, COLORES } from '../tinta/capa.js';
 import { cablearTinta } from '../tinta/editor.js';
 import { registrar as registrarSeleccion, olvidar as olvidarSeleccion, olvidarTodo as olvidarSelecciones } from '../pdf/seleccion.js';
+import { buscadorDe, ubicar } from '../pdf/buscador.js';
 
 /* Cuánto se pinta fuera de la ventana, en pantallas. Con 0.6 el scroll rápido
    alcanza a mostrar el hueco; con 2 se pinta de más y en documentos pesados se
@@ -48,6 +49,17 @@ const V = {
   colores: { pluma: '#1a1a1a', fibra: '#c0392b', resaltador: '#f1c40f' },
   anchos: { pluma: 1.8, fibra: 4.5, resaltador: 14, borrador: 16 },
   editores: new Map(),     // nº de página → editor de tinta cableado
+
+  /* Búsqueda. El ÍNDICE no está acá: vive colgado del documento (buscadorDe),
+     así que volver a una pestaña no vuelve a leer el libro entero. Lo que hay
+     acá es el acto de buscar —la consulta, en cuál resultado estás—, y eso sí
+     se reinicia al cambiar de documento: buscar es algo que estás haciendo
+     ahora, no una propiedad del PDF como la página o el zoom. */
+  buscador: null,
+  consulta: '',
+  actual: -1,              // índice en buscador.resultados, o -1 si ninguno
+  pendiente: null,         // página cuyo resultado hay que centrar cuando monte
+  divsTexto: new Map(),    // nº de página → los spans de su capa de texto
 };
 
 /** La herramienta activa, ya resuelta con su color y grosor. */
@@ -156,7 +168,18 @@ function montarTexto(contenedor, n) {
   V.textos.set(n, tarea);
 
   tarea.promesa
-    .then((r) => { if (r) registrarSeleccion(div); })
+    .then((r) => {
+      if (!r) return;
+      registrarSeleccion(div);
+      /* Los spans se guardan porque son sobre lo que se resalta: una
+         coincidencia sabe en qué fragmento cae, y el fragmento es uno de
+         estos. */
+      V.divsTexto.set(n, r.divs);
+      const pos = marcarPagina(contenedor, n);
+      /* Un salto a un resultado de una página que todavía no estaba montada
+         termina acá: recién ahora se sabe DÓNDE cae la coincidencia. */
+      if (pos && V.pendiente === n) { V.pendiente = null; centrarEn(contenedor, pos); }
+    })
     .catch((err) => {
       // Cancelar es lo normal al hacer scroll: no es un error a mostrar.
       if (err?.name === 'AbortException') return;
@@ -229,6 +252,20 @@ function liberar(contenedor) {
   const texto = contenedor.querySelector('.qr-texto');
   if (texto) { olvidarSeleccion(texto); texto.replaceChildren(); }
 
+  /* Las marcas de la búsqueda se van con los spans sobre los que estaban
+     medidas: sin esto quedarían pintadas sobre una capa vacía, y al volver la
+     página se sumarían a las nuevas. */
+  V.divsTexto.delete(n);
+  const marcas = contenedor.querySelector('.qr-marcas');
+  if (marcas) {
+    /* Se apaga ADEMÁS de vaciarse. Vaciar y dejarla prendida deja una capa
+       visible sin nada adentro, y esa combinación es un agujero: remarcarTodo()
+       decide a quién visitar preguntando por hijos, así que una capa así no la
+       vuelve a tocar nadie y se queda prendida para siempre. */
+    marcas.classList.remove('is-visible');
+    marcas.replaceChildren();
+  }
+
   // Poner width en 0 libera el bitmap. Sin esto los canvas siguen ocupando su
   // memoria aunque ya no se vean, y la virtualización no sirve de nada.
   contenedor.querySelectorAll('canvas').forEach((c) => { c.width = 0; c.height = 0; });
@@ -242,6 +279,7 @@ function liberarTodo() {
   V.editores.clear();
   for (const t of V.textos.values()) t.cancelar();
   V.textos.clear();
+  V.divsTexto.clear();
   olvidarSelecciones();
   V.observador?.disconnect();
   V.observador = null;
@@ -259,6 +297,7 @@ function construirPaginas() {
     return `
       <div class="qr-pliego" data-pagina="${g.numero}" style="width:${ancho}px;height:${alto}px">
         <canvas class="qr-hoja"></canvas>
+        <div class="qr-marcas"></div>
         <div class="qr-texto"></div>
         <canvas class="qr-tinta"></canvas>
         <span class="qr-pliego__num">${g.numero}</span>
@@ -299,6 +338,9 @@ function reescalar({ anclarEn = null } = {}) {
      la escala vieja, y un span corrido no se ve pero se selecciona mal. */
   for (const t of V.textos.values()) t.cancelar();
   V.textos.clear();
+  /* Los spans de la escala vieja quedan a la basura, y con ellos las medidas
+     de las marcas: se vuelven a tomar cuando la capa nueva esté montada. */
+  V.divsTexto.clear();
   V.observador?.disconnect();
   V.observador = null;
 
@@ -464,8 +506,440 @@ function cambiarPanel(cual) {
     t.classList.toggle('is-active', t.dataset.panel === cual);
   });
   V.observadorMini?.disconnect();
+  /* Buscar no es una lista más: el cuerpo pasa a ser campo fijo arriba y lista
+     con scroll propio abajo. Sin la clase, el campo scrollearía junto con los
+     resultados y se iría de pantalla apenas hay unos cuantos. */
+  document.getElementById('qr-panel-cuerpo')?.classList.toggle('es-buscar', cual === 'buscar');
   if (cual === 'miniaturas') pintarMiniaturas();
-  else pintarEsquema();
+  else if (cual === 'esquema') pintarEsquema();
+  else pintarBuscar();
+}
+
+/* ── Buscar ──────────────────────────────────────────────────────────────────
+   El motor está en pdf/buscador.js; acá vive lo que se ve. Dos mitades que se
+   hablan por V.actual: la LISTA del panel y las MARCAS sobre la hoja.
+
+   Las marcas no se pintan metiéndole spans a la capa de texto —que es lo que
+   hace el visor de pdf.js—: se mide dónde cae cada coincidencia con un Range y
+   se pinta un rectángulo aparte, en su propia capa. Es una decisión, no un
+   atajo. La capa de texto es de la selección, y seleccion.js recorre su
+   estructura hermano por hermano para mover la cola; partirle los spans al
+   medio para envolver una coincidencia rompería justo eso. Midiendo, el
+   resaltado no toca nada: lee.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Los temporizadores del apagado de cada capa de marcas. En un WeakMap y no
+   colgados del nodo: el div es de la plantilla del pliego y sobrevive a la
+   virtualización, así que lo que se le cuelgue encima también. */
+const apagados = new WeakMap();
+
+/**
+ * Apaga las marcas de una capa y recién después la vacía.
+ *
+ * Vaciar de una es lo que se ve mal: al borrar el campo, todo lo resaltado de
+ * la hoja desaparecería en un frame. Se apaga con la transición de la capa y el
+ * vaciado va atrás.
+ *
+ * El apagado va SIN condición, incluso con la capa ya vacía: una capa prendida
+ * y sin hijos es un agujero, porque remarcarTodo() decide a quién visitar
+ * preguntando justamente por los hijos y no la vuelve a tocar nunca más.
+ */
+function limpiarMarcas(capa) {
+  capa.classList.remove('is-visible');
+  if (!capa.firstChild) return;
+  clearTimeout(apagados.get(capa));
+  apagados.set(capa, setTimeout(() => {
+    if (!capa.classList.contains('is-visible')) capa.replaceChildren();
+  }, 200));
+}
+
+/**
+ * Pinta las coincidencias de una página y devuelve dónde quedó la que está
+ * enfocada —medida contra el pliego— o null si en esta página no está.
+ *
+ * Se llama cada vez que una página monta su capa de texto y cada vez que
+ * cambia la consulta. Es SÍNCRONA a propósito: entre un await y su vuelta la
+ * página puede haberse ido de pantalla, y las marcas terminarían medidas
+ * contra unos spans y pintadas sobre otros.
+ */
+function marcarPagina(contenedor, n) {
+  const capa = contenedor.querySelector('.qr-marcas');
+  if (!capa) return null;
+
+  const divs = V.divsTexto.get(n);
+  const hits = V.buscador?.porPagina.get(n);
+  const indice = V.buscador?.indiceListo(n);
+  if (!divs || !hits?.length || !indice) { limpiarMarcas(capa); return null; }
+
+  /* La capa de texto y el índice tienen que ser la MISMA lista de fragmentos:
+     el índice ubica una coincidencia por (fragmento, offset) y acá se busca ese
+     fragmento por su número. Si alguna vez dejaran de coincidir —una versión de
+     pdf.js que arme la capa distinto— no se resalta nada y se avisa. Es mucho
+     mejor que pintar sobre las letras equivocadas: un resaltado corrido no se
+     lee como un error, se lee como que el buscador encontró otra cosa. */
+  if (divs.length !== indice.fragmentos) {
+    console.warn(`[buscar] página ${n}: la capa tiene ${divs.length} fragmentos y el índice ${indice.fragmentos}`);
+    limpiarMarcas(capa);
+    return null;
+  }
+
+  const res = V.buscador.resultados[V.actual];
+  const enfocada = res && res.pagina === n ? res.enPagina : -1;
+
+  const base = contenedor.getBoundingClientRect();
+  const rango = document.createRange();
+  const frag = document.createDocumentFragment();
+  let foco = null;
+
+  for (let k = 0; k < hits.length; k++) {
+    const esta = k === enfocada;
+    for (const seg of ubicar(indice, hits[k].desde, hits[k].hasta)) {
+      const nodo = divs[seg.i]?.firstChild;
+      if (!nodo || nodo.nodeType !== Node.TEXT_NODE) continue;
+      rango.setStart(nodo, Math.min(seg.a, nodo.length));
+      rango.setEnd(nodo, Math.min(seg.b, nodo.length));
+
+      /* Un solo Range puede dar VARIOS rectángulos: una coincidencia que cruza
+         el final del renglón se ve en dos pedazos, y cada pedazo es su marca. */
+      for (const r of rango.getClientRects()) {
+        if (r.width < 0.5 || r.height < 0.5) continue;
+        const marca = document.createElement('div');
+        marca.className = esta ? 'qr-marca is-actual' : 'qr-marca';
+        marca.style.left = `${r.left - base.left}px`;
+        marca.style.top = `${r.top - base.top}px`;
+        marca.style.width = `${r.width}px`;
+        marca.style.height = `${r.height}px`;
+        frag.append(marca);
+        /* Relativa al PLIEGO y no a la pantalla: así centrarEn() no necesita
+           saber por dónde va el scroll, que mientras hay una animación suave en
+           curso es un número que se mueve. */
+        if (esta && !foco) foco = { top: r.top - base.top, alto: r.height };
+      }
+    }
+  }
+
+  clearTimeout(apagados.get(capa));
+  capa.replaceChildren(frag);
+  capa.classList.add('is-visible');
+  return foco;
+}
+
+/**
+ * Vuelve a medir las marcas de todas las páginas que están en pantalla, y
+ * devuelve dónde quedó la coincidencia enfocada — con su pliego — si cayó en
+ * alguna de ellas.
+ *
+ * Que las repase TODAS y no solo la que interesa es el punto. La marca viva es
+ * una sola en todo el documento, pero la anterior vive en OTRA hoja: repintando
+ * únicamente la de destino, la de antes se queda encendida y quedan dos
+ * "actuales" en pantalla, cada una diciendo que es la que el contador numera.
+ */
+function remarcarTodo() {
+  if (!V.visor) return null;
+  let foco = null;
+  for (const el of V.visor.querySelectorAll('.qr-pliego')) {
+    const n = Number(el.dataset.pagina);
+    if (!V.divsTexto.has(n) && !el.querySelector('.qr-marcas')?.firstChild) continue;
+    const pos = marcarPagina(el, n);
+    if (pos) foco = { contenedor: el, pos };
+  }
+  return foco;
+}
+
+/**
+ * Deja una coincidencia en el medio del visor. `pos` viene de marcarPagina() y
+ * está medida contra el pliego.
+ *
+ * La cuenta sale del LAYOUT —el offsetTop del pliego más el alto de la marca
+ * adentro de él— y no del scroll de ahora. Es la misma coordenada que usa irA(),
+ * y la razón es que apretar "siguiente" dos veces seguidas encuentra la primera
+ * animación todavía en vuelo: sumando el scrollTop de ese momento, el salto se
+ * pasaba de largo justo lo que le faltaba a la animación anterior.
+ */
+function centrarEn(contenedor, pos) {
+  if (!V.visor || !pos || !contenedor) return;
+  const y = contenedor.offsetTop + pos.top - (V.visor.clientHeight - pos.alto) / 2;
+  V.visor.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+}
+
+/**
+ * El primer resultado a partir de la página que estás mirando.
+ *
+ * El "siguiente" se cuenta desde acá y no desde el principio del documento:
+ * buscando una palabra parado en la página 200, el primer Enter tiene que
+ * llevar a la 201 y no a la 3. Es la diferencia entre un buscador que te
+ * acompaña y uno que te manda de vuelta al principio cada vez.
+ */
+function resultadoDesdeAca(direccion) {
+  const res = V.buscador?.resultados || [];
+  if (!res.length) return -1;
+  if (direccion > 0) {
+    const i = res.findIndex((r) => r.pagina >= S.pagina);
+    return i === -1 ? 0 : i;
+  }
+  for (let i = res.length - 1; i >= 0; i--) if (res[i].pagina <= S.pagina) return i;
+  return res.length - 1;
+}
+
+/** Salta al resultado siguiente o al anterior. */
+function navegarBusqueda(direccion) {
+  const res = V.buscador?.resultados || [];
+  if (!res.length) return;
+  irAlResultado(V.actual < 0 ? resultadoDesdeAca(direccion) : V.actual + direccion);
+}
+
+/** Va al resultado número i de la lista, dando la vuelta por los extremos. */
+function irAlResultado(i) {
+  const res = V.buscador?.resultados || [];
+  if (!res.length) return;
+
+  V.actual = ((i % res.length) + res.length) % res.length;
+  const r = res[V.actual];
+
+  marcarLista();
+  actualizarCuenta();
+
+  const contenedor = V.visor?.querySelector(`.qr-pliego[data-pagina="${r.pagina}"]`);
+  if (!contenedor) return;
+
+  S.pagina = r.pagina;
+  actualizarBarra();
+  marcarMiniatura();
+
+  /* Si la página ya tiene su capa de texto, dónde cae la coincidencia se sabe
+     ahora mismo y se va derecho ahí. Si no, primero hay que acercarla para que
+     la virtualización la monte, y el centrado fino lo termina montarTexto()
+     cuando los spans existan — por eso queda anotada en V.pendiente. */
+  const foco = remarcarTodo();
+  if (foco) { V.pendiente = null; centrarEn(foco.contenedor, foco.pos); return; }
+
+  V.pendiente = r.pagina;
+  V.visor.scrollTo({ top: Math.max(0, contenedor.offsetTop - 24), behavior: 'auto' });
+}
+
+/* ── El panel de búsqueda ────────────────────────────────────────────────── */
+
+function pintarBuscar() {
+  const cuerpo = document.getElementById('qr-panel-cuerpo');
+  if (!cuerpo) return;
+
+  /* Dos renglones, y los dos SIEMPRE puestos. La fila de abajo podría
+     aparecer recién cuando hay resultados, pero entonces el campo se movería
+     de lugar justo mientras se escribe en él — y un campo que se corre bajo el
+     cursor es de las pocas cosas que se sienten rotas aunque estén animadas.
+     Sin nada buscado dice "—" y los botones no sirven, que es la verdad. */
+  cuerpo.innerHTML = `
+    <div class="qr-buscar">
+      <div class="ox-inputwrap qr-buscar__campo">
+        ${Icons.svg('search')}
+        <input class="ox-input" id="qr-buscar-campo" placeholder="Buscar en el documento"
+               spellcheck="false" autocomplete="off" value="${esc(V.consulta)}">
+      </div>
+      <div class="qr-buscar__barra">
+        <span class="ox-meta qr-buscar__cuenta" id="qr-buscar-cuenta">—</span>
+        <div class="ox-spacer"></div>
+        <button class="ox-iconbtn ox-iconbtn--sm" id="qr-buscar-prev" disabled
+                data-tip="Anterior" data-tip-key="Shift Enter"><i data-icon="chevronUp"></i></button>
+        <button class="ox-iconbtn ox-iconbtn--sm" id="qr-buscar-next" disabled
+                data-tip="Siguiente" data-tip-key="Enter"><i data-icon="chevronDown"></i></button>
+      </div>
+    </div>
+    <div class="qr-buscar__lista" id="qr-buscar-lista"></div>`;
+
+  Icons.mount(cuerpo);
+  cablearBuscar();
+  pintarResultados();
+}
+
+/** El "3/47" del campo, y los botones que dejan de servir sin resultados. */
+function actualizarCuenta() {
+  const cuenta = document.getElementById('qr-buscar-cuenta');
+  const b = V.buscador;
+  const hay = !!(b && V.consulta.trim() && b.total);
+
+  if (cuenta) {
+    /* Antes de pararse en una, el contador dice CUÁNTAS hay; parado en una,
+       dice en cuál. "— de 30" era gramaticalmente correcto y se leía como un
+       hueco, que es justo lo que un contador no puede parecer. */
+    const plural = b && b.total === 1 ? 'coincidencia' : 'coincidencias';
+    cuenta.textContent = !hay ? '—'
+      : V.actual >= 0 ? `${V.actual + 1} de ${b.total}`
+        : `${b.total} ${plural}`;
+    cuenta.classList.toggle('is-vacia', !hay);
+  }
+  document.getElementById('qr-buscar-prev')?.toggleAttribute('disabled', !hay);
+  document.getElementById('qr-buscar-next')?.toggleAttribute('disabled', !hay);
+}
+
+function pintarResultados() {
+  const lista = document.getElementById('qr-buscar-lista');
+  if (!lista) return;
+  actualizarCuenta();
+
+  const b = V.buscador;
+  const paginas = S.doc?.paginas ?? 0;
+
+  if (!V.consulta.trim()) {
+    lista.innerHTML = `
+      <div class="qr-panel__vacio">
+        ${Icons.svg('search')}
+        <span class="ox-meta">Escribí para buscar en las ${paginas} páginas.</span>
+        <span class="ox-meta qr-buscar__nota">Encuentra el texto de verdad del PDF, el mismo que se
+        puede seleccionar con el mouse. Si el archivo es un escaneo —una foto de la hoja— no hay
+        texto que buscar.</span>
+      </div>`;
+    return;
+  }
+
+  if (!b?.resultados.length) {
+    /* Mientras recorre dice por dónde va. Sin esto, buscar en un tratado de
+       mil páginas se ve igual que buscar algo que no está: vacío y quieto. */
+    const texto = b?.terminada
+      ? `Sin coincidencias para «${esc(V.consulta.trim())}».`
+      : `Leyendo la página ${b?.leidas ?? 0} de ${paginas}…`;
+    lista.innerHTML = `
+      <div class="qr-panel__vacio">
+        ${Icons.svg(b?.terminada ? 'search' : 'clock')}
+        <span class="ox-meta">${texto}</span>
+      </div>`;
+    return;
+  }
+
+  const filas = b.resultados.map((r, i) => `
+    <button class="qr-hit${i === V.actual ? ' is-actual' : ''}" data-i="${i}">
+      <span class="qr-hit__texto">${esc(r.antes)}<mark>${esc(r.medio)}</mark>${esc(r.despues)}</span>
+      <span class="qr-hit__pag ox-num">${r.pagina}</span>
+    </button>`).join('');
+
+  /* Los dos pies dicen lo que la lista NO muestra: que todavía falta recorrer,
+     o que hay más coincidencias de las que entraron. Una lista recortada en
+     silencio se lee como una lista completa. */
+  const pie = !b.terminada
+    ? `<div class="qr-buscar__pie ox-meta">Buscando… ${b.leidas} de ${paginas} páginas</div>`
+    : b.recortada
+      ? `<div class="qr-buscar__pie ox-meta">Se listan ${b.resultados.length} de ${b.total}. Las demás se resaltan igual en la hoja.</div>`
+      : '';
+
+  lista.innerHTML = filas + pie;
+}
+
+/** Deja marcado en la lista el resultado en el que estás, y lo trae a la vista. */
+function marcarLista() {
+  const lista = document.getElementById('qr-buscar-lista');
+  if (!lista) return;
+  lista.querySelectorAll('.qr-hit').forEach((f) => {
+    f.classList.toggle('is-actual', Number(f.dataset.i) === V.actual);
+  });
+
+  const fila = lista.querySelector('.qr-hit.is-actual');
+  if (!fila) return;
+  const arriba = fila.offsetTop;
+  const visible = arriba >= lista.scrollTop
+    && arriba + fila.offsetHeight <= lista.scrollTop + lista.clientHeight;
+  if (!visible) {
+    lista.scrollTo({ top: arriba - lista.clientHeight / 2 + fila.offsetHeight / 2, behavior: 'smooth' });
+  }
+}
+
+/**
+ * Lanza una búsqueda.
+ *
+ * No salta a ningún resultado: resalta y se queda quieto. Saltar mientras se
+ * escribe es lo que hace el buscador del navegador, y adentro de un documento
+ * de papel se siente distinto — la hoja se te va de abajo del ojo cada vez que
+ * agregás una letra. Acá el salto lo pedís vos, con Enter o con las flechas, y
+ * mientras tanto ves dónde está lo que buscás sin perder dónde estabas.
+ */
+async function lanzarBusqueda(consulta) {
+  if (!S.doc) return;
+  V.consulta = consulta;
+  V.actual = -1;
+  V.pendiente = null;
+
+  // Al cambiar de pestaña, el buscador de antes es el de otro documento.
+  if (V.buscador?.doc !== S.doc) V.buscador = buscadorDe(S.doc);
+
+  let pedido = false;
+  let ultimo = 0;
+  const repintar = () => {
+    if (pedido) return;
+    pedido = true;
+    /* Seis repintados por segundo como techo, y no uno por aviso. En un tratado
+       con miles de coincidencias, alAvanzar() llega decenas de veces por
+       segundo y cada repintado rearma una lista de cientos de filas: sin freno,
+       la app se sentiría trabada justo mientras trabaja. La cuenta va contra el
+       último pintado de verdad, así que si el documento es corto y termina
+       antes, no se pierde nada — abajo se pinta igual al salir. */
+    setTimeout(() => {
+      pedido = false;
+      ultimo = performance.now();
+      if (V.consulta !== consulta) return;
+      pintarResultados();
+      remarcarTodo();
+    }, Math.max(0, 160 - (performance.now() - ultimo)));
+  };
+
+  await V.buscador.buscar(consulta, { alAvanzar: repintar });
+
+  // Mientras leía llegó otra consulta: lo que terminó ya no es lo que se ve.
+  if (V.consulta !== consulta) return;
+  pintarResultados();
+  remarcarTodo();
+}
+
+function cablearBuscar() {
+  const campo = document.getElementById('qr-buscar-campo');
+  let reloj = null;
+
+  campo?.addEventListener('input', () => {
+    clearTimeout(reloj);
+    /* Un respiro antes de salir a leer el documento: sin él, escribir
+       "compensación" son doce recorridas completas, once de ellas tiradas. */
+    reloj = setTimeout(() => lanzarBusqueda(campo.value), 180);
+  });
+
+  campo?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      /* Con texto, Escape limpia; ya limpio, suelta el campo. Dos escapes
+         seguidos te devuelven al documento sin tocar el mouse. */
+      if (campo.value) { campo.value = ''; clearTimeout(reloj); lanzarBusqueda(''); }
+      else { campo.blur(); V.visor?.focus(); }
+      return;
+    }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    clearTimeout(reloj);
+    // Enter sobre una consulta ya buscada avanza; sobre una recién escrita, busca.
+    if (campo.value !== V.consulta) lanzarBusqueda(campo.value);
+    else navegarBusqueda(e.shiftKey ? -1 : 1);
+  });
+
+  document.getElementById('qr-buscar-prev')?.addEventListener('click', () => navegarBusqueda(-1));
+  document.getElementById('qr-buscar-next')?.addEventListener('click', () => navegarBusqueda(1));
+
+  document.getElementById('qr-buscar-lista')?.addEventListener('click', (e) => {
+    const fila = e.target.closest('.qr-hit');
+    if (fila) irAlResultado(Number(fila.dataset.i));
+  });
+}
+
+/** Ctrl+F: abre el panel en Buscar y pone el cursor en el campo. */
+function abrirBusqueda() {
+  if (!V.panelAbierto) document.getElementById('qr-toggle-panel')?.click();
+  if (V.panel !== 'buscar') cambiarPanel('buscar');
+  const campo = document.getElementById('qr-buscar-campo');
+  campo?.focus();
+  campo?.select();
+}
+
+/** Al cambiar de documento la búsqueda arranca de cero. El índice no: es del PDF. */
+function reiniciarBusqueda() {
+  V.buscador?.cancelar();
+  V.buscador = null;
+  V.consulta = '';
+  V.actual = -1;
+  V.pendiente = null;
 }
 
 /* ── Tinta ───────────────────────────────────────────────────────────────── */
@@ -677,7 +1151,7 @@ export function viewLector() {
      no repintaba nada —Router.go('lector') es un no-op si ya estás en
      'lector'— y el documento recién se veía al cambiar de vista y volver. */
   Router.onLeave(alCambiar((que) => {
-    if (que === 'documento') Router.refresh({ animar: true });
+    if (que === 'documento') { reiniciarBusqueda(); Router.refresh({ animar: true }); }
     else if (que === 'tinta' && V.tintaActiva) actualizarBarraTinta();
   }));
 
@@ -743,6 +1217,7 @@ export function viewLector() {
           <div class="qr-panel__tabs">
             <button class="qr-panel__tab${V.panel === 'miniaturas' ? ' is-active' : ''}" data-panel="miniaturas">Páginas</button>
             <button class="qr-panel__tab${V.panel === 'esquema' ? ' is-active' : ''}" data-panel="esquema">Marcadores</button>
+            <button class="qr-panel__tab${V.panel === 'buscar' ? ' is-active' : ''}" data-panel="buscar">Buscar</button>
           </div>
           <div class="qr-panel__cuerpo" id="qr-panel-cuerpo"></div>
         </aside>
@@ -875,6 +1350,17 @@ export function atajosLector(e) {
     return true;
   }
 
+  /* Buscar. Van con e.ctrlKey y con F3, así que valen también con el foco
+     adentro de un campo: es justo donde uno los aprieta. */
+  if (e.ctrlKey && e.key.toLowerCase() === 'f') { e.preventDefault(); abrirBusqueda(); return true; }
+  if (e.key === 'F3') {
+    e.preventDefault();
+    // Sin nada buscado todavía, F3 abre el panel en vez de no hacer nada.
+    if (V.buscador?.resultados.length) navegarBusqueda(e.shiftKey ? -1 : 1);
+    else abrirBusqueda();
+    return true;
+  }
+
   /* Tinta */
   if (e.ctrlKey && e.key.toLowerCase() === 'e') { e.preventDefault(); alternarTinta(); return true; }
   if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); deshacerTinta(); return true; }
@@ -891,4 +1377,4 @@ export function atajosLector(e) {
   return false;
 }
 
-export { irA, reescalar };
+export { irA, reescalar, abrirBusqueda };

@@ -22,7 +22,7 @@ import {
   cargarImpresoras, emitir, alCambiar, impresoraActual, MAX_PESTANAS,
 } from './estado.js';
 import * as Pestanas from './pestanas.js';
-import { viewLector, atajosLector } from './views/lector.js';
+import { viewLector, atajosLector, abrirBusqueda } from './views/lector.js';
 import { viewImprimir } from './views/imprimir.js';
 import { viewPaginas } from './views/paginas.js';
 import { viewHerramientas } from './views/herramientas.js';
@@ -538,6 +538,16 @@ function registrarComandos() {
     ...(S.doc ? [
       { id: 'cerrar', group: 'Documento', icon: 'close', label: 'Cerrar el documento', hint: 'Ctrl W', run: cerrarDocumento },
       { id: 'imprimir', group: 'Documento', icon: 'printer', label: 'Imprimir…', hint: 'Ctrl P', run: () => Router.go('imprimir') },
+      /* Va a la vista primero: buscar sin el documento delante no serviría de
+         nada, porque lo que devuelve son lugares de la hoja. */
+      {
+        id: 'buscar',
+        group: 'Documento',
+        icon: 'search',
+        label: 'Buscar en el documento…',
+        hint: 'Ctrl F',
+        run: () => { Router.go('lector'); abrirBusqueda(); },
+      },
     ] : []),
 
     /* Los otros abiertos, por nombre. Con cuatro pestañas de nombres parecidos
@@ -587,7 +597,7 @@ async function boot() {
   Icons.mount(document);
   Tooltip.init();
   /* El placeholder dice el vocabulario de ESTA app. El default de Onyx solo
-     promete comandos; aca adentro tambien se salta entre los PDF abiertos. */
+     promete comandos; acá adentro también se salta entre los PDF abiertos. */
   Palette.init({ placeholder: 'Buscar comandos y documentos…' });
   initClickFlash();
   initScrollFades();

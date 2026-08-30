@@ -38,6 +38,17 @@ solo glifo (`ﬁ`, `ﬀ`) vuelven a ser letras sueltas, así se pueden volver a
 buscar. En un PDF escaneado no hay nada que seleccionar: son fotos de páginas,
 no texto.
 
+**Buscar** — Ctrl+F. Los resultados con su contexto en el panel, y las
+coincidencias resaltadas sobre la hoja. Encuentra a través de las tres cosas que
+hacen que una búsqueda ingenua no encuentre nada adentro de un PDF: la
+**ligadura** (`oﬁcina` aparece escribiendo `oficina`), la **tilde**
+(`compensacion` encuentra `compensación`) y el **renglón cortado** — `compen-`
+al final de una línea y `sación` al principio de la siguiente son una sola
+palabra, guion incluido. La ñ no se toca: es otra letra, no una ene con adorno,
+y `ano` no tiene por qué encontrar `año`. Sin OCR, y por las mismas razones que
+la selección: en un escaneo no hay texto que buscar, y la app lo dice en vez de
+devolver una lista vacía.
+
 **Imponer** — simple, múltiple (N-up), póster y folleto, con escala, rangos,
 orientación y dúplex. El preview dibuja el **área que el tóner no alcanza**, que
 es el dato que ningún visor muestra y la causa de la mitad de los recortes.
@@ -82,6 +93,7 @@ renderer/
   js/
     pdf/documento.js   Todo lo que sabe de pdf.js vive acá.
     pdf/seleccion.js   Que arrastrar sobre el texto se sienta como arrastrar.
+    pdf/buscador.js    El plegado (ligaduras, tildes, renglones) y el índice.
     imagenes.js        La cabecera de un PNG/JPEG: de píxeles a milímetros.
     imposicion/
       plan.js          Geometría pura: entra un plan, salen las hojas. Sin pdf-lib.
@@ -103,7 +115,7 @@ Sin pdf-lib de por medio se puede testear con Node pelado.
 ## Verificar
 
 ```
-npm run verificar     # las seis suites, 321 aserciones
+npm run verificar     # las nueve suites, 462 aserciones
 ```
 
 | | |
@@ -112,6 +124,7 @@ npm run verificar     # las seis suites, 321 aserciones
 | `npm run imposicion` | Impone de verdad y **vuelve a leer** el PDF para ver qué cayó dónde |
 | `npm run tinta` | El vuelco de la Y, el contorno, el borrador y el historial |
 | `npm run seleccion` | Rasteriza la página y compara: los spans invisibles tienen que caer sobre las letras |
+| `npm run buscar` | Genera un PDF con los casos difíciles y mide **dónde cae cada marca**: el resaltado tiene que caer sobre las mismas letras que el span de la capa de texto |
 | `npm run pestanas` | Abre varios PDFs: que el estado sea de cada pestaña y que el worker compartido sobreviva a cerrar una |
 | `npm run cerrar` | Levanta la app entera y la cierra: que el último trazo llegue al disco **y que la ventana siga cerrándose** |
 | `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético |

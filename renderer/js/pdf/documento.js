@@ -244,6 +244,35 @@ class Documento {
   }
 
   /**
+   * Los fragmentos de texto de una página, para el índice del buscador.
+   *
+   * Tres decisiones que tienen que quedar clavadas a lo que hace capaTexto(),
+   * porque el buscador ubica una coincidencia por (fragmento, offset) y después
+   * la pinta sobre los spans que armó la capa. Si las dos listas no son la
+   * misma, el resaltado cae en otra palabra:
+   *
+   * · `disableNormalization: true` — el mismo crudo que pide la capa. Con la
+   *   normalización activada pdf.js abre las ligaduras ("ﬁ" → "fi"), y un
+   *   fragmento de largo distinto corre todos los offsets de ahí en adelante.
+   *   Que "oficina" encuentre "oﬁcina" lo resuelve plegar(), en el buscador,
+   *   que sabe volver del texto plegado al original.
+   *
+   * · Los ítems SIN `str` se filtran: son las marcas de contenido etiquetado,
+   *   que la capa consume para estructurar pero no convierte en spans.
+   *
+   * · `hasEOL` viaja como `salto`. Sin él, el último renglón se pega con el
+   *   primero de la línea siguiente y "de las" no se encuentra nunca — o peor,
+   *   aparece un "estadoen" que en la hoja no existe.
+   */
+  async fragmentos(n) {
+    const page = await this._pagina(n);
+    const { items } = await page.getTextContent({ disableNormalization: true });
+    return items
+      .filter((it) => typeof it.str === 'string')
+      .map((it) => ({ str: it.str, salto: !!it.hasEOL }));
+  }
+
+  /**
    * Arma la capa de texto de una página: un span transparente por fragmento,
    * puesto exactamente encima de las letras que pintó el canvas. Eso es lo que
    * hace que el texto del PDF se pueda arrastrar con el mouse y copiar — la
@@ -290,7 +319,13 @@ class Documento {
 
       await capa.render();
       if (cancelado) return null;
-      return { fragmentos: capa.textDivs.length };
+      /* Los spans salen para afuera porque el buscador los necesita: resalta
+         armando un Range sobre el nodo de texto de cada uno y midiendo dónde
+         cae. Van en el mismo orden que fragmentos(), uno por ítem —los <br> de
+         los saltos de renglón se agregan al DOM pero NO entran en esta lista—,
+         y esa correspondencia es la que hace que una coincidencia sepa sobre
+         qué letras pintarse. */
+      return { fragmentos: capa.textDivs.length, divs: capa.textDivs };
     })();
 
     return {
