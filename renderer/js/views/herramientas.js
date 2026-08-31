@@ -308,15 +308,7 @@ function htmlDividir() {
           <span class="ox-field__hint">Separados por coma. Cada tramo es un archivo. Sobre ${S.doc.paginas} páginas.</span>
         </div>`}
 
-      ${partes.length ? `
-        <div class="qr-partes">
-          <span class="ox-eyebrow">Van a salir ${plural(partes.length, 'archivo', 'archivos')}</span>
-          <div class="qr-partes__lista">
-            ${partes.slice(0, 12).map((p, i) => `
-              <span class="ox-chip ox-chip--mono">${i + 1}. ${p.length === 1 ? `pág. ${p[0]}` : `${p[0]}–${p[p.length - 1]}`}</span>`).join('')}
-            ${partes.length > 12 ? `<span class="ox-chip">y ${partes.length - 12} más</span>` : ''}
-          </div>
-        </div>` : '<span class="ox-meta">Ese corte no deja ninguna página.</span>'}
+      <div class="qr-partes" id="qr-div-partes">${htmlPartes(partes)}</div>
 
       <div class="qr-herr__acciones">
         <div class="ox-spacer"></div>
@@ -325,6 +317,30 @@ function htmlDividir() {
         </button>
       </div>
     </div>`;
+}
+
+/* Lo único que cambia cuando cambia el corte. Vive aparte para poder repintarlo
+   sin rehacer la sección entera: el campo de "páginas por archivo" se edita
+   mientras se lo mira, y rehacerlo con innerHTML en cada tecla se lo arranca de
+   las manos al usuario — pierde el cursor, el foco y los pasos del stepper. */
+function htmlPartes(partes) {
+  if (!partes.length) return '<span class="ox-meta">Ese corte no deja ninguna página.</span>';
+
+  return `
+    <span class="ox-eyebrow">Van a salir ${plural(partes.length, 'archivo', 'archivos')}</span>
+    <div class="qr-partes__lista">
+      ${partes.slice(0, 12).map((p, i) => `
+        <span class="ox-chip ox-chip--mono">${i + 1}. ${p.length === 1 ? `pág. ${p[0]}` : `${p[0]}–${p[p.length - 1]}`}</span>`).join('')}
+      ${partes.length > 12 ? `<span class="ox-chip">y ${partes.length - 12} más</span>` : ''}
+    </div>`;
+}
+
+function pintarPartes() {
+  const partes = calcularPartes();
+  const cont = document.getElementById('qr-div-partes');
+  if (cont) cont.innerHTML = htmlPartes(partes);
+  const hacer = document.getElementById('qr-div-hacer');
+  if (hacer) hacer.disabled = !partes.length;
 }
 
 function calcularPartes() {
@@ -354,12 +370,14 @@ function cablearDividir() {
   const cada = document.getElementById('qr-div-cada');
   cada?.addEventListener('input', () => {
     V.corte.cada = Math.max(1, parseInt(cada.value, 10) || 1);
-    pintarSeccion();
-    document.getElementById('qr-div-cada')?.focus();
+    pintarPartes();
   });
+  /* Vaciar el campo mientras se escribe está bien; dejarlo vacío no. Al salir
+     vuelve a mostrar el número que de verdad se va a usar. */
+  cada?.addEventListener('change', () => { cada.value = String(V.corte.cada); });
 
   const rangos = document.getElementById('qr-div-rangos');
-  rangos?.addEventListener('change', () => { V.corte.rangos = rangos.value; pintarSeccion(); });
+  rangos?.addEventListener('change', () => { V.corte.rangos = rangos.value; pintarPartes(); });
 
   document.getElementById('qr-div-hacer')?.addEventListener('click', hacerDividir);
 }

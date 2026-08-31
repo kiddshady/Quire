@@ -78,10 +78,15 @@ function plan() {
   return S.plan;
 }
 
-function cambiar(parche, { rehacer = true } = {}) {
+/* repintar:false para los controles que el usuario tiene AGARRADO — el campo de
+   copias mientras aguanta la flecha, un slider mientras lo arrastra. pintarOpciones
+   rehace el panel con innerHTML, así que repintar desde el propio evento del
+   control le arranca de las manos el nodo con el que está interactuando. El
+   control ya muestra su valor solo; lo único que falta es el estado. */
+function cambiar(parche, { rehacer = true, repintar = true } = {}) {
   S.plan = { ...plan(), ...parche };
   if (rehacer) programarImposicion();
-  pintarOpciones();
+  if (repintar) pintarOpciones();
 }
 
 /* ── Imposición con debounce ─────────────────────────────────────────────── */
@@ -515,7 +520,7 @@ function cablearOpciones() {
      diferencia entre escribir el número y apretar la flecha. */
   bindStepper($('op-copias-stepper'));
   $('op-copias')?.addEventListener('change', (e) => {
-    cambiar({ copias: Math.max(1, parseInt(e.target.value, 10) || 1) }, { rehacer: false });
+    cambiar({ copias: Math.max(1, parseInt(e.target.value, 10) || 1) }, { rehacer: false, repintar: false });
     pintarResumen();
   });
 
@@ -554,7 +559,7 @@ function cablearOpciones() {
   });
 
   deslizador('op-escala-valor', 'op-escala-eco', (v) => `${v}%`, 10, 390,
-    (v) => cambiar({ escala: { ...plan().escala, valor: v } }, { rehacer: false }));
+    (v) => cambiar({ escala: { ...plan().escala, valor: v } }, { rehacer: false, repintar: false }));
 
   $('op-margen')?.addEventListener('click', (e) => {
     const on = !e.currentTarget.classList.contains('is-on');
@@ -594,9 +599,9 @@ function cablearOpciones() {
 
   /* Póster */
   deslizador('op-poster-escala', 'op-poster-eco', (v) => `${v}%`, 100, 900,
-    (v) => cambiar({ poster: { ...plan().poster, escala: v } }, { rehacer: false }));
+    (v) => cambiar({ poster: { ...plan().poster, escala: v } }, { rehacer: false, repintar: false }));
   deslizador('op-poster-solape', 'op-poster-solape-eco', (v) => `${v} mm`, 0, 30,
-    (v) => cambiar({ poster: { ...plan().poster, solape: v } }, { rehacer: false }));
+    (v) => cambiar({ poster: { ...plan().poster, solape: v } }, { rehacer: false, repintar: false }));
   $('op-poster-marcas')?.addEventListener('click', (e) => {
     const on = !e.currentTarget.classList.contains('is-on');
     e.currentTarget.classList.toggle('is-on', on);

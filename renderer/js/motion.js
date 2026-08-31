@@ -176,6 +176,11 @@ export function bindStepper(root, onChange) {
   };
 
   function mover(dir) {
+    /* Si el input ya se fue del documento, el listener del paso anterior repintó
+       el panel entero y este quedó huérfano: su número no lo ve nadie, pero cada
+       paso sigue despachando 'change' y volviendo a repintar. Acá se corta. */
+    if (!input.isConnected) return false;
+
     const antes = leer();
     const v = acotar(antes + dir * num('step', 1));
     if (v === antes) { sync(); return false; }
@@ -189,7 +194,12 @@ export function bindStepper(root, onChange) {
   }
 
   let timer = null;
-  const frenar = () => { clearTimeout(timer); timer = null; };
+  function frenar() {
+    clearTimeout(timer);
+    timer = null;
+    window.removeEventListener('pointerup', frenar);
+    window.removeEventListener('pointercancel', frenar);
+  }
 
   function arrancar(dir, desde) {
     const transcurrido = Date.now() - desde;
@@ -201,19 +211,24 @@ export function bindStepper(root, onChange) {
     const btn = e.target.closest('[data-step]');
     if (!btn || btn.disabled) return;
     e.preventDefault();                 // que el campo no pierda el foco
+    frenar();                           // nunca dos repeticiones sobre el mismo campo
     const dir = btn.dataset.step === 'up' ? 1 : -1;
+
+    /* Soltar tiene que frenar SIEMPRE, y el pointerup no siempre llega hasta acá:
+       si el primer paso hace que quien escucha repinte, este root sale del
+       documento y el evento cae sobre los nodos nuevos. window sí lo ve. Se
+       enganchan al apretar y los suelta frenar(), así no se acumulan. */
+    window.addEventListener('pointerup', frenar);
+    window.addEventListener('pointercancel', frenar);
+
     mover(dir);
     const desde = Date.now();
     timer = setTimeout(() => arrancar(dir, desde), ESPERA);
-    /* La captura del puntero es lo que hace que soltar CUENTE aunque el dedo se
-       haya ido del botón. Sin esto, arrastrar afuera deja el contador corriendo
-       para siempre. */
-    btn.setPointerCapture?.(e.pointerId);
+    /* La captura del puntero mantiene el aguante aunque el dedo se salga del
+       botón. Si el paso de recién ya se llevó puesto el botón, tirar acá no
+       importa: el freno de verdad está en window. */
+    try { btn.setPointerCapture(e.pointerId); } catch { /* ya no está en el DOM */ }
   });
-
-  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-    root.addEventListener(ev, frenar);
-  }
 
   input.addEventListener('input', sync);
   sync();
