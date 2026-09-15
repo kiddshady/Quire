@@ -20,8 +20,11 @@ import { paint, head, empty, esc, attempt } from '../ui.js';
 import { plural } from '../format.js';
 import { reorganizar } from '../imposicion/motor.js';
 import { aplanarTinta } from '../tinta/aplanar.js';
+import { exportarImagenes } from '../exportar.js';
 
 const api = window.onyx;
+const DPI_PNG = 300;
+const FILTRO_PNG = [{ name: 'Imagen PNG', extensions: ['png'] }];
 
 const V = {
   docRuta: null,
@@ -29,6 +32,7 @@ const V = {
   rotaciones: {},
   seleccion: new Set(),
   observador: null,
+  exportando: false,
 };
 
 function reiniciar() {
@@ -86,6 +90,7 @@ export function viewPaginas() {
         <button class="ox-iconbtn ox-iconbtn--sm" id="org-rotar-izq" data-tip="Girar a la izquierda" disabled><i data-icon="rotarIzq"></i></button>
         <button class="ox-iconbtn ox-iconbtn--sm" id="org-rotar-der" data-tip="Girar a la derecha" disabled><i data-icon="rotarDer"></i></button>
         <button class="ox-iconbtn ox-iconbtn--sm" id="org-extraer" data-tip="Extraer a un PDF nuevo" disabled><i data-icon="external"></i></button>
+        <button class="ox-iconbtn ox-iconbtn--sm" id="org-exportar-png" data-tip="Exportar selección como PNG · 300 dpi" disabled><i data-icon="download"></i></button>
         <button class="ox-iconbtn ox-iconbtn--sm qr-iconbtn-danger" id="org-borrar" data-tip="Quitar del documento" disabled><i data-icon="trash"></i></button>
       </div>
 
@@ -160,11 +165,11 @@ function actualizarBarra() {
     cuenta.textContent = n ? `${plural(n, 'página', 'páginas')}` : 'nada seleccionado';
     cuenta.classList.toggle('is-vacia', !n);
   }
-  for (const id of ['org-rotar-izq', 'org-rotar-der', 'org-extraer', 'org-borrar']) {
-    document.getElementById(id)?.toggleAttribute('disabled', !n);
+  for (const id of ['org-rotar-izq', 'org-rotar-der', 'org-extraer', 'org-exportar-png', 'org-borrar']) {
+    document.getElementById(id)?.toggleAttribute('disabled', !n || V.exportando);
   }
   // No se puede borrar todo: un PDF sin páginas no es un PDF.
-  document.getElementById('org-borrar')?.toggleAttribute('disabled', !n || n >= V.orden.length);
+  document.getElementById('org-borrar')?.toggleAttribute('disabled', !n || n >= V.orden.length || V.exportando);
 
   document.getElementById('org-guardar')?.toggleAttribute('disabled', !hayCambios());
   document.getElementById('org-reiniciar')?.toggleAttribute('disabled', !hayCambios());
@@ -232,6 +237,7 @@ function cablear() {
   });
 
   $('org-extraer')?.addEventListener('click', extraer);
+  $('org-exportar-png')?.addEventListener('click', exportarPNG);
   $('org-guardar')?.addEventListener('click', guardar);
   $('org-reiniciar')?.addEventListener('click', () => { reiniciar(); Router.refresh(); });
 }
@@ -241,6 +247,57 @@ function rotar(grados) {
     V.rotaciones[n] = (((V.rotaciones[n] || 0) + grados) % 360 + 360) % 360;
   }
   pintarGrilla();
+}
+
+async function exportarPNG() {
+  const paginas = V.orden.filter((n) => V.seleccion.has(n));
+  if (!paginas.length || V.exportando) return;
+
+  V.exportando = true;
+  actualizarBarra();
+
+  try {
+    await attempt(async () => {
+      /* Para un lote se elige la carpeta ANTES de rasterizar: cancelar no
+         debería hacer trabajar a pdf.js ni reservar cientos de MB porque sí. */
+      const carpeta = paginas.length > 1 ? await api.docs.elegirCarpeta() : null;
+      if (paginas.length > 1 && !carpeta) return;
+
+      const imagenes = await exportarImagenes(S.doc, {
+        paginas,
+        formato: 'png',
+        dpi: DPI_PNG,
+        capa: S.tinta,
+        rotaciones: { ...V.rotaciones },
+      });
+
+      if (imagenes.length === 1) {
+        const imagen = imagenes[0];
+        const guardado = await api.docs.guardarComo(imagen.bytes, imagen.nombre, FILTRO_PNG);
+        if (!guardado) return;
+        Toast.show({
+          title: 'Página exportada como PNG',
+          text: `${imagen.ancho} × ${imagen.alto} px · ${guardado.nombre}`,
+          icon: 'download',
+        });
+        return;
+      }
+
+      for (const imagen of imagenes) {
+        await api.docs.escribir(carpeta, imagen.nombre, imagen.bytes);
+      }
+
+      const primera = imagenes[0];
+      Toast.show({
+        title: `${plural(imagenes.length, 'página exportada', 'páginas exportadas')} como PNG`,
+        text: `${primera.ancho} × ${primera.alto} px · ${carpeta}`,
+        icon: 'download',
+      });
+    }, { errorTitle: 'No se pudo exportar como PNG' });
+  } finally {
+    V.exportando = false;
+    actualizarBarra();
+  }
 }
 
 async function extraer() {

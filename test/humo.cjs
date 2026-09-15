@@ -587,18 +587,28 @@ app.whenReady().then(async () => {
     // Seleccionar la 2 y la 3, girar y quitar una.
     items[1]?.click();
     items[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+    const exportarPNG = document.getElementById('org-exportar-png');
+    const exportarPNGHabilitado = !!exportarPNG && !exportarPNG.disabled;
     document.getElementById('org-rotar-der')?.click();
     const trasRotar = document.querySelectorAll('.qr-org__item .ox-chip').length;
     document.getElementById('org-borrar')?.click();
     return {
       items: items.length,
       conMiniatura: items.filter((i) => i.querySelector('canvas')).length,
+      exportarPNGExiste: !!exportarPNG,
+      exportarPNGHabilitado,
       trasRotar,
       trasBorrar: document.querySelectorAll('.qr-org__item').length,
       guardarHabilitado: !document.getElementById('org-guardar')?.disabled,
       estado: document.getElementById('org-estado')?.textContent,
     };
   })()`)]);
+
+  {
+    const p = notas.at(-1)[1];
+    if (!p.exportarPNGExiste) problemas.push('paginas: falta la acción Exportar como PNG');
+    if (!p.exportarPNGHabilitado) problemas.push('paginas: Exportar como PNG no se habilita con la selección');
+  }
 
   /* Las vistas entran con una animación de 420 ms. capturePage() devuelve el
      último frame COMPUESTO, así que capturar de inmediato saca la pantalla a

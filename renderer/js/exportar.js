@@ -55,6 +55,7 @@ export function medidaAlDPI(geometria, dpi) {
  *   calidad   0..1, solo para jpeg y webp
  *   capa      capa de tinta, o null
  *   rotacion  giro extra, el mismo que se ve en el lector
+ *   rotaciones giros extra por página, como los cambios pendientes de Páginas
  *   onProgreso(hecho, total)
  * @returns {Promise<Array<{nombre:string, bytes:ArrayBuffer, ancho:number, alto:number}>>}
  */
@@ -65,6 +66,7 @@ export async function exportarImagenes(doc, {
   calidad = 0.92,
   capa = null,
   rotacion = 0,
+  rotaciones = null,
   nombreBase = null,
   onProgreso = null,
 } = {}) {
@@ -89,10 +91,13 @@ export async function exportarImagenes(doc, {
     /* dpr 1 a propósito: acá el tamaño lo fija el DPI pedido, no la densidad
        de la pantalla. Con dpr del sistema, exportar daría distinto según el
        monitor en el que estuviera abierta la app. */
-    const canvas = await doc.lienzo(n, { escala, rotacionExtra: rotacion, dpr: 1 });
+    /* `rotacion` cubre el giro global del lector; `rotaciones` permite sumar
+       el giro particular que todavía está pendiente en la vista Páginas. */
+    const rotacionPagina = rotacion + (rotaciones?.[n] || 0);
+    const canvas = await doc.lienzo(n, { escala, rotacionExtra: rotacionPagina, dpr: 1 });
 
     if (capa?.trazos(n).length) {
-      const viewport = await doc.viewport(n, { escala, rotacionExtra: rotacion });
+      const viewport = await doc.viewport(n, { escala, rotacionExtra: rotacionPagina });
       dibujarTrazos(canvas.getContext('2d'), capa.trazos(n), viewport, { dpr: 1 });
     }
 

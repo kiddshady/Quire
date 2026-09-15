@@ -276,6 +276,9 @@ app.whenReady().then(async () => {
 
       const png = await exportarImagenes(doc, { paginas: [1, 2], formato: 'png', dpi: 150 });
       const jpg = await exportarImagenes(doc, { paginas: [1], formato: 'jpeg', dpi: 72, calidad: 0.8 });
+      const pngGirado = await exportarImagenes(doc, {
+        paginas: [1, 2], formato: 'png', dpi: 72, rotaciones: { 2: 90 },
+      });
 
       // La firma del archivo, no su extensión: que diga .png no lo hace un PNG.
       const firma = (buf, n) => [...new Uint8Array(buf).slice(0, n)];
@@ -289,6 +292,7 @@ app.whenReady().then(async () => {
         firmaPNG: firma(png[0].bytes, 4),
         firmaJPEG: firma(jpg[0].bytes, 3),
         jpegMasChico: jpg[0].bytes.byteLength < png[0].bytes.byteLength,
+        girosPorPagina: pngGirado.map((i) => ({ ancho: i.ancho, alto: i.alto })),
         formatos: Object.keys(FORMATOS),
       };
 
@@ -406,6 +410,10 @@ app.whenReady().then(async () => {
     `${r.exportar.medida.ancho} × ${r.exportar.medida.alto}`);
   ok('el cálculo previo coincide con lo que sale',
     r.exportar.esperado150.ancho === r.exportar.medida.ancho);
+  ok('los giros pendientes se aplican sólo a la página que corresponde',
+    r.exportar.girosPorPagina[0].alto > r.exportar.girosPorPagina[0].ancho
+      && r.exportar.girosPorPagina[1].ancho > r.exportar.girosPorPagina[1].alto,
+    JSON.stringify(r.exportar.girosPorPagina));
   // 89 50 4E 47 = \x89PNG · FF D8 FF = SOI de JPEG
   ok('el PNG es un PNG de verdad', r.exportar.firmaPNG.join() === '137,80,78,71', r.exportar.firmaPNG.join());
   ok('y el JPEG un JPEG', r.exportar.firmaJPEG.join() === '255,216,255', r.exportar.firmaJPEG.join());
