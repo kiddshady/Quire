@@ -199,7 +199,7 @@ export function show() {
   anim.innerHTML = `
     <div class="ox-palette" role="dialog" aria-modal="true">
       <div class="ox-palette__search">
-        ${Icons.svg('search', 'ox-icon--lg')}
+        ${Icons.svg('search')}
         <input class="ox-palette__input" placeholder="${placeholder.replace(/"/g, '&quot;')}" spellcheck="false" autocomplete="off">
       </div>
       <div class="ox-palette__list ox-scroll"></div>

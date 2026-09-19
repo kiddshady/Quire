@@ -230,14 +230,17 @@
   box-shadow: inset 0 -1px 0 var(--ox-line);
   flex: 0 0 auto;
 }
-.ox-palette__search > .ox-icon { color: var(--ox-text-4); }
+/* Lupa y texto a la escala de los ítems (15px / 13px): el buscador es una fila
+   más de la lista, no un encabezado. Con el padding de 16px la lupa cae en la
+   misma columna que los íconos de abajo. */
+.ox-palette__search > .ox-icon { width: 15px; height: 15px; color: var(--ox-text-4); }
 .ox-palette__input {
   flex: 1 1 auto;
   min-width: 0;
   border: 0;
   background: transparent;
   color: var(--ox-text);
-  font-size: var(--ox-fs-15);
+  font-size: var(--ox-fs-13);
   user-select: text;
   cursor: text;
 }
