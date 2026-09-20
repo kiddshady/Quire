@@ -93,12 +93,11 @@ app.whenReady().then(async () => {
     menu && menu.t >= 0 && menu.l >= 0 && menu.b <= H && menu.rt <= W, JSON.stringify(menu));
   await js(`document.body.click(); true`); await sleep(300);
 
-  await click('#btn-palette');
-  await sleep(500);
-  const pal = await js(`(() => { const p=document.querySelector('.ox-palette'); if(!p) return null;
-    const r=p.getBoundingClientRect(); return {t:Math.round(r.top),cx:Math.round(r.left+r.width/2)}; })()`);
-  ok('la paleta abre centrada y visible', pal && pal.t > 0 && Math.abs(pal.cx - W / 2) < 4, JSON.stringify(pal));
-  await click('.ox-scrim'); await sleep(400);
+  ok('no queda el botón de comandos', !(await js(`document.querySelector('#btn-palette')`)));
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'K', modifiers: ['control'] });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'K', modifiers: ['control'] });
+  await sleep(200);
+  ok('Ctrl+K no abre una paleta', !(await js(`document.querySelector('.ox-palette')`)));
 
   await click('#demo-modal');
   await sleep(600);

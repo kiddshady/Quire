@@ -63,8 +63,8 @@
   --ox-bg:     oklch(14.9% calc(.0046 * var(--ox-tint)) var(--ox-hue));  /* base de la ventana */
   --ox-s1:     oklch(17.2% calc(.0070 * var(--ox-tint)) var(--ox-hue));  /* rail, statusbar */
   --ox-s2:     oklch(20.3% calc(.0093 * var(--ox-tint)) var(--ox-hue));  /* card, panel, fila elevada */
-  --ox-s3:     oklch(23.4% calc(.0106 * var(--ox-tint)) var(--ox-hue));  /* menú, modal, popover, tooltip */
-  --ox-s4:     oklch(27.1% calc(.0126 * var(--ox-tint)) var(--ox-hue));  /* command palette, lo más alto */
+  --ox-s3:     oklch(23.4% calc(.0106 * var(--ox-tint)) var(--ox-hue));  /* menú, modal, popover */
+  --ox-s4:     oklch(27.1% calc(.0126 * var(--ox-tint)) var(--ox-hue));  /* tooltip, lo más alto */
 
   /* El backgroundColor de la BrowserWindow tiene que coincidir con --ox-bg.
      Electron no entiende oklch, así que main.cjs lleva el hex equivalente y el

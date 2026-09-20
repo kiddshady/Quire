@@ -10,7 +10,6 @@
 import './iconos.js';                    // registra los íconos del dominio
 import { Icons } from './icons.js';
 import { Tooltip, Toast, Menu, Modal } from './overlays.js';
-import Palette from './palette.js';
 import Router from './router.js';
 import { initClickFlash, initScrollFades, raf2 } from './motion.js';
 import { paint, head, empty, esc, attempt, copy, colorToken } from './ui.js';
@@ -22,7 +21,7 @@ import {
   cargarImpresoras, emitir, alCambiar, impresoraActual, MAX_PESTANAS,
 } from './estado.js';
 import * as Pestanas from './pestanas.js';
-import { viewLector, atajosLector, abrirBusqueda } from './views/lector.js';
+import { viewLector, atajosLector } from './views/lector.js';
 import { viewImprimir } from './views/imprimir.js';
 import { viewPaginas } from './views/paginas.js';
 import { viewHerramientas } from './views/herramientas.js';
@@ -417,7 +416,6 @@ function cablearShell() {
   document.querySelectorAll('.ox-navitem').forEach((b) =>
     b.addEventListener('click', () => Router.go(b.dataset.view)));
 
-  document.getElementById('btn-palette')?.addEventListener('click', () => Palette.toggle());
   document.getElementById('btn-abrir')?.addEventListener('click', abrirConDialogo);
 
   /* La vista Convertir produce PDFs y quiere abrirlos, pero no maneja pestañas:
@@ -565,57 +563,6 @@ function actualizarChrome() {
   }
 }
 
-function registrarComandos() {
-  const abiertas = S.pestanas;
-  const activaId = S.pestana?.id;
-
-  Palette.clear();
-  Palette.register([
-    { id: 'abrir', group: 'Documento', icon: 'folder', label: 'Abrir un PDF…', hint: 'Ctrl O', run: abrirConDialogo },
-    ...(S.doc ? [
-      { id: 'cerrar', group: 'Documento', icon: 'close', label: 'Cerrar el documento', hint: 'Ctrl W', run: cerrarDocumento },
-      { id: 'imprimir', group: 'Documento', icon: 'printer', label: 'Imprimir…', hint: 'Ctrl P', run: () => Router.go('imprimir') },
-      /* Va a la vista primero: buscar sin el documento delante no serviría de
-         nada, porque lo que devuelve son lugares de la hoja. */
-      {
-        id: 'buscar',
-        group: 'Documento',
-        icon: 'search',
-        label: 'Buscar en el documento…',
-        hint: 'Ctrl F',
-        run: () => { Router.go('lector'); abrirBusqueda(); },
-      },
-    ] : []),
-
-    /* Los otros abiertos, por nombre. Con cuatro pestañas de nombres parecidos
-       —cuatro apuntes de la misma materia— escribir dos letras acá es más
-       rápido y más seguro que contar posiciones para el Ctrl+número.
-
-       El activo no está en la lista: es a donde ya estás, y un comando que no
-       hace nada solo ocupa un renglón. El índice sale del map, ANTES de
-       filtrarlo, para que el atajo que se muestra sea el que de verdad
-       funciona. */
-    ...abiertas
-      .map((p, i) => ({
-        id: `pestana-${p.id}`,
-        group: 'Documentos abiertos',
-        icon: 'file',
-        label: p.doc?.nombre || 'documento.pdf',
-        hint: `Ctrl ${i + 1}`,
-        run: () => activar(p.id),
-      }))
-      .filter((_, i) => abiertas[i].id !== activaId),
-
-    { id: 'nav-lector', group: 'Ir a', icon: 'book', label: 'Documento', run: () => Router.go('lector') },
-    { id: 'nav-paginas', group: 'Ir a', icon: 'grid', label: 'Páginas', run: () => Router.go('paginas') },
-    { id: 'nav-imprimir', group: 'Ir a', icon: 'printer', label: 'Imprimir', run: () => Router.go('imprimir') },
-    { id: 'nav-herramientas', group: 'Ir a', icon: 'tools', label: 'Herramientas', run: () => Router.go('herramientas') },
-    { id: 'nav-convertir', group: 'Ir a', icon: 'convertir', label: 'Convertir', run: () => Router.go('convertir') },
-    { id: 'nav-piezas', group: 'Ir a', icon: 'layers', label: 'Piezas', run: () => Router.go('piezas') },
-    { id: 'nav-ajustes', group: 'Ir a', icon: 'settings', label: 'Ajustes', run: () => Router.go('ajustes') },
-  ]);
-}
-
 /* ══ Color de la ventana ═════════════════════════════════════════════════════
    --ox-bg está en oklch y Electron solo entiende hex. Se resuelve acá y se le
    manda al proceso principal, así el frame fantasma que pinta el compositor de
@@ -634,9 +581,6 @@ function sincronizarColorVentana() {
 async function boot() {
   Icons.mount(document);
   Tooltip.init();
-  /* El placeholder dice el vocabulario de ESTA app. El default de Onyx solo
-     promete comandos; acá adentro también se salta entre los PDF abiertos. */
-  Palette.init({ placeholder: 'Buscar comandos y documentos…' });
   initClickFlash();
   initScrollFades();
   cablearShell();
@@ -655,7 +599,6 @@ async function boot() {
     return;
   }
 
-  registrarComandos();
   actualizarChrome();
   alCambiar(actualizarChrome);
   Router.onChange(actualizarChrome);
@@ -665,7 +608,6 @@ async function boot() {
      pestaña o el doble click en el explorador pasan todos por acá. */
   alCambiar((que) => {
     if (que !== 'pestanas') return;
-    registrarComandos();
     recordarSesion();
   });
 

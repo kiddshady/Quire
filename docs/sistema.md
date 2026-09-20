@@ -21,8 +21,8 @@ componente escribe un valor crudo.
 | `--ox-bg` | Base de la ventana |
 | `--ox-s1` | Rail, statusbar |
 | `--ox-s2` | Card, panel, fila elevada |
-| `--ox-s3` | Menú, modal, popover, tooltip |
-| `--ox-s4` | Paleta de comandos, lo más alto |
+| `--ox-s3` | Menú, modal, popover |
+| `--ox-s4` | Tooltip, lo más alto |
 
 La croma crece con la luminancia: un plano claro necesita más temperatura que
 uno oscuro para no verse lavado.
@@ -270,7 +270,6 @@ Toast.error(title, text);
 Menu.show(anchorEl, items, { align: 'end' });
 await Modal.show({ title, sub, body, actions, width, dismissible });
 await Modal.confirm({ title, sub, confirmLabel, danger });
-Palette.init(); Palette.register([...]); Palette.toggle();
 ```
 
 **Tooltips**: declarativos. `data-tip="texto"`, opcionalmente `data-tip-side`
@@ -282,10 +281,6 @@ más `{ sep: true }` y `{ groupLabel }`.
 **Modal**: devuelve una promesa con el `value` del botón que se apretó (`null`
 si se cerró). El `body` puede ser HTML o un `Node` — si es un nodo, podés leer
 sus campos después de que cierre. Atrapa el foco y cierra con Escape.
-
-**Palette**: comandos `{ id, label, group, icon, hint, run }`. Match por
-subsecuencia: "rndg" encuentra "Research Digest". Re-registrá cuando cambien
-los datos (`Palette.clear()` primero).
 
 ---
 

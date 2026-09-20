@@ -10,7 +10,6 @@
 
 import { Icons } from './icons.js';
 import { Toast, Menu, Modal } from './overlays.js';
-import Palette from './palette.js';
 import { bindSwitcher, bindStepper } from './motion.js';
 import { mark, status, copy, colorToken } from './ui.js';
 
@@ -216,10 +215,6 @@ export function designHTML() {
               <button class="ox-tab" data-value="2">Detalle <span class="ox-tab__count">12</span></button>
               <button class="ox-tab" data-value="3">Historial</button>
             </div>
-            <div class="ox-row" style="gap:6px">
-              <span class="ox-kbd">Ctrl</span><span class="ox-kbd">K</span>
-              <span class="ox-meta">abre la paleta de comandos</span>
-            </div>
           </div>
         </div>`)}
 
@@ -231,7 +226,6 @@ export function designHTML() {
           <button class="ox-btn ox-btn--secondary ox-flashable" id="demo-confirm">Confirmación destructiva</button>
           <button class="ox-btn ox-btn--secondary ox-flashable" id="demo-toast">Toast</button>
           <button class="ox-btn ox-btn--secondary ox-flashable" id="demo-toast-err">Toast de error</button>
-          <button class="ox-btn ox-btn--secondary ox-flashable" id="demo-palette">Paleta de comandos</button>
         </div>`)}
 
       ${section('Métricas y medidores', '', `
@@ -493,8 +487,6 @@ export function wireDesign(rootEl) {
 
   rootEl.querySelector('#demo-toast-err')?.addEventListener('click', () =>
     Toast.error('No se pudo guardar', 'EPERM: el archivo está tomado por otro proceso. Se reintentó 5 veces.'));
-
-  rootEl.querySelector('#demo-palette')?.addEventListener('click', () => Palette.show());
 
   /* Íconos: click = copiar la etiqueta lista para pegar. */
   rootEl.querySelector('#icon-grid')?.addEventListener('click', (e) => {

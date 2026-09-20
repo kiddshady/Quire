@@ -547,8 +547,7 @@
 }
 
 /* Lo que coincide se ILUMINA, no se pinta de amarillo. El amarillo es de la
-   hoja, donde hay papel debajo; acá arriba resaltar es subir de énfasis, igual
-   que en la paleta de comandos. */
+   hoja, donde hay papel debajo; acá arriba resaltar es subir de énfasis. */
 .qr-hit mark {
   background: transparent;
   color: var(--ox-text);
