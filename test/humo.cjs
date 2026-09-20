@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { vigilarConsola } = require('./consola.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 const PDF = process.argv.find((a) => a.endsWith('.pdf'))
@@ -35,9 +36,7 @@ app.whenReady().then(async () => {
     },
   });
 
-  win.webContents.on('console-message', (e) => {
-    if (e.level >= 2) problemas.push(`consola[${e.level}] ${e.message.slice(0, 200)}`);
-  });
+  vigilarConsola(win, problemas);
   win.webContents.on('did-fail-load', (_e, code, desc, url) => {
     problemas.push(`no cargó (${code} ${desc}) → ${url}`);
   });

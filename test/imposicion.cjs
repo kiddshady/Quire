@@ -12,6 +12,7 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { vigilarConsola } = require('./consola.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 const HTML = path.join(RAIZ, 'renderer', '_imposicion.html');
@@ -27,7 +28,7 @@ app.whenReady().then(async () => {
 
   const win = new BrowserWindow({ show: false, width: 900, height: 700 });
   const errores = [];
-  win.webContents.on('console-message', (e) => { if (e.level >= 2) errores.push(e.message.slice(0, 180)); });
+  vigilarConsola(win, errores, { largo: 180 });
   await win.loadFile(HTML);
 
   const r = await win.webContents.executeJavaScript(`(async () => {

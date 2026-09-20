@@ -14,6 +14,7 @@ const { app, BrowserWindow } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const { vigilarConsola } = require('./consola.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 const MOODLE = path.join(__dirname, 'fixtures', 'ejemplo-moodle.htm');
@@ -79,9 +80,7 @@ app.whenReady().then(async () => {
     webPreferences: { preload: path.join(RAIZ, 'preload.cjs'), contextIsolation: true, nodeIntegration: false },
   });
   conversion.iniciar(() => win);
-  win.webContents.on('console-message', (e) => {
-    if (e.level >= 2) problemas.push(`consola[${e.level}] ${e.message.slice(0, 200)}`);
-  });
+  vigilarConsola(win, problemas);
   await win.loadFile(path.join(RAIZ, 'renderer', 'index.html'));
   win.showInactive();
   await esperar(1400);

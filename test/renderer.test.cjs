@@ -13,6 +13,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const { app, BrowserWindow } = require('electron');
+const { vigilarConsola } = require('./consola.cjs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
@@ -35,7 +36,7 @@ app.whenReady().then(async () => {
     webPreferences: { preload: path.join(ROOT, 'preload.cjs'), contextIsolation: true },
   });
   const errores = [];
-  win.webContents.on('console-message', (e) => { if (e.level >= 2) errores.push(`${e.level}: ${e.message}`); });
+  vigilarConsola(win, errores);
   await win.loadFile(path.join(ROOT, 'renderer', 'index.html'));
   win.show();
   await sleep(2200);

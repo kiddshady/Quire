@@ -23,6 +23,7 @@ const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { vigilarConsola } = require('./consola.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 
@@ -100,7 +101,7 @@ app.whenReady().then(async () => {
   });
 
   const errores = [];
-  win.webContents.on('console-message', (e) => { if (e.level >= 2) errores.push(e.message.slice(0, 200)); });
+  vigilarConsola(win, errores);
 
   await win.loadFile(path.join(RAIZ, 'renderer', 'index.html'));
   win.showInactive();

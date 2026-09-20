@@ -17,6 +17,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 const { app, BrowserWindow, nativeImage } = require('electron');
 const path = require('node:path');
+const { vigilarConsola } = require('./consola.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 const PDF = process.argv.find((a) => a.endsWith('.pdf'))
@@ -54,7 +55,7 @@ app.whenReady().then(async () => {
   });
 
   const errores = [];
-  win.webContents.on('console-message', (e) => { if (e.level >= 2) errores.push(e.message.slice(0, 180)); });
+  vigilarConsola(win, errores, { largo: 180 });
 
   await win.loadFile(path.join(RAIZ, 'renderer', 'index.html'));
   win.showInactive();
@@ -91,8 +92,18 @@ app.whenReady().then(async () => {
       const y0 = Math.max(0, Math.floor(desdePt * ky));
       const y1 = Math.min(bh, Math.ceil(hastaPt * ky));
 
-      const d = canvas.getContext('2d', { willReadFrequently: true })
-        .getImageData(x0, y0, x1 - x0, y1 - y0).data;
+      /* Se lee de una COPIA y no del canvas de la hoja. El de la hoja ya tiene
+         su contexto (lo creó pdf.js al pintar, sin willReadFrequently), y
+         getContext() con opciones distintas devuelve ese mismo contexto
+         ignorando las nuestras: leerle píxeles hace que Chromium avise por
+         consola, y desde que los smokes escuchan la consola, ese aviso es un
+         warning que hace fallar el test por una lectura que es del test. */
+      const copia = document.createElement('canvas');
+      copia.width = x1 - x0;
+      copia.height = y1 - y0;
+      const ctx = copia.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(canvas, x0, y0, x1 - x0, y1 - y0, 0, 0, x1 - x0, y1 - y0);
+      const d = ctx.getImageData(0, 0, x1 - x0, y1 - y0).data;
 
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, n = 0;
       for (let y = 0; y < y1 - y0; y++) {
