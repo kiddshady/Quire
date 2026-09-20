@@ -101,6 +101,10 @@ const DEFAULT_SETTINGS = {
      primera. Es una lista y no una ruta sola desde que Quire abre varios
      documentos a la vez. */
   ultimosDocumentos: [],
+  /* En qué lugar de la franja estaba la activa, que la lista de arriba pierde
+     al ponerla primera. Con esto el orden en que acomodaste las pestañas
+     vuelve igual al reabrir. */
+  posicionActiva: 0,
 };
 
 /** Migraciones: cada función lleva el archivo de la versión N a la N+1.

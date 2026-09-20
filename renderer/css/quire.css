@@ -121,6 +121,26 @@
 }
 .qr-tab.is-active::after { transform: scaleX(1); }
 
+/* Arrastrar para reordenar — el gesto vive en pestanas.js. La arrastrada sigue
+   al puntero y por eso NO transiciona su transform: un retardo entre la mano
+   y la pestaña se siente como arrastrar por barro. Las vecinas sí: se corren
+   solas a hacerle lugar, y eso tiene que verse llegar. Al soltar, la clase se
+   va y la arrastrada recupera la transición para deslizarse hasta su hueco,
+   todavía levantada: aterriza al llegar, no al soltar. */
+.qr-tabs.is-reordering .qr-tab:not(.is-dragging) {
+  transition: var(--tr-color), var(--tr-move);
+}
+/* Levantada: sube de plano con sombra, como todo lo que flota en la casa. Va
+   DESPUÉS de :hover y de .is-active para pisarles el fondo con la misma
+   especificidad. */
+.qr-tab.is-dragging,
+.qr-tab.is-settling {
+  z-index: 1;
+  color: var(--ox-text);
+  background: var(--ox-wash-3);
+  box-shadow: 0 4px 14px rgb(0 0 0 / .45);
+}
+
 /* El nombre se corta con elipsis y el título entero vive en el tooltip. */
 .qr-tab__nombre {
   flex: 1 1 auto;

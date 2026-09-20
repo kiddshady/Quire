@@ -17,8 +17,8 @@ import { fmtBytes, relTime } from './format.js';
 import { designHTML, wireDesign } from './design-view.js';
 import * as Actualizar from './actualizar.js';
 import {
-  S, abrir, cerrar, activar, activarRelativa, rutasAbiertas, guardarTodo,
-  cargarImpresoras, emitir, alCambiar, impresoraActual, MAX_PESTANAS,
+  S, abrir, cerrar, activar, activarRelativa, mover, rutasAbiertas, posicionActiva,
+  guardarTodo, cargarImpresoras, emitir, alCambiar, impresoraActual, MAX_PESTANAS,
 } from './estado.js';
 import * as Pestanas from './pestanas.js';
 import { viewLector, atajosLector } from './views/lector.js';
@@ -59,7 +59,7 @@ async function cargar(archivo) {
    desde cada sitio que abre o cierra: la franja también cierra pestañas por su
    cuenta, y con dos caminos uno de los dos se olvida. */
 const recordarSesion = () =>
-  api.settings.save({ ultimosDocumentos: rutasAbiertas() }).catch(() => {});
+  api.settings.save({ ultimosDocumentos: rutasAbiertas(), posicionActiva: posicionActiva() }).catch(() => {});
 
 /**
  * Vuelve a abrir las pestañas de la sesión anterior.
@@ -87,9 +87,14 @@ async function restaurarSesion() {
   }
 
   /* La activa quedó siendo la ÚLTIMA que se abrió, y tiene que ser la primera
-     de la lista: es la que estabas leyendo. */
+     de la lista: es la que estabas leyendo. Y después vuelve al lugar de la
+     franja donde la habías dejado: se abrió primera para verla enseguida, no
+     porque fuera la primera. */
   const primera = S.pestanas[0];
-  if (primera) activar(primera.id);
+  if (primera) {
+    activar(primera.id);
+    mover(primera.id, S.settings.posicionActiva || 0);
+  }
 }
 
 /* Lo que el motor de conversión sabe leer. Es el mismo criterio que
@@ -487,6 +492,16 @@ function atajosPestanas(e) {
   if (e.key === 'Tab') {
     e.preventDefault();
     activarRelativa(e.shiftKey ? -1 : 1);
+    return true;
+  }
+
+  /* Ctrl+Shift+RePág / AvPág corre la activa un lugar, como en cualquier
+     navegador: es el mismo reordenar que arrastrar una pestaña, para quien
+     no suelta el teclado. */
+  if (e.shiftKey && (e.key === 'PageUp' || e.key === 'PageDown')) {
+    e.preventDefault();
+    const p = S.pestana;
+    if (p) mover(p.id, S.pestanas.indexOf(p) + (e.key === 'PageUp' ? -1 : 1));
     return true;
   }
 

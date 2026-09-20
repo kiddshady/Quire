@@ -261,6 +261,30 @@ export function activarRelativa(paso) {
   return activar(pestanas[i].id);
 }
 
+/**
+ * Corre una pestaña a otro lugar de la franja. `destino` es el índice donde
+ * tiene que quedar; se recorta a los bordes, así que pasarse no rompe nada.
+ *
+ * La activa sigue siendo la MISMA pestaña, esté donde esté después del
+ * corrimiento: mover una franja no es elegir un documento. Por eso acá se
+ * emite solo 'pestanas' y no 'documento' — el lector no tiene nada que
+ * repintar.
+ */
+export function mover(id, destino) {
+  const i = pestanas.findIndex((p) => p.id === id);
+  if (i < 0) return false;
+  const j = Math.max(0, Math.min(pestanas.length - 1, destino));
+  if (i === j) return false;
+
+  const actual = pestanas[activa];
+  const [p] = pestanas.splice(i, 1);
+  pestanas.splice(j, 0, p);
+  activa = pestanas.indexOf(actual);
+
+  emitir('pestanas');
+  return true;
+}
+
 /** Cierra una pestaña y activa la que ocupa su lugar. */
 export async function cerrarPestana(id) {
   const i = pestanas.findIndex((p) => p.id === id);
@@ -330,6 +354,17 @@ export function rutasAbiertas() {
   const orden = [...pestanas];
   if (activa > 0 && activa < orden.length) orden.unshift(...orden.splice(activa, 1));
   return orden.map((p) => p.doc?.ruta).filter(Boolean);
+}
+
+/**
+ * En qué lugar de la franja estaba la activa. Es lo que rutasAbiertas() pierde
+ * al ponerla primera, y hace falta para que el orden en que acomodaste las
+ * pestañas sobreviva a cerrar la app. Se cuenta sobre las que TIENEN ruta,
+ * que son las únicas que se van a restaurar: un documento sin ruta delante de
+ * la activa no va a estar en la próxima sesión para ocupar su lugar.
+ */
+export function posicionActiva() {
+  return pestanas.slice(0, activa).filter((p) => p.doc?.ruta).length;
 }
 
 /** Carga la lista de impresoras y elige una si todavía no hay. */

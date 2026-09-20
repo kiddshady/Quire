@@ -19,6 +19,11 @@
      pdf.js, cerrar UNA pestaña dejaría a las demás sin poder pintar. Por eso
      acá se cierra una y después se renderiza otra.
 
+   · Que reordenar sea de verdad: mover() cambia la lista sin perder la activa,
+     y arrastrar con el mouse —con eventos del sistema, no sintéticos— termina
+     en ese mismo mover(). Lo que se rompe acá es la aritmética de a qué lugar
+     va la pestaña, y eso no se ve leyendo el código.
+
    · Que esconder la franja no le coma el alto al cuerpo. Se pliega a 0 y NUNCA
      con `hidden`: un `display:none` la sacaría de ser ítem del grid y el
      cuerpo caería en la fila de alto automático que era de ella. El síntoma
@@ -324,6 +329,99 @@ async function correr() {
       !!n.error && /cerr/i.test(n.error), n.error || 'no tiró error');
     ok('y no queda una pestaña a medias', n.tras === n.max, `${n.tras}`);
     ok('el botón de abrir otro desaparece en el tope', !n.hayMas);
+  }
+
+  /* ── 5-bis. Reordenar ───────────────────────────────────────────────────── */
+  console.log('\n5-bis. Cambiar las pestañas de lugar');
+  notas.push(['mover', await js(`(async () => {
+    const est = await import('./js/estado.js');
+    const { S } = est;
+    const nombres = () => S.pestanas.map((p) => p.doc.nombre);
+    const enDom = () => [...document.querySelectorAll('.qr-tab__nombre')].map((n) => n.textContent);
+
+    // La activa es la última (recién abierta). Se mueve la PRIMERA al final:
+    // la activa tiene que seguir siendo la misma, corrida un lugar.
+    const activaAntes = S.pestana;
+    const orden = nombres();
+    const movida = est.mover(S.pestanas[0].id, 3);
+    const trasMover = { movida, orden: nombres(), dom: enDom(),
+                        activaSigue: S.pestana === activaAntes,
+                        posicion: est.posicionActiva() };
+
+    // Pasarse del borde se recorta, no explota; y al mismo lugar no hace nada.
+    const pasada = est.mover(S.pestanas[3].id, 99);
+    const primeraTrasPasada = nombres()[3];
+    const quieta = est.mover(S.pestanas[1].id, 1);
+
+    return { orden, trasMover, pasada, primeraTrasPasada, quieta, final: nombres() };
+  })()`)]);
+
+  {
+    const n = notas.at(-1)[1];
+    const esperado = [...n.orden.slice(1), n.orden[0]];
+    ok('mover() cambia el orden', n.trasMover.movida && n.trasMover.orden.join() === esperado.join(),
+      `${n.trasMover.orden.join(' / ')}`);
+    ok('y la franja se repinta en ese orden', n.trasMover.dom.join() === esperado.join(),
+      n.trasMover.dom.join(' / '));
+    ok('la activa sigue siendo la misma pestaña', n.trasMover.activaSigue);
+    ok('corrida un lugar', n.trasMover.posicion === 2, `posición ${n.trasMover.posicion}`);
+    ok('pasarse del borde se recorta', !n.pasada && n.primeraTrasPasada === esperado[3], n.primeraTrasPasada);
+    ok('y moverla a donde ya está no hace nada', !n.quieta);
+  }
+
+  /* El gesto de verdad, con eventos de mouse del sistema y no sintéticos:
+     setPointerCapture() rechaza un pointerId inventado, así que un
+     PointerEvent despachado a mano nunca llegaría a arrastrar nada. */
+  console.log('\n5-ter. Arrastrar una pestaña');
+  {
+    const rects = await js(`(() => [...document.querySelectorAll('.qr-tab')].map((t) => {
+      const r = t.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    }))()`);
+    const nombresAntes = await js(`(async () => (await import('./js/estado.js')).S.pestanas.map((p) => p.doc.nombre))()`);
+
+    // De la primera a la tercera, con pasos intermedios como un mouse real, y
+    // unos píxeles PASADOS del centro de la tercera: es cruzar el centro de
+    // una vecina lo que te da su lugar, y quedarse clavado justo encima es
+    // un empate que ninguna mano de verdad produce.
+    const de = rects[0]; const a = { x: rects[2].x + 6, y: rects[2].y };
+    const raton = (type, x, y, extra = {}) => win.webContents.sendInputEvent({ type, x, y, button: 'left', ...extra });
+    raton('mouseDown', de.x, de.y, { clickCount: 1 });
+    const pasos = 12;
+    for (let i = 1; i <= pasos; i++) {
+      raton('mouseMove', Math.round(de.x + (a.x - de.x) * i / pasos), de.y);
+      await esperar(16);
+    }
+    // A mitad de camino: la arrastrada está levantada y las vecinas corridas.
+    const enVuelo = await js(`(() => {
+      const tabs = [...document.querySelectorAll('.qr-tab')];
+      return {
+        levantada: tabs.findIndex((t) => t.classList.contains('is-dragging')),
+        corridas: tabs.filter((t) => /translateX\\(-/.test(t.style.transform)).length,
+        franja: document.getElementById('qr-tabs').classList.contains('is-reordering'),
+      };
+    })()`);
+    raton('mouseUp', a.x, de.y, { clickCount: 1 });
+    await esperar(500);
+
+    const despues = await js(`(async () => {
+      const est = await import('./js/estado.js');
+      const tabs = [...document.querySelectorAll('.qr-tab')];
+      return {
+        orden: est.S.pestanas.map((p) => p.doc.nombre),
+        activa: est.S.doc.nombre,
+        sucias: tabs.filter((t) => t.style.transform || t.classList.contains('is-dragging') || t.classList.contains('is-settling')).length,
+        franja: document.getElementById('qr-tabs').classList.contains('is-reordering'),
+      };
+    })()`);
+
+    ok('en vuelo, la arrastrada está levantada', enVuelo.levantada === 0, `índice ${enVuelo.levantada}`);
+    ok('y las dos que pasó se corrieron a la izquierda', enVuelo.corridas === 2, `${enVuelo.corridas}`);
+    ok('la franja sabe que está reordenando', enVuelo.franja);
+    const esperado = [nombresAntes[1], nombresAntes[2], nombresAntes[0], nombresAntes[3]];
+    ok('al soltar, la primera quedó tercera', despues.orden.join() === esperado.join(), despues.orden.join(' / '));
+    ok('y pasó a ser la activa', despues.activa === nombresAntes[0], despues.activa);
+    ok('no queda ningún transform ni clase colgada', despues.sucias === 0 && !despues.franja, `${despues.sucias}`);
   }
 
   /* ── 6. Cerrar: a dónde salta, y el worker sigue vivo ───────────────────── */

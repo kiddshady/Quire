@@ -171,7 +171,7 @@ npm run verificar     # las once suites
 | `npm run tinta` | El vuelco de la Y, el contorno, el borrador y el historial |
 | `npm run seleccion` | Rasteriza la página y compara: los spans invisibles tienen que caer sobre las letras |
 | `npm run buscar` | Genera un PDF con los casos difíciles y mide **dónde cae cada marca**: el resaltado tiene que caer sobre las mismas letras que el span de la capa de texto |
-| `npm run pestanas` | Abre varios PDFs: que el estado sea de cada pestaña y que el worker compartido sobreviva a cerrar una |
+| `npm run pestanas` | Abre varios PDFs: que el estado sea de cada pestaña, que arrastrar una la cambie de lugar y que el worker compartido sobreviva a cerrar una |
 | `npm run cerrar` | Levanta la app entera y la cierra: que el último trazo llegue al disco **y que la ventana siga cerrándose** |
 | `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético |
 | `npm run apertura` | Lanza la app **como proceso**, con un PDF en la línea de comandos |
