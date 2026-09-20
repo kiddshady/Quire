@@ -874,6 +874,105 @@
 /* Anotando, la hoja se despega un poco más: se pasa de leer a intervenir. */
 .qr-visor.is-anotando .qr-pliego { box-shadow: var(--ox-e3); }
 
+/* ── El puck de navegación ───────────────────────────────────────────────────
+   Con la barra espaciadora apretada mientras se anota (ver "Navegar con el
+   puck" en lector.js). Mientras dura, los canvas de tinta dejan pasar el
+   puntero: el visor es el que escucha, y con el lápiz apoyado no hay que
+   arrancar un trazo ni seleccionar texto. */
+.qr-visor.is-navegando .qr-tinta { pointer-events: none; }
+.qr-visor.is-navegando { user-select: none; touch-action: none; }
+
+/* La pista escalándose en vivo. El transform se pone desde el lector, con el
+   origen en el centro del disco; acá solo se avisa al compositor. */
+.qr-pista.is-escalando { will-change: transform; }
+
+/* La capa donde vive el disco: del alto del cuerpo y del ancho del visor, con
+   el borde izquierdo puesto por el lector porque se mueve con el panel. Va
+   fuera del visor para que el scroll no se la lleve, y recorta para que el
+   disco no asome por encima del panel cuando se muestra cerca del borde. */
+.qr-puck-ancla {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  left: var(--qr-panel-w);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* El disco no recibe eventos — es puro afiche, el reparto entre zonas lo hace
+   la aritmética en lector.js. Sus superficies son translúcidas a propósito:
+   flota sobre la hoja justo cuando la estás mirando para navegar, y taparla
+   entera sería contraproducente. Sobre el papel blanco quedan como un gris
+   profundo, que es lo que se quiere: se lee como un instrumento apoyado. */
+.qr-puck {
+  --puck-anillo: color-mix(in oklch, var(--ox-s2) 82%, transparent);
+  --puck-nucleo: color-mix(in oklch, var(--ox-s3) 82%, transparent);
+  --puck-hi:     color-mix(in oklch, var(--ox-s4) 88%, transparent);
+  --puck-on:     color-mix(in oklch, var(--ox-s4) 96%, transparent);
+  --puck-linea:  var(--ox-line-3);
+
+  position: absolute;
+  left: 0; top: 0;
+  width: 112px; height: 112px;
+  /* centrado por margen y no por transform: deja el transform entero libre
+     para la animación de entrada */
+  margin: -56px 0 0 -56px;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(.82);
+  transition: opacity var(--ox-t-2) var(--ox-ease), transform var(--ox-t-2) var(--ox-ease);
+}
+.qr-puck.is-visible { opacity: 1; transform: scale(1); }
+
+/* El vidrio: desenfoca lo que hay debajo para que el disco se lea sobre
+   cualquier hoja, y la sombra lo despega del papel. */
+.qr-puck__vidrio {
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  backdrop-filter: blur(9px);
+  box-shadow: var(--ox-e3);
+}
+.qr-puck__art { position: absolute; inset: 0; display: block; }
+
+.qr-puck__anillo {
+  fill: none;
+  stroke: var(--puck-anillo);
+  transition: stroke var(--ox-t-1) var(--ox-ease-soft);
+}
+.qr-puck__nucleo {
+  fill: var(--puck-nucleo);
+  transition: fill var(--ox-t-1) var(--ox-ease-soft);
+}
+.qr-puck__borde { fill: none; stroke: var(--puck-linea); stroke-width: 1; }
+.qr-puck__rayo  { stroke: var(--puck-linea); stroke-width: 1.5; stroke-linecap: round; }
+
+.qr-puck__glifo {
+  fill: none;
+  stroke: var(--ox-text-2);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke var(--ox-t-1) var(--ox-ease-soft);
+}
+
+/* La zona bajo el puntero se ilumina: el disco se comporta como un botón
+   aunque no reciba un solo evento. */
+.qr-puck[data-hover="anillo"] .qr-puck__anillo { stroke: var(--puck-hi); }
+.qr-puck[data-hover="anillo"] .qr-puck__flecha { stroke: var(--ox-text); }
+.qr-puck[data-hover="nucleo"] .qr-puck__nucleo { fill: var(--puck-hi); }
+.qr-puck[data-hover="nucleo"] .qr-puck__lupa   { stroke: var(--ox-text); }
+
+/* Mientras el gesto corre, el acento marca cuál de las dos zonas está mandando
+   — y se queda SOLO en los glifos, como en el rail: cuatro trazos de 2 px se
+   leen igual que un disco entero teñido y no compiten con la hoja. La otra
+   zona se apaga, que es la mitad de la señal. */
+.qr-puck[data-activo="anillo"] .qr-puck__anillo { stroke: var(--puck-on); }
+.qr-puck[data-activo="anillo"] .qr-puck__flecha { stroke: var(--ox-accent); }
+.qr-puck[data-activo="anillo"] .qr-puck__lupa   { stroke: var(--ox-text-3); }
+.qr-puck[data-activo="nucleo"] .qr-puck__nucleo { fill: var(--puck-on); }
+.qr-puck[data-activo="nucleo"] .qr-puck__lupa   { stroke: var(--ox-accent); }
+.qr-puck[data-activo="nucleo"] .qr-puck__flecha { stroke: var(--ox-text-3); }
+
 /* ── Barra de herramientas de tinta ──────────────────────────────────────── */
 
 .qr-tintabarra {

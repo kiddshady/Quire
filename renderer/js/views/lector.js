@@ -21,6 +21,7 @@ import { paint, head, empty, esc } from '../ui.js';
 import { raf2 } from '../motion.js';
 import { HERRAMIENTAS, COLORES } from '../tinta/capa.js';
 import { cablearTinta } from '../tinta/editor.js';
+import { montarPuck } from '../puck.js';
 import { registrar as registrarSeleccion, olvidar as olvidarSeleccion, olvidarTodo as olvidarSelecciones } from '../pdf/seleccion.js';
 import { buscadorDe, ubicar } from '../pdf/buscador.js';
 
@@ -49,6 +50,13 @@ const V = {
   colores: { pluma: '#1a1a1a', fibra: '#c0392b', resaltador: '#f1c40f' },
   anchos: { pluma: 1.8, fibra: 4.5, resaltador: 14, borrador: 16 },
   editores: new Map(),     // nº de página → editor de tinta cableado
+
+  /* El puck. Solo existe mientras la vista está pintada: se monta en
+     cablearNavegacion() y se va con el DOM. Ver "Navegar con el puck". */
+  puck: null,
+  navegando: false,        // la barra espaciadora está apretada, anotando
+  gesto: null,             // el arrastre en curso sobre el disco, si hay
+  puntero: null,           // dónde está el puntero sobre el visor, en px del visor
 
   /* Búsqueda. El ÍNDICE no está acá: vive colgado del documento (buscadorDe),
      así que volver a una pestaña no vuelve a leer el libro entero. Lo que hay
@@ -953,6 +961,7 @@ function alternarTinta(forzar = null) {
      el visor y no en cada pliego para que un solo toggle alcance. */
   V.visor?.classList.toggle('is-anotando', V.tintaActiva);
   if (V.tintaActiva) pintarBarraTinta();
+  else if (V.navegando) salirNav();
 }
 
 function pintarBarraTinta() {
@@ -1127,6 +1136,216 @@ function rehacerTinta() {
   actualizarBarraTinta();
 }
 
+/* ── Navegar con el puck ─────────────────────────────────────────────────────
+   Mientras se anota, el canvas de tinta se queda con el puntero y el lápiz no
+   puede ni scrollear ni acercarse. Con la barra espaciadora apretada aparece
+   el disco de puck.js bajo el puntero: apoyar en el núcleo y arrastrar hace
+   zoom, apoyar en el anillo —o en cualquier otro lado del visor— desplaza.
+   Es el gesto de Scrawl, para no soltar el lápiz.
+
+   El visor escucha los eventos, no el disco (que es puro afiche): con la
+   clase is-navegando los canvas de tinta dejan pasar el puntero y el
+   pointerdown cae acá. Soltar la barra a mitad de un arrastre no lo corta:
+   el gesto empezado manda, y el disco se queda hasta que el lápiz se levante.
+
+   ── El zoom en vivo ───────────────────────────────────────────────────────
+   Reescalar de verdad es volver a pedirle a pdf.js cada página, y hacerlo
+   por frame mientras se arrastra sería imposible. Mientras dura el gesto la
+   pista entera se escala con un transform con origen en el centro del disco
+   —lo que está debajo del puck es lo que no se mueve—, y al soltar se hace el
+   reescalado de verdad y se corrige el scroll para que ese mismo punto del
+   papel siga bajo el disco. Las hojas se ven borrosas un instante al llegar,
+   igual que con Ctrl+rueda: es el bitmap viejo estirado hasta que se
+   nitidiza. */
+
+/* Cuántos píxeles de arrastre duplican la escala. Es el número de Scrawl:
+   con 180, el núcleo entero (48 px) cubre un 20 % de zoom, que es el rango en
+   el que uno ajusta, y cruzar el visor de arriba abajo lleva de ver la hoja
+   entera a mirar la letra. */
+const ZOOM_ARRASTRE_PX = 180;
+
+/** Dónde cayó un evento, en px del visor (0,0 = su esquina, sin el scroll). */
+function enVisor(e) {
+  const r = V.visor.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+function cablearNavegacion() {
+  const ancla = document.getElementById('qr-puck-ancla');
+  if (!ancla || !V.visor) return;
+  const visor = V.visor;
+
+  V.puck = montarPuck(ancla);
+  V.navegando = false;
+  V.gesto = null;
+  V.puntero = null;
+
+  visor.addEventListener('pointermove', (e) => {
+    const pt = enVisor(e);
+    V.puntero = pt;
+
+    const g = V.gesto;
+    if (!g) {
+      if (V.navegando) V.puck.hover(V.puck.zonaEn(pt.x, pt.y));
+      return;
+    }
+    if (e.pointerId !== g.puntero) return;
+
+    if (g.tipo === 'pan') {
+      visor.scrollLeft = g.sl - (pt.x - g.x0);
+      visor.scrollTop = g.st - (pt.y - g.y0);
+      return;
+    }
+    /* Función de cuánto se movió la mano desde que apoyó, no acumulado frame
+       a frame: volver al punto de partida devuelve la escala exacta. El tope
+       es el mismo de zoomA(), aplicado acá para que la vista previa no
+       prometa un zoom que después no se cumple. */
+    const objetivo = Math.max(0.05, Math.min(8, g.escala * Math.pow(2, (g.y0 - pt.y) / ZOOM_ARRASTRE_PX)));
+    g.k = objetivo / g.escala;
+    zoomVivo(g);
+  });
+  visor.addEventListener('pointerleave', () => {
+    V.puntero = null;
+    if (V.navegando && !V.gesto) V.puck.hover(null);
+  });
+
+  visor.addEventListener('pointerdown', (e) => {
+    if (!V.navegando || V.gesto || e.button !== 0) return;
+    /* Sin esto el navegador arranca una selección de texto o le da el foco a
+       lo que haya abajo, y el arrastre se ve peleando con eso. */
+    e.preventDefault();
+    const pt = enVisor(e);
+    visor.setPointerCapture(e.pointerId);
+
+    if (V.puck.zonaEn(pt.x, pt.y) === 'nucleo') {
+      // el zoom pivotea sobre el centro del disco, no sobre donde apoyaste: el
+      // puck es la lupa, y lo que está abajo del disco es lo que no se mueve
+      V.gesto = { tipo: 'zoom', puntero: e.pointerId, y0: pt.y, escala: escalaActual(), k: 1, ax: V.puck.x, ay: V.puck.y };
+      V.puck.activo('nucleo');
+      prepararZoomVivo(V.gesto);
+    } else {
+      V.gesto = { tipo: 'pan', puntero: e.pointerId, x0: pt.x, y0: pt.y, sl: visor.scrollLeft, st: visor.scrollTop };
+      V.puck.activo('anillo');
+    }
+  });
+
+  const soltar = (e) => {
+    const g = V.gesto;
+    if (!g || e.pointerId !== g.puntero) return;
+    V.gesto = null;
+    V.puck.activo(null);
+    if (g.tipo === 'zoom') asentarZoom(g);
+
+    if (V.navegando) V.puck.hover(V.puntero ? V.puck.zonaEn(V.puntero.x, V.puntero.y) : null);
+    /* La barra se soltó a mitad del arrastre y el gesto se dejó terminar
+       igual: recién ahora se apaga el modo navegación. */
+    else salirNav();
+  };
+  visor.addEventListener('pointerup', soltar);
+  visor.addEventListener('pointercancel', soltar);
+
+  /* Soltar la barra. Va en window y no en el visor: el foco puede estar en
+     cualquier botón de la barra de tinta. Y se previene el default por lo
+     mismo: un keyup de espacio sobre un botón con foco le dispara el click, y
+     el último botón que tocaste fue, casi seguro, el lapicito. */
+  const alSoltarTecla = (e) => {
+    if (e.key !== ' ' || !V.tintaActiva) return;
+    if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    e.preventDefault();
+    if (!V.navegando) return;
+    V.navegando = false;
+    if (!V.gesto) salirNav();
+  };
+  // Si la ventana pierde el foco con la barra apretada, el keyup nunca llega.
+  const alPerderFoco = () => { if (V.navegando && !V.gesto) salirNav(); };
+  window.addEventListener('keyup', alSoltarTecla);
+  window.addEventListener('blur', alPerderFoco);
+
+  Router.onLeave(() => {
+    window.removeEventListener('keyup', alSoltarTecla);
+    window.removeEventListener('blur', alPerderFoco);
+    V.puck = null;
+    V.navegando = false;
+    V.gesto = null;
+    V.puntero = null;
+  });
+}
+
+function entrarNav() {
+  if (!V.puck || !V.visor) return;
+  V.navegando = true;
+  /* La capa del disco se calza sobre el visor: el panel lateral puede estar
+     plegado o no, y el borde izquierdo del visor se mueve con eso. */
+  document.getElementById('qr-puck-ancla').style.left = `${V.visor.offsetLeft}px`;
+  // sin puntero sobre el visor (la barra se apretó con el mouse afuera) el
+  // disco va al centro: sigue sirviendo, y ahí el zoom pivotea en el medio
+  const x = V.puntero ? V.puntero.x : V.visor.clientWidth / 2;
+  const y = V.puntero ? V.puntero.y : V.visor.clientHeight / 2;
+  V.puck.mostrar(x, y);
+  V.puck.hover(V.puck.zonaEn(x, y));
+  V.visor.classList.add('is-navegando');
+}
+
+function salirNav() {
+  V.navegando = false;
+  V.puck?.ocultar();
+  V.visor?.classList.remove('is-navegando');
+}
+
+function prepararZoomVivo(g) {
+  const pista = V.visor.querySelector('.qr-pista');
+  g.pista = pista;
+  pista.classList.add('is-escalando');
+  /* A 'fijo' desde el primer frame, no al soltar. La pista escalada agranda el
+     área de scroll y le hace aparecer la barra horizontal al visor; eso lo
+     achica, el ResizeObserver lo ve, y en modo 'ancho' respondería con un
+     reescalar() en mitad del gesto que salta al tope de la página. Con la
+     misma escala en 'fijo' no cambia nada a la vista y el observador no
+     tiene nada que hacer. Si el gesto termina en nada, se devuelve el modo. */
+  g.modo = S.modoZoom;
+  S.modoZoom = 'fijo';
+  S.zoom = g.escala;
+  // el origen va en coordenadas de la pista, que es el visor más el scroll
+  pista.style.transformOrigin = `${g.ax + V.visor.scrollLeft}px ${g.ay + V.visor.scrollTop}px`;
+}
+
+function zoomVivo(g) {
+  g.pista.style.transform = `scale(${g.k})`;
+  // el porcentaje de la barra sigue al gesto: es el único número que importa
+  const z = document.getElementById('qr-zoom-valor');
+  if (z) z.textContent = `${Math.round(g.escala * g.k * 100)}%`;
+}
+
+/** Al soltar el núcleo: el reescalado de verdad, con el mismo punto del papel bajo el disco. */
+function asentarZoom(g) {
+  const visor = V.visor;
+  g.pista.classList.remove('is-escalando');
+  g.pista.style.transform = '';
+  g.pista.style.transformOrigin = '';
+
+  if (Math.abs(g.k - 1) < 0.01) { S.modoZoom = g.modo; actualizarBarra(); return; }
+
+  /* Qué punto del papel había bajo el disco, como página + fracción de la
+     hoja: es lo que tiene que seguir bajo el disco cuando las hojas cambien
+     de tamaño. Se busca por rectángulo y no por offsetTop porque el
+     offsetParent de un pliego es el cuerpo del lector, no el visor. */
+  const vr = visor.getBoundingClientRect();
+  let ancla = null;
+  for (const el of visor.querySelectorAll('.qr-pliego')) {
+    const r = el.getBoundingClientRect();
+    const top = r.top - vr.top;
+    if (g.ay < top) break;
+    ancla = { el, fx: (g.ax - (r.left - vr.left)) / r.width, fy: (g.ay - top) / r.height };
+  }
+
+  zoomA(g.escala * g.k);
+  if (!ancla) return;
+
+  const r = ancla.el.getBoundingClientRect();
+  visor.scrollTop += (r.top - vr.top) + ancla.fy * r.height - g.ay;
+  visor.scrollLeft += (r.left - vr.left) + ancla.fx * r.width - g.ax;
+}
+
 /* ── Zoom ────────────────────────────────────────────────────────────────── */
 
 function zoomA(valor, { modo = 'fijo' } = {}) {
@@ -1225,6 +1444,9 @@ export function viewLector() {
         <div class="qr-visor" id="qr-visor" tabindex="0">
           <div class="qr-pista"></div>
         </div>
+        <!-- Donde vive el puck: una capa del tamaño exacto del visor, fuera
+             de él para que el scroll no se la lleve. Ver quire.css. -->
+        <div class="qr-puck-ancla" id="qr-puck-ancla"></div>
       </div>
     </div>`);
 
@@ -1241,6 +1463,7 @@ export function viewLector() {
   raf2(() => irA(S.pagina, { suave: false }));
 
   cablear();
+  cablearNavegacion();
 
   /* El ancho disponible cambia con la ventana y al plegar el panel: en modo
      ajustado, el zoom tiene que seguirlo. */
@@ -1331,6 +1554,15 @@ function cablear() {
 export function atajosLector(e) {
   if (!S.doc || Router.name !== 'lector') return false;
   const enCampo = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
+
+  /* Anotando, la barra espaciadora es el puck (ver "Navegar con el puck") y
+     va ANTES de la página siguiente, que es lo que sigue siendo sin tinta.
+     Se traga también los repeat de Windows: mantener la barra es el gesto. */
+  if (!enCampo && e.key === ' ' && V.tintaActiva && V.puck) {
+    e.preventDefault();
+    if (!e.repeat && !V.navegando) entrarNav();
+    return true;
+  }
 
   if (!enCampo && (e.key === 'PageDown' || (e.key === ' ' && !e.shiftKey))) {
     e.preventDefault(); irA(Math.min(S.doc.paginas, S.pagina + 1)); return true;

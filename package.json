@@ -37,6 +37,7 @@
     "seleccion": "electron test/seleccion.cjs",
     "buscar": "electron test/buscar.cjs",
     "pestanas": "electron test/pestanas.cjs",
+    "puck": "electron test/puck.cjs",
     "cerrar": "electron test/cerrar.cjs",
     "apertura": "node test/apertura.cjs",
     "verificar": "npm test && npm run ocr && npm run convertir && npm run imposicion && npm run tinta && npm run seleccion && npm run buscar && npm run pestanas && npm run cerrar && npm run humo && npm run apertura",

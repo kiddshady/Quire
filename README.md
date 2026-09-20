@@ -63,7 +63,10 @@ es el dato que ningún visor muestra y la causa de la mitad de los recortes.
 
 **Anotar** — con la tablet, con presión real. Los trazos se guardan aparte: el
 PDF original nunca se toca. Al imprimir o exportar se aplanan como paths
-vectoriales sobre una copia — sin convertir el documento ni partirlo.
+vectoriales sobre una copia — sin convertir el documento ni partirlo. Y para
+moverse sin soltar el lápiz, el **puck** de Scrawl: con la barra espaciadora
+apretada aparece un disco bajo el puntero — arrastrar el núcleo hace zoom,
+arrastrar el anillo desplaza.
 
 **Organizar** — reordenar, rotar, borrar y extraer páginas.
 
@@ -171,6 +174,7 @@ npm run verificar     # las once suites
 | `npm run tinta` | El vuelco de la Y, el contorno, el borrador y el historial |
 | `npm run seleccion` | Rasteriza la página y compara: los spans invisibles tienen que caer sobre las letras |
 | `npm run buscar` | Genera un PDF con los casos difíciles y mide **dónde cae cada marca**: el resaltado tiene que caer sobre las mismas letras que el span de la capa de texto |
+| `npm run puck` | Prende la tinta y aprieta la barra con eventos del sistema: que el disco aparezca bajo el puntero, que el anillo mueva el scroll píxel por píxel y que el núcleo termine en un zoom real con el mismo punto del papel bajo el disco |
 | `npm run pestanas` | Abre varios PDFs: que el estado sea de cada pestaña, que arrastrar una la cambie de lugar y que el worker compartido sobreviva a cerrar una |
 | `npm run cerrar` | Levanta la app entera y la cierra: que el último trazo llegue al disco **y que la ventana siga cerrándose** |
 | `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético |
