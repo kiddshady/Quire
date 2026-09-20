@@ -37,7 +37,8 @@ const ipc = require('./src/ipc.cjs');
 const store = require('./src/store.cjs');
 const documentos = require('./src/documentos.cjs');
 const actualizador = require('./src/actualizador.cjs');
-const { rutaDeArgv } = require('./src/argv.cjs');
+const conversion = require('./src/conversion.cjs');
+const { rutaDeArgv, loteDeArgv } = require('./src/argv.cjs');
 
 const DEV = process.argv.includes('--dev');
 
@@ -243,7 +244,40 @@ function entregar(ruta) {
   }
 }
 
+/* ── Convertir desde la línea de comandos ────────────────────────────────────
+   `Quire.exe --convertir examen.htm --a pdf,md`: sin ventana, convierte y
+   sale. Las salidas caen al lado de cada original; el código de salida es 0
+   si todo salió y 1 si algo falló, y el detalle va a un `quire-convertir.json`
+   junto a la primera salida — porque una app de ventana en Windows no tiene
+   consola a la que escribir. Existe para convertir desde un script y para
+   probar el motor en la app EMPAQUETADA, donde el asar y los modelos de OCR
+   viven en otro lado que en desarrollo. */
+async function convertirYSalir(lote) {
+  const fs = require('node:fs/promises');
+  let codigo = 1;
+  try {
+    if (!lote.files.length) throw new Error('--convertir necesita al menos un archivo.');
+    const res = await conversion.convertir({
+      files: lote.files, outputs: lote.outputs, options: { destino: { modo: 'junto' } },
+    });
+    const informe = { version: app.getVersion(), empaquetada: app.isPackaged, ...res };
+    const dir = res.outDirs[0] || path.dirname(lote.files[0]);
+    await fs.writeFile(path.join(dir, 'quire-convertir.json'), JSON.stringify(informe, null, 2), 'utf8');
+    console.log(JSON.stringify(informe, null, 2));
+    codigo = res.results.every((r) => r.ok) ? 0 : 1;
+  } catch (err) {
+    console.error('[convertir]', err);
+  }
+  app.exit(codigo);
+}
+
 function arrancar() {
+  const lote = loteDeArgv(process.argv, app.isPackaged);
+  if (lote) {
+    app.whenReady().then(() => convertirYSalir(lote));
+    return;
+  }
+
   entregar(rutaDeArgv(process.argv, app.isPackaged));
 
   app.whenReady().then(async () => {
@@ -251,6 +285,7 @@ function arrancar() {
     /* El actualizador se engancha a la ventana por función y no por referencia:
        cuando esto corre, `win` todavía es null. */
     actualizador.iniciar(() => win);
+    conversion.iniciar(() => win);
     createWindow(await loadWindowState());
   });
 }
@@ -262,7 +297,11 @@ function arrancar() {
    En desarrollo no se pide, y no es un detalle: el lock es por `userData`, que
    es el MISMO en dev que en la app instalada. Sin esta excepción, `npm run dev`
    con Quire abierta se cerraría sola y parecería que la app está rota. */
-if (!DEV && !app.requestSingleInstanceLock()) {
+/* El lote por línea de comandos no pide el lock: tiene que poder correr con
+   Quire abierta, y no abre ventana que pisar. */
+const SIN_VENTANA = !!loteDeArgv(process.argv, app.isPackaged);
+
+if (!DEV && !SIN_VENTANA && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', (_e, argv) => {
@@ -276,6 +315,10 @@ if (!DEV && !app.requestSingleInstanceLock()) {
 }
 
 app.on('window-all-closed', () => {
+  /* En el modo sin ventana la única que se abre y se cierra es la oculta de
+     printToPDF: si eso cerrara la app, el lote moriría después del primer
+     PDF, con las otras salidas sin escribir. */
+  if (SIN_VENTANA) return;
   if (process.platform !== 'darwin') app.quit();
 });
 

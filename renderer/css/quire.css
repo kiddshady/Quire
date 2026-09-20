@@ -1641,3 +1641,76 @@
 }
 
 .qr-stat-act .ox-statusbar__value { color: inherit; }
+
+/* ═══ CONVERTIR ══════════════════════════════════════════════════════════════
+   La cola a la izquierda y el inspector de opciones a la derecha, como en
+   Imprimir. El inspector reusa .qr-inspector y .qr-pie tal cual. */
+
+.qr-conv__cola {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* .ox-scroll ya pone el padding vertical (= al fade) y la máscara. La
+     sangría lateral es la del encabezado de la vista. */
+  padding-left: var(--ox-6);
+  padding-right: var(--ox-6);
+}
+
+.qr-conv__lista { max-width: 760px; animation: ox-glide-in var(--ox-t-4) var(--ox-ease); }
+
+.qr-conv__vacio { margin: 48px auto; }
+
+.qr-conv__item { align-items: flex-start; padding-top: var(--ox-3); padding-bottom: var(--ox-3); }
+.qr-conv__item .ox-listitem__main { gap: 3px; }
+.qr-conv__item .ox-rowactions { align-self: center; }
+
+/* Un archivo sin conversor sigue en la lista para que se vea por qué no va,
+   pero atenuado: no es un error, es un "esto no". */
+.qr-conv__item.is-inerte .ox-listitem__title,
+.qr-conv__item.is-inerte .qr-conv__icono { color: var(--ox-text-4); }
+
+.qr-conv__icono {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: var(--ox-r-sm);
+  background: var(--ox-s3);
+  color: var(--ox-text-3);
+  transition: var(--tr-color), background var(--ox-t-2) var(--ox-ease-soft);
+}
+.qr-conv__icono .ox-icon { width: 14px; height: 14px; }
+.qr-conv__item.is-listo .qr-conv__icono { color: var(--ox-text); background: var(--ox-wash-2); }
+.qr-conv__item.is-error .qr-conv__icono { color: var(--ox-danger); background: var(--ox-danger-wash); }
+
+/* La barra vive adentro del ítem y se reserva su alto solo mientras convierte. */
+.qr-conv__meter { margin-top: var(--ox-1); max-width: 360px; }
+.qr-conv__meter[hidden] { display: none; }
+
+/* Las salidas de un archivo listo: un chip por archivo escrito. El del PDF
+   abre en Quire; los demás muestran la carpeta. */
+.qr-conv__salidas { display: flex; flex-wrap: wrap; gap: var(--ox-1); margin-top: var(--ox-1); }
+.qr-conv__salida {
+  cursor: pointer;
+  transition: background var(--ox-t-2) var(--ox-ease-soft), color var(--ox-t-2) var(--ox-ease-soft);
+}
+.qr-conv__salida:hover { background: var(--ox-wash-2); color: var(--ox-text); }
+.qr-conv__salida .ox-icon { flex: 0 0 auto; }
+
+/* Filas del inspector: control a la izquierda, texto que puede ser de dos
+   líneas a la derecha. El control se alinea con la primera línea. */
+.qr-conv__fila { gap: 10px; align-items: flex-start; cursor: pointer; }
+.qr-conv__fila > .ox-switch,
+.qr-conv__fila > .ox-check { flex: 0 0 auto; margin-top: 2px; }
+.qr-conv__fila .ox-meta { line-height: 1.5; }
+
+.qr-conv__salidas-lista { display: flex; flex-direction: column; gap: var(--ox-2); }
+
+.qr-conv__chunks { margin-top: var(--ox-1); }
+.qr-conv__chunks[hidden] { display: none; }
+
+.qr-resumen__n { font-size: var(--ox-fs-19); font-weight: var(--ox-w-semi); color: var(--ox-text); }
+
+/* El botón de unir aparece solo con dos textos o más en la cola. `.ox-btn` es
+   inline-flex y le gana al `hidden` del navegador: hay que decirlo. */
+.qr-pie__boton[hidden] { display: none; }

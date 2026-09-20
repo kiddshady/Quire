@@ -103,5 +103,22 @@ const vacio = armarIndice([]);
 eq('no tiene nada que buscar', coincidencias(vacio, plegarConsulta('lo que sea')).length, 0);
 eq('y no rompe', vacio.texto, '');
 
+/* El caso McGraw Hill: el PDF dice "5-HT" con un guion blando que pdf.js
+   descarta, así que el texto que llega es "5HT". Con `sinGuiones` el índice y
+   la consulta pliegan igual, y el mapa sigue apuntando al original — que es lo
+   que deja resaltar "5HT" en la hoja cuando buscaste "5-HT". */
+console.log('\n8. Documentos de guiones blandos');
+const sinG = { sinGuiones: true };
+eq('el guion se ignora en la consulta', plegarConsulta('5-HT', sinG), '5ht');
+eq('y también el U+2010', plegarConsulta('HMG‐CoA', sinG), 'hmgcoa');
+eq('pero no la raya de diálogo', plegarConsulta('a — b', sinG), 'a — b');
+eq('sin la opción, el guion sigue contando', plegarConsulta('5-HT'), '5-ht');
+const mcgraw = armarIndice([{ str: 'receptores 5HT y HMGCoA', salto: false }], sinG);
+eq('"5-HT" encuentra "5HT"', coincidencias(mcgraw, plegarConsulta('5-HT', sinG)), [{ desde: 11, hasta: 14 }]);
+eq('"HMG-CoA" encuentra "HMGCoA"', coincidencias(mcgraw, plegarConsulta('HMG-CoA', sinG)), [{ desde: 17, hasta: 23 }]);
+/* Si el texto trae un guion de verdad (un PDF mixto), se salta sin correr el
+   mapa: "anti-horario" plegado son 11 letras que apuntan a 12 originales. */
+eq('un guion real en el texto no corre el mapa', plegar('anti-horario', sinG).mapa, [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11]);
+
 console.log(`\n═══ ${pass} ok · ${fail} fallas ═══\n`);
 if (fail) process.exit(1);

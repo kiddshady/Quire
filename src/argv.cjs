@@ -48,4 +48,42 @@ function rutaDeArgv(argv, empaquetada) {
   return candidato ? path.resolve(candidato.trim()) : null;
 }
 
-module.exports = { rutaDeArgv };
+/**
+ * Un lote de conversión pedido desde la línea de comandos, o null.
+ *
+ *     Quire.exe --convertir examen.htm apuntes.pdf --a pdf,md
+ *
+ * Sin ventana: convierte, deja las salidas al lado de cada original y sale
+ * con 0 si todo salió, 1 si algo falló. Es la forma de convertir desde un
+ * script o de probar el motor en la app empaquetada. `--a` (o `--a=`) elige
+ * las salidas, separadas por coma; sin `--a` sale un PDF.
+ *
+ * @returns {{ files: string[], outputs: string[] } | null}
+ */
+function loteDeArgv(argv, empaquetada) {
+  if (!Array.isArray(argv)) return null;
+  const args = argv.slice(empaquetada ? 1 : 2).filter((a) => typeof a === 'string');
+  const en = args.indexOf('--convertir');
+  if (en === -1) return null;
+
+  const files = [];
+  let outputs = ['pdf'];
+  for (let i = en + 1; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--a') { outputs = partirSalidas(args[++i]); continue; }
+    if (a.startsWith('--a=')) { outputs = partirSalidas(a.slice(4)); continue; }
+    if (a.startsWith('-')) continue;           // switches de Chromium/Electron
+    if (a.trim()) files.push(path.resolve(a.trim()));
+  }
+  return { files, outputs };
+}
+
+/* Los nombres cortos que uno escribe → los del registro del motor. */
+const ALIAS_SALIDA = { md: 'markdown', markdown: 'markdown', txt: 'txt', texto: 'txt', json: 'json', chunks: 'chunks', pdf: 'pdf' };
+
+function partirSalidas(texto) {
+  const lista = String(texto || '').split(',').map((s) => ALIAS_SALIDA[s.trim().toLowerCase()]).filter(Boolean);
+  return lista.length ? [...new Set(lista)] : ['pdf'];
+}
+
+module.exports = { rutaDeArgv, loteDeArgv };

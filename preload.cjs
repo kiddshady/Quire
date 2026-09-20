@@ -109,6 +109,22 @@ contextBridge.exposeInMainWorld('onyx', {
     },
   },
 
+  /** Conversión: Moodle → PDF, y PDF/DOCX/PPTX/TXT → Markdown, texto, JSON o
+      fragmentos. Un lote a la vez; el progreso llega por onProgreso. */
+  conv: {
+    catalogo: () => call('conv:catalogo'),
+    elegir: () => call('conv:elegir'),
+    fichar: (rutas) => call('conv:fichar', rutas),
+    convertir: (lote) => call('conv:convertir', lote),
+    unir: (lote) => call('conv:unir', lote),
+    mostrar: (ruta) => call('conv:mostrar', ruta),
+    onProgreso: (cb) => {
+      const handler = (_e, evento) => cb(evento);
+      ipcRenderer.on('conv:progreso', handler);
+      return () => ipcRenderer.off('conv:progreso', handler);
+    },
+  },
+
   /** Impresión. Lo que se manda ya tiene que estar impuesto. */
   print: {
     listar: () => call('print:listar'),

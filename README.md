@@ -49,6 +49,14 @@ y `ano` no tiene por qué encontrar `año`. Sin OCR, y por las mismas razones qu
 la selección: en un escaneo no hay texto que buscar, y la app lo dice en vez de
 devolver una lista vacía.
 
+Y una cuarta que no se ve: los PDF de McGraw Hill (el Goodman & Gilman, el
+Katzung) codifican **todos** sus guiones como guion blando (U+00AD), y pdf.js lo
+descarta al extraer el texto sin opción para conservarlo: en la hoja se lee
+`5-HT` y en el texto queda `5HT`. Quire sondea unas páginas del documento y, si
+usa guiones blandos, ignora el guion en las dos puntas — `5-HT` encuentra `5HT`
+y el resaltado cae donde tiene que caer. En un PDF normal el guion de
+`anti-horario` sigue contando.
+
 **Imponer** — simple, múltiple (N-up), póster y folleto, con escala, rangos,
 orientación y dúplex. El preview dibuja el **área que el tóner no alcanza**, que
 es el dato que ningún visor muestra y la causa de la mitad de los recortes.
@@ -64,6 +72,36 @@ el camino de vuelta: **una imagen también entra como página**. Un PNG, un JPEG
 o un WEBP se suman a la lista de combinar igual que un PDF, y el tamaño de la
 hoja sale de la densidad que el archivo declara — un escaneo a 300 dpi vuelve a
 medir A4. Si no declara nada, sus píxeles se toman como píxeles de pantalla.
+
+**Convertir** — lo que era Omnimuter, adentro del lector. En una dirección,
+**crear PDF**: la revisión de un cuestionario **Moodle** (el `.htm` guardado con
+"página completa") sale como examen coloreado —correctas, incorrectas, tu
+respuesta, las imágenes inlineadas— impreso por el Chromium de la app, y **se
+abre en una pestaña** listo para imponer e imprimir. Un Word, un PowerPoint o un
+texto salen como PDF genérico. En la otra, **sacar el texto**: un PDF, un
+`.docx` o un `.pptx` a **Markdown, texto plano, JSON o fragmentos** para RAG.
+Al PDF se le rescatan los guiones blandos de McGraw Hill (por diccionario, desde
+el operator list: `HMGCoA` vuelve a ser `HMG-CoA`), se le quitan los pies que se
+repiten en todas las páginas, y las páginas **escaneadas** pasan por **OCR**
+offline (tesseract, español e inglés, los modelos viajan en el instalador). Nada
+de eso toca el original: las salidas caen al lado, a `Descargas\Quire\<día>` o a
+una carpeta elegida, y si ya hay un archivo con ese nombre se numera. Los
+textos se pueden **unir** en un solo `.md`; los PDF se unen en Herramientas →
+Combinar, que copia páginas sin re-renderizar. Soltar un `.htm` o un `.docx` en
+cualquier vista te lleva a Convertir con el archivo ya en la cola.
+
+También se convierte **sin abrir la ventana**, desde un script o desde otra app:
+
+```
+Quire.exe --convertir examen.htm apuntes.pdf --a pdf,md
+```
+
+Las salidas caen al lado de cada original (`pdf`, `md`, `txt`, `json`,
+`chunks`; sin `--a` sale un PDF), el detalle queda en un `quire-convertir.json`
+junto a ellas —una app de ventana no tiene consola en Windows— y el código de
+salida es 0 si todo salió. Es, además, la forma de probar el motor en la app
+**empaquetada**, donde el asar y los modelos de OCR viven en otro lado que en
+desarrollo: la 0.6.0 se verificó así antes de publicarse.
 
 **Abrir con doble click** — si lo ponés como lector predeterminado, el PDF se
 carga solo. Con Quire ya abierta, otro doble click reusa la ventana en vez de
@@ -85,9 +123,15 @@ src/
   firmas.cjs           Qué es un archivo, por su firma. Sin Electron, para testearlo.
   documentos.cjs       Abrir, leer y guardar PDFs. Los bytes van por IPC.
   impresion.cjs        Capacidades reales de la impresora + mandar el papel.
+  conversion.cjs       El chofer del motor: diálogos, printToPDF, rutas del OCR, progreso.
+  motor/               El motor de conversión (ex Omnimuter). Node pelado, sin Electron.
+    converters/        moodle, html, pdf (+OCR +guiones), docx, pptx, text → Document
+    outputs/           pdf (template HTML), markdown, plaintext, structured, chunks
+    pipeline.cjs       archivo → converter → cleaners → outputs → disco
   ipc.cjs · store.cjs  El puente y el disco (de Onyx).
 vendor/
   sumatrapdf/          El que manda el papel. Lo único que sabe elegir el tamaño.
+  tessdata/            Los modelos de OCR (spa+eng). Van fuera del asar, como Sumatra.
 renderer/
   vendor/              pdf.js y pdf-lib, versionados a propósito.
   js/
@@ -115,12 +159,14 @@ Sin pdf-lib de por medio se puede testear con Node pelado.
 ## Verificar
 
 ```
-npm run verificar     # las nueve suites, 462 aserciones
+npm run verificar     # las once suites
 ```
 
 | | |
 |---|---|
-| `npm test` | Node pelado: tokens, escritura atómica, la aritmética de imposición, el parseo de argv, las decisiones del actualizador y las cabeceras de imagen |
+| `npm test` | Node pelado: tokens, escritura atómica, la aritmética de imposición, el parseo de argv, las decisiones del actualizador, las cabeceras de imagen, el plegado del buscador y **el motor de conversión** (Moodle y PDF a markdown/txt/json/chunks, destinos, colisiones de nombre, unir textos) |
+| `npm run ocr` | Fabrica un PDF escaneado —una página rasterizada, sin una letra de texto— y mira que tesseract la lea con los modelos de `vendor/tessdata` |
+| `npm run convertir` | Con Electron: imprime el cuestionario a PDF con `printToPDF`, y después monta la app, encola el archivo por el mismo camino que un arrastre, convierte, y comprueba que el PDF **terminó abierto en una pestaña** |
 | `npm run imposicion` | Impone de verdad y **vuelve a leer** el PDF para ver qué cayó dónde |
 | `npm run tinta` | El vuelco de la Y, el contorno, el borrador y el historial |
 | `npm run seleccion` | Rasteriza la página y compara: los spans invisibles tienen que caer sobre las letras |

@@ -13,7 +13,7 @@ import { createRequire } from 'module';
 import path from 'path';
 
 const require = createRequire(import.meta.url);
-const { rutaDeArgv } = require('../src/argv.cjs');
+const { rutaDeArgv, loteDeArgv } = require('../src/argv.cjs');
 
 let pass = 0; let fail = 0;
 const ok = (n, c, x = '') => { if (c) { pass++; console.log(`  ok   ${n}`); } else { fail++; console.log(`  FALLA ${n} ${x}`); } };
@@ -63,6 +63,20 @@ console.log('\n6. Entradas rotas');
 ok('argv que no es lista', rutaDeArgv(null, true) === null);
 ok('lista vacía', rutaDeArgv([], true) === null);
 ok('elementos que no son strings', rutaDeArgv([EXE, 42, null, PDF], true) === PDF);
+
+console.log('\n7. Un lote de conversión por línea de comandos');
+const eq = (n, a, b) => ok(n, JSON.stringify(a) === JSON.stringify(b), JSON.stringify(a));
+ok('sin --convertir no hay lote', loteDeArgv([EXE, PDF], true) === null);
+eq('los archivos que siguen, absolutos, y PDF por defecto',
+  loteDeArgv([EXE, '--convertir', 'C:\\x\\examen.htm', 'C:\\x\\libro.pdf'], true),
+  { files: ['C:\\x\\examen.htm', 'C:\\x\\libro.pdf'], outputs: ['pdf'] });
+eq('--a elige las salidas, con alias y sin repetir',
+  loteDeArgv([EXE, '--convertir', 'C:\\x\\a.pdf', '--a', 'md,txt,md'], true).outputs, ['markdown', 'txt']);
+eq('--a= también', loteDeArgv([EXE, '--convertir', '--a=json,chunks', 'C:\\x\\a.docx'], true).outputs, ['json', 'chunks']);
+eq('una salida desconocida cae al PDF', loteDeArgv([EXE, '--convertir', 'C:\\x\\a.pdf', '--a', 'xyz'], true).outputs, ['pdf']);
+eq('los switches de Chromium no son archivos',
+  loteDeArgv([ELECTRON, '.', '--convertir', '--no-sandbox', 'a.htm'], false).files, [path.resolve('a.htm')]);
+ok('un lote sin archivos existe igual (el main avisa)', loteDeArgv([EXE, '--convertir'], true).files.length === 0);
 
 console.log(`\n═══ ${pass} ok · ${fail} fallas ═══\n`);
 process.exit(fail ? 1 : 0);

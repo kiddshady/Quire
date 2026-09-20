@@ -81,6 +81,22 @@ const DEFAULT_SETTINGS = {
      más predecible, y permite mostrar de qué lado va el fajo al darlo vuelta. */
   duplexAsistido: true,
 
+  /* Conversión (la vista Convertir). Lo que elegiste la última vez queda:
+     qué salidas, a dónde, y las perillas del PDF. */
+  conversion: {
+    salidas: { pdf: true, markdown: false, txt: false, json: false, chunks: false },
+    destino: 'junto',             // 'junto' | 'descargas' | 'carpeta'
+    carpeta: null,                // la elegida, si destino === 'carpeta'
+    abrirAlTerminar: true,        // un PDF resultante se abre en una pestaña
+    ocr: true,
+    restaurarGuiones: true,
+    quitarPies: true,
+    seguirLayout: true,
+    frontmatter: true,
+    chunkSize: 1500,
+    chunkOverlap: 200,
+  },
+
   /* Las rutas de las pestañas abiertas al cerrar, en su orden, con la activa
      primera. Es una lista y no una ruta sola desde que Quire abre varios
      documentos a la vez. */

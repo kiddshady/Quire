@@ -26,6 +26,7 @@ import { viewLector, atajosLector, abrirBusqueda } from './views/lector.js';
 import { viewImprimir } from './views/imprimir.js';
 import { viewPaginas } from './views/paginas.js';
 import { viewHerramientas } from './views/herramientas.js';
+import { viewConvertir, encolar as encolarConvertibles, pendientes as convertiblesPendientes } from './views/convertir.js';
 
 const api = window.onyx;
 
@@ -92,6 +93,11 @@ async function restaurarSesion() {
   if (primera) activar(primera.id);
 }
 
+/* Lo que el motor de conversión sabe leer. Es el mismo criterio que
+   src/conversion.cjs, repetido acá para decidir sin ida y vuelta al main a
+   dónde va lo que soltaste. */
+const ES_CONVERTIBLE = /\.(htm|html|pdf|docx|pptx|txt|text|md|markdown|rst|log)$/i;
+
 /* Arrastrar un PDF a la ventana. Chromium abriría el archivo REEMPLAZANDO la
    app si no se cancelan los dos eventos — con prevenir el drop no alcanza. */
 function cablearArrastre() {
@@ -115,8 +121,26 @@ function cablearArrastre() {
     dentro = 0; marcar(false);
 
     const archivos = [...(e.dataTransfer?.files || [])];
+    const rutas = archivos.map((f) => api.docs.rutaDe(f)).filter(Boolean);
+
+    /* En Convertir, todo lo que soltás entra a la cola, PDFs incluidos: ahí un
+       PDF es materia prima, no algo para leer. En cualquier otra vista, un
+       archivo convertible que no es PDF —el .htm de un cuestionario, un
+       .docx— te lleva a Convertir con el archivo ya en la lista. */
+    const convertibles = rutas.filter((r) => ES_CONVERTIBLE.test(r));
+    if (Router.name === 'convertir' && convertibles.length) {
+      await encolarConvertibles(convertibles);
+      return;
+    }
+
     const pdf = archivos.find((f) => /\.pdf$/i.test(f.name));
     if (!pdf) {
+      const otros = convertibles.filter((r) => !/\.pdf$/i.test(r));
+      if (otros.length) {
+        const n = await encolarConvertibles(otros);
+        if (n) Router.go('convertir');
+        return;
+      }
       /* Soltar acá abre un documento, y una imagen no es un documento. Pero la
          app SÍ sabe qué hacer con una imagen, así que el aviso dice dónde en
          vez de terminar en "no". */
@@ -372,6 +396,7 @@ Router.define({
   paginas: { view: viewPaginas },
   imprimir: { view: viewImprimir },
   herramientas: { view: viewHerramientas },
+  convertir: { view: viewConvertir },
   piezas: { view: viewPiezas },
   ajustes: { view: viewAjustes },
 }, document.getElementById('view'));
@@ -394,6 +419,15 @@ function cablearShell() {
 
   document.getElementById('btn-palette')?.addEventListener('click', () => Palette.toggle());
   document.getElementById('btn-abrir')?.addEventListener('click', abrirConDialogo);
+
+  /* La vista Convertir produce PDFs y quiere abrirlos, pero no maneja pestañas:
+     lo pide por acá y el shell lo abre como si lo hubieras elegido vos. */
+  window.addEventListener('quire:abrir-ruta', (e) => {
+    const ruta = e.detail?.ruta;
+    if (ruta) abrirRuta(ruta);
+  });
+  /* El contador del rail sigue a la cola de conversión, que cambia sola. */
+  window.addEventListener('quire:convertir-cola', () => actualizarChrome());
 
   /* Delegación global: las vistas se repintan enteras, así que enganchar los
      handlers en cada repintado sería recablear todo cada vez. */
@@ -496,6 +530,9 @@ function actualizarChrome() {
   const cuenta = document.getElementById('nav-paginas-count');
   if (cuenta) cuenta.textContent = S.doc ? S.doc.paginas : '';
 
+  const porConvertir = document.getElementById('nav-convertir-count');
+  if (porConvertir) porConvertir.textContent = convertiblesPendientes() || '';
+
   for (const id of ['stat-pagina', 'stat-medida']) {
     const el = document.getElementById(id);
     if (el) el.hidden = !S.doc;
@@ -573,6 +610,7 @@ function registrarComandos() {
     { id: 'nav-paginas', group: 'Ir a', icon: 'grid', label: 'Páginas', run: () => Router.go('paginas') },
     { id: 'nav-imprimir', group: 'Ir a', icon: 'printer', label: 'Imprimir', run: () => Router.go('imprimir') },
     { id: 'nav-herramientas', group: 'Ir a', icon: 'tools', label: 'Herramientas', run: () => Router.go('herramientas') },
+    { id: 'nav-convertir', group: 'Ir a', icon: 'convertir', label: 'Convertir', run: () => Router.go('convertir') },
     { id: 'nav-piezas', group: 'Ir a', icon: 'layers', label: 'Piezas', run: () => Router.go('piezas') },
     { id: 'nav-ajustes', group: 'Ir a', icon: 'settings', label: 'Ajustes', run: () => Router.go('ajustes') },
   ]);

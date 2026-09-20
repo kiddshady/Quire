@@ -2,7 +2,7 @@
   "name": "quire",
   "productName": "Quire",
   "version": "0.5.3",
-  "description": "Quire — lector de PDF con foco en la impresión: imposición, anotación con tablet y previsualización fiel.",
+  "description": "Quire — lector de PDF con foco en la impresión: imposición, anotación con tablet y previsualización fiel. Convierte cuestionarios Moodle a PDF y saca el texto de PDF, Word y PowerPoint (con OCR).",
   "main": "main.cjs",
   "author": "Kidd_Shady",
   "license": "MIT",
@@ -20,12 +20,16 @@
     "imposition",
     "booklet",
     "printing",
-    "annotation"
+    "annotation",
+    "converter",
+    "moodle",
+    "ocr",
+    "markdown"
   ],
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "test": "node test/tokens.test.mjs && node test/store.test.mjs && node test/format.test.mjs && node test/plan.test.mjs && node test/argv.test.mjs && node test/actualizador.test.mjs && node test/imagenes.test.mjs && node test/buscar.test.mjs",
+    "test": "node test/tokens.test.mjs && node test/store.test.mjs && node test/format.test.mjs && node test/plan.test.mjs && node test/argv.test.mjs && node test/actualizador.test.mjs && node test/imagenes.test.mjs && node test/buscar.test.mjs && node test/motor.test.cjs",
     "smoke": "electron test/renderer.test.cjs",
     "humo": "electron test/humo.cjs",
     "imposicion": "electron test/imposicion.cjs",
@@ -35,19 +39,20 @@
     "pestanas": "electron test/pestanas.cjs",
     "cerrar": "electron test/cerrar.cjs",
     "apertura": "node test/apertura.cjs",
-    "verificar": "npm test && npm run imposicion && npm run tinta && npm run seleccion && npm run buscar && npm run pestanas && npm run cerrar && npm run humo && npm run apertura",
+    "verificar": "npm test && npm run ocr && npm run convertir && npm run imposicion && npm run tinta && npm run seleccion && npm run buscar && npm run pestanas && npm run cerrar && npm run humo && npm run apertura",
     "color-ventana": "electron test/color-ventana.cjs",
     "icons": "magick -background none build/marca.svg -resize 1024x1024 build/icon.png && magick build/icon.png -define icon:auto-resize=256,128,64,48,32,16 build/icon.ico",
     "build": "electron-builder --win --publish never",
-    "release": "electron-builder --win --publish always"
+    "release": "electron-builder --win --publish always",
+    "ocr": "node test/ocr.test.cjs",
+    "convertir": "electron test/convertir.cjs"
   },
   "comentario-extraResources": "SumatraPDF va en extraResources, o sea FUERA del asar: un .exe adentro del asar no se puede ejecutar. Es lo único que sabe elegir el tamaño de papel — ver vendor/sumatrapdf/LEEME.md y la sección de impresión del README. Este comentario vive en la raíz y no adentro de `build` porque electron-builder valida esa sección contra un esquema y rechaza cualquier clave que no conozca.",
-  "comentario-dependencias": "pdf-lib y pdfjs-dist son devDependencies A PROPÓSITO: en runtime la app no las carga de node_modules sino de renderer/vendor/, donde están copiadas y versionadas. Como dependencies, electron-builder las metía en el asar junto con @napi-rs/canvas y compañía — decenas de MB de código que nunca se ejecuta. El paquete pasó de 112 MB a lo que pesa ahora.",
+  "comentario-dependencias": "pdf-lib es devDependency A PROPÓSITO: en runtime el renderer la carga de renderer/vendor/, donde está copiada y versionada, y como dependency electron-builder la metería en el asar sin que nadie la use. pdfjs-dist, en cambio, está DOS veces y las dos hacen falta: la 5.7 vendorizada en renderer/vendor/pdfjs/ (el visor, con su shim para Electron 40) y la 6.x de node_modules, que usa el motor de conversión en el proceso principal (src/motor/converters/pdf.cjs) — la 5.x no anda con @napi-rs/canvas 1.x, que es lo que rasteriza las páginas para el OCR. De pdfjs-dist se empaqueta solo el build legacy: el resto se excluye en `files`.",
   "devDependencies": {
     "electron": "40.10.2",
     "electron-builder": "^25.1.8",
-    "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^5.7.284"
+    "pdf-lib": "^1.17.1"
   },
   "build": {
     "appId": "com.umbrovex.quire",
@@ -76,7 +81,11 @@
       "!test/**",
       "!docs/**",
       "!build/marca.svg",
-      "!renderer/vendor/cobayo.pdf"
+      "!renderer/vendor/cobayo.pdf",
+      "!node_modules/pdfjs-dist/build/**",
+      "!node_modules/pdfjs-dist/web/**",
+      "!node_modules/pdfjs-dist/image_decoders/**",
+      "!node_modules/pdfjs-dist/types/**"
     ],
     "extraResources": [
       {
@@ -86,6 +95,13 @@
           "**/*",
           "!SumatraPDF-settings.txt",
           "!sumatrapdfcache${/*}"
+        ]
+      },
+      {
+        "from": "vendor/tessdata",
+        "to": "tessdata",
+        "filter": [
+          "*.traineddata.gz"
         ]
       }
     ],
@@ -103,9 +119,21 @@
     },
     "portable": {
       "artifactName": "${productName}-Portable-${version}.${ext}"
-    }
+    },
+    "asarUnpack": [
+      "node_modules/tesseract.js/**",
+      "node_modules/tesseract.js-core/**",
+      "node_modules/@napi-rs/**"
+    ]
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
-  }
+    "@napi-rs/canvas": "^1.0.9",
+    "cheerio": "^1.2.0",
+    "electron-updater": "^6.8.9",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.12.3",
+    "pdfjs-dist": "^6.3.289",
+    "tesseract.js": "^7.0.0"
+  },
+  "comentario-ocr": "tesseract.js, tesseract.js-core y @napi-rs/canvas van en asarUnpack: cargan .wasm y .node por ruta de archivo, y eso adentro del asar no funciona. Los modelos (vendor/tessdata, spa+eng) van en extraResources, junto a SumatraPDF, y src/conversion.cjs los busca en process.resourcesPath cuando la app está empaquetada."
 }

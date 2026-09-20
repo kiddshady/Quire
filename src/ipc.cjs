@@ -17,6 +17,7 @@ const store = require('./store.cjs');
 const documentos = require('./documentos.cjs');
 const impresion = require('./impresion.cjs');
 const actualizador = require('./actualizador.cjs');
+const conversion = require('./conversion.cjs');
 
 /* Las colecciones que el renderer puede tocar. Es una lista blanca a
    propósito: sin ella, cualquier bug en el renderer puede crear carpetas
@@ -94,6 +95,17 @@ function register() {
   handle('update:buscar', (opts) => actualizador.buscar(opts));
   handle('update:descargar', () => actualizador.descargar());
   handle('update:instalar', () => actualizador.instalar());
+
+  /* ── Conversión ─────────────────────────────────────────────────────────
+     El motor de Omnimuter, manejado desde src/conversion.cjs. Las rutas que
+     entran son las que el usuario eligió o soltó; el progreso vuelve por
+     'conv:progreso' mientras dura el lote. */
+  handle('conv:catalogo', () => conversion.catalogo());
+  handle('conv:elegir', () => conversion.elegir());
+  handle('conv:fichar', (rutas) => conversion.fichar(rutas));
+  handle('conv:convertir', (lote) => conversion.convertir(lote));
+  handle('conv:unir', (lote) => conversion.unir(lote));
+  handle('conv:mostrar', (ruta) => conversion.mostrar(ruta));
 }
 
 module.exports = { register, COLLECTIONS };

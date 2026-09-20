@@ -46,6 +46,14 @@ Icons.add({
   combinar: '<path d="M2.6 2.9h4.6v4.2H2.6z"/><path d="M8.8 8.9h4.6v4.2H8.8z"/>'
     + '<path d="M7.2 5h2.8a1.1 1.1 0 0 1 1.1 1.1v2.8"/>',
 
+  /* Convertir: un documento que entra y sale distinto — la hoja de la
+     izquierda pasa a la de la derecha por una flecha. */
+  convertir: '<path d="M2.4 3.4h4.2v9.2H2.4z"/><path d="M9.4 3.4h4.2v9.2H9.4z"/>'
+    + '<path d="M6.6 8h2.8"/><path d="M8.3 6.9 9.4 8l-1.1 1.1"/>',
+
+  /* Markdown: la M y la flecha hacia abajo del logo, a trazo. */
+  markdown: '<path d="M2.4 11.4V4.6l2.8 3.3 2.8-3.3v6.8"/><path d="M11 4.6v6.8"/><path d="M9.2 9.6 11 11.4l1.8-1.8"/>',
+
   /* Dividir: dos mitades y la línea por donde se parte. */
   dividir: '<path d="M2.6 3.5h3.7v9H2.6z"/><path d="M9.7 3.5h3.7v9H9.7z"/>'
     + '<path d="M8 2.2v11.6" stroke-dasharray="1.9 1.7"/>',

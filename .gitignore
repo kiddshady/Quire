@@ -11,6 +11,10 @@ data/
 # Capturas que dejan los tests al correr.
 test/*.png
 
+# El caché de tesseract, si alguna vez cae en el cwd (no debería: ver rutasOcr
+# en src/conversion.cjs).
+*.traineddata
+
 # Temporales del sistema.
 Thumbs.db
 desktop.ini

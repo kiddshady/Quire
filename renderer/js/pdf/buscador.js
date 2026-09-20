@@ -28,6 +28,23 @@
    palabras partidas vueltas a unir. Se busca sobre ESA, y un mapa dice de qué
    carácter del original salió cada uno de los plegados — que es lo que deja
    volver, del match, a las letras exactas que hay que resaltar en la hoja.
+
+   ── Y una cuarta, que no se ve: los GUIONES QUE NO ESTÁN ───────────────────
+
+   Los PDF de McGraw Hill (el Goodman & Gilman, el Katzung) no traen ni un
+   guion ASCII: codifican TODOS sus guiones como guion blando (U+00AD), y
+   pdf.js lo descarta al extraer el texto, sin opción para conservarlo. En la
+   hoja se lee "5-HT" y en el texto queda "5HT": buscar "5-HT" no encuentra
+   nada, y no hay forma de saberlo desde la caja de búsqueda.
+
+   Reponer el guion en el texto no sirve: el resaltado ubica cada match por
+   (fragmento, offset) sobre los spans que armó pdf.js, que tampoco tienen el
+   guion — un carácter de más corre todo lo que sigue. Lo que sí se puede es
+   IGNORAR el guion en las dos puntas: si el documento usa guiones blandos, el
+   índice y la consulta se pliegan sin guiones, y "5-HT" encuentra "5HT" con
+   los offsets intactos. Se decide por documento, sondeando unas páginas (ver
+   Documento.usaGuionesBlandos), porque en un PDF normal el guion de
+   "anti-horario" sí es texto y tiene que seguir contando.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* Las marcas combinantes: la tilde de un texto ya descompuesto (a + ́ ). */
@@ -37,6 +54,9 @@ const BLANCO = /\s/;
 
 /* La tilde de la eñe, suelta, como viene en un texto ya descompuesto. */
 const TILDE_N = '\u0303';
+
+/* Los guiones que unen palabras: el ASCII, el U+2010 y el no separable. */
+const GUION = /[-\u2010\u2011]/;
 
 /**
  * Deja un texto listo para comparar, y dice de dónde salió cada carácter.
@@ -50,7 +70,7 @@ const TILDE_N = '\u0303';
  * cadena a propósito: normalizando de una, "ﬁ" pasa a ser dos caracteres y
  * todo lo que viene después se corre un lugar, sin que nada avise de cuánto.
  */
-export function plegar(texto) {
+export function plegar(texto, { sinGuiones = false } = {}) {
   let plano = '';
   const mapa = [];
   let hueco = -1;              // índice del espacio pendiente de emitir, o -1
@@ -96,6 +116,10 @@ export function plegar(texto) {
     // El guion blando es una sugerencia de corte invisible, no es texto.
     if (c === '­') continue;
 
+    /* En un documento de guiones blandos, el guion visible tampoco cuenta:
+       ver el encabezado. Solo los guiones de unión, no la raya de diálogo. */
+    if (sinGuiones && GUION.test(c)) continue;
+
     if (hueco >= 0) { emitir(' ', hueco); hueco = -1; }
 
     /* La eñe se salva de la poda, y las vocales no.
@@ -128,9 +152,9 @@ export function plegar(texto) {
  * los tira —para eso está—, pero en una consulta significan algo. Buscando
  * "el " con el espacio puesto, uno quiere "el " y no "elefante".
  */
-export function plegarConsulta(consulta) {
+export function plegarConsulta(consulta, opciones = {}) {
   const crudo = String(consulta ?? '');
-  const { plano } = plegar(crudo);
+  const { plano } = plegar(crudo, opciones);
   if (!plano) return '';
   return (/^\s/.test(crudo) ? ' ' : '') + plano + (/\s$/.test(crudo) ? ' ' : '');
 }
@@ -146,7 +170,7 @@ export function plegarConsulta(consulta) {
  * de texto no es un span sino un `<br>` — y los `<br>` no están en la lista de
  * spans sobre la que después se resalta.
  */
-export function armarIndice(fragmentos) {
+export function armarIndice(fragmentos, opciones = {}) {
   let texto = '';
   const corte = [];
   const largo = [];
@@ -158,7 +182,7 @@ export function armarIndice(fragmentos) {
     if (f.salto) texto += '\n';
   }
 
-  const { plano, mapa } = plegar(texto);
+  const { plano, mapa } = plegar(texto, opciones);
   return { texto, corte, largo, plano, mapa, fragmentos: fragmentos.length };
 }
 
@@ -253,6 +277,9 @@ class Buscador {
     this.doc = doc;
     this._indices = new Map();      // nº de página → promesa del índice
     this._listos = new Map();       // nº de página → el índice ya resuelto
+    /* ¿El documento codifica sus guiones como blandos? Se decide una vez, en
+       la primera búsqueda, y vale para el índice entero: ver el encabezado. */
+    this._sinGuiones = null;        // null = todavía no se sondeó
 
     this.consulta = '';
     /** [{ pagina, enPagina, desde, hasta, antes, medio, despues }] — hasta TOPE. */
@@ -269,10 +296,26 @@ class Buscador {
   /** El tope existe y se alcanzó: la lista está recortada. */
   get recortada() { return this.total > this.resultados.length; }
 
+  /** El plegado que le corresponde a este documento. */
+  get opciones() { return { sinGuiones: this._sinGuiones === true }; }
+
+  async _sondearGuiones() {
+    if (this._sinGuiones !== null) return this._sinGuiones;
+    try {
+      this._sinGuiones = typeof this.doc.usaGuionesBlandos === 'function'
+        ? await this.doc.usaGuionesBlandos()
+        : false;
+    } catch (err) {
+      console.warn('[buscador] no se pudo sondear los guiones:', err);
+      this._sinGuiones = false;
+    }
+    return this._sinGuiones;
+  }
+
   async indice(n) {
     if (!this._indices.has(n)) {
       this._indices.set(n, this.doc.fragmentos(n).then((f) => {
-        const armado = armarIndice(f);
+        const armado = armarIndice(f, this.opciones);
         this._listos.set(n, armado);
         return armado;
       }));
@@ -305,7 +348,12 @@ class Buscador {
     this._corrida++;
     const mia = this._corrida;
 
-    const aguja = plegarConsulta(consulta);
+    /* El sondeo va ANTES de plegar la consulta y de armar el primer índice:
+       los dos dependen de él, y tienen que estar de acuerdo. */
+    await this._sondearGuiones();
+    if (this._corrida !== mia) return this;
+
+    const aguja = plegarConsulta(consulta, this.opciones);
     this.consulta = String(consulta ?? '');
     this.resultados = [];
     this.porPagina = new Map();

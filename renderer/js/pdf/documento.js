@@ -244,6 +244,38 @@ class Documento {
   }
 
   /**
+   * ¿Este PDF escribe sus guiones como guiones blandos (U+00AD)?
+   *
+   * pdf.js los tira en getTextContent() y no hay opción que lo evite, pero el
+   * operator list sí trae los glifos. Se miran unas páginas repartidas por el
+   * documento —no hace falta el libro entero para saberlo— y el buscador usa
+   * la respuesta para plegar sin guiones (ver el encabezado de buscador.js).
+   * La vuelta es más cara que leer el texto, por eso se cachea y se sondea
+   * una sola vez por documento.
+   */
+  async usaGuionesBlandos({ paginas = 6 } = {}) {
+    if (this._guionesBlandos !== undefined) return this._guionesBlandos;
+    const total = this.paginas;
+    const n = Math.min(paginas, total);
+    const muestra = [...new Set(Array.from({ length: n }, (_, i) => 1 + Math.floor((i * total) / n)))];
+
+    let hay = false;
+    for (const num of muestra) {
+      const page = await this._pagina(num);
+      const ops = await page.getOperatorList();
+      for (let i = 0; i < ops.fnArray.length && !hay; i++) {
+        if (ops.fnArray[i] !== pdfjs.OPS.showText) continue;
+        const glifos = ops.argsArray[i]?.[0];
+        if (!Array.isArray(glifos)) continue;
+        if (glifos.some((g) => g && typeof g === 'object' && g.unicode === '­')) hay = true;
+      }
+      if (hay) break;
+    }
+    this._guionesBlandos = hay;
+    return hay;
+  }
+
+  /**
    * Los fragmentos de texto de una página, para el índice del buscador.
    *
    * Tres decisiones que tienen que quedar clavadas a lo que hace capaTexto(),
