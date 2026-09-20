@@ -895,13 +895,21 @@ export function viewImprimir() {
   V.hoja = 1;
   raf2(() => rehacerImposicion());
 
-  // El preview se re-encaja cuando cambia el tamaño disponible.
-  const ro = new ResizeObserver(() => { if (V.doc) pintarHoja(); });
+  /* El preview se re-encaja cuando cambia el tamaño disponible. Al frame
+     siguiente y no adentro del callback, por lo mismo que en el lector:
+     pintar la hoja cambia el tamaño de lo que se observa, y Chromium reporta
+     ese rebote como un error de consola. */
+  let repintadoPendiente = 0;
+  const ro = new ResizeObserver(() => {
+    cancelAnimationFrame(repintadoPendiente);
+    repintadoPendiente = requestAnimationFrame(() => { if (V.doc) pintarHoja(); });
+  });
   const cuerpo = document.getElementById('qr-preview-cuerpo');
   if (cuerpo) ro.observe(cuerpo);
 
   Router.onLeave(() => {
     ro.disconnect();
+    cancelAnimationFrame(repintadoPendiente);
     clearTimeout(V.pendiente);
     V.render?.cancelar();
     V.generacion++;              // invalida cualquier imposición en vuelo

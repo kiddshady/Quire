@@ -1466,9 +1466,19 @@ export function viewLector() {
   cablearNavegacion();
 
   /* El ancho disponible cambia con la ventana y al plegar el panel: en modo
-     ajustado, el zoom tiene que seguirlo. */
+     ajustado, el zoom tiene que seguirlo.
+
+     El reescalado va al frame siguiente y no adentro del callback: cambia el
+     tamaño de las hojas, con eso puede aparecer o irse una barra de scroll, y
+     eso cambia el tamaño del visor que se está observando. Hacerlo adentro es
+     el "ResizeObserver loop" que Chromium reporta como error de consola; la
+     vista se veía bien igual, pero el error estaba. Diferido, además, dos
+     avisos seguidos se vuelven un solo reescalado. */
+  let reescaladoPendiente = 0;
   const ro = new ResizeObserver(() => {
-    if (S.modoZoom !== 'fijo') reescalar();
+    if (S.modoZoom === 'fijo') return;
+    cancelAnimationFrame(reescaladoPendiente);
+    reescaladoPendiente = requestAnimationFrame(() => { if (S.modoZoom !== 'fijo') reescalar(); });
   });
   ro.observe(V.visor);
 
@@ -1478,6 +1488,7 @@ export function viewLector() {
      trazos" con uno ya dibujado. */
   Router.onLeave(() => {
     ro.disconnect();
+    cancelAnimationFrame(reescaladoPendiente);
     V.observadorMini?.disconnect();
     liberarTodo();
     V.visor?.removeEventListener('scroll', alScrollear);

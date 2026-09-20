@@ -135,21 +135,32 @@ function pintarGrilla() {
   }).join('');
 
   /* Las miniaturas se pintan bajo demanda: en un documento largo, generar
-     todas de una tarda más que abrir el archivo. */
+     todas de una tarda más que abrir el archivo.
+
+     El documento se toma UNA vez, acá, y no de S.doc en cada miniatura: las
+     entradas se pintan de a una con un await en el medio, y en ese medio
+     puede pasar de todo — cambiar de pestaña, cerrar la última. Con S.doc en
+     vivo, la grilla de un documento terminaba con miniaturas del siguiente, o
+     tiraba "Cannot read properties of null" al cerrar. */
+  const doc = S.doc;
+  const geometrias = S.geometrias;
   V.observador?.disconnect();
   V.observador = new IntersectionObserver(async (entradas, self) => {
     for (const e of entradas) {
       if (!e.isIntersecting) continue;
       self.unobserve(e.target);
+      // Ya no es el documento de esta grilla: lo que falte no le importa a nadie.
+      if (S.doc !== doc) return;
       const n = Number(e.target.dataset.pagina);
       const hoja = e.target.querySelector('.qr-org__hoja');
       try {
-        const g = S.geometrias[n - 1];
-        const canvas = await S.doc.lienzo(n, { escala: 190 / g.anchoPt, dpr: 2 });
+        const g = geometrias[n - 1];
+        const canvas = await doc.lienzo(n, { escala: 190 / g.anchoPt, dpr: 2 });
         canvas.className = 'qr-org__lienzo';
         hoja.replaceChildren(canvas);
       } catch (err) {
-        if (err?.name !== 'RenderingCancelledException') console.error(`[páginas ${n}]`, err);
+        // Cerrado a mitad del render no es un error: es que ya no hace falta.
+        if (err?.name !== 'RenderingCancelledException' && S.doc === doc) console.error(`[páginas ${n}]`, err);
       }
     }
   }, { root: grilla, rootMargin: '150% 0px' });
