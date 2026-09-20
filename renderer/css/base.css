@@ -30,6 +30,26 @@ body {
 h1, h2, h3, h4, p, figure, blockquote { margin: 0; }
 ul, ol { margin: 0; padding: 0; list-style: none; }
 button, input, textarea, select { font: inherit; color: inherit; }
+
+/* ── El padding de fábrica del <button> ──────────────────────────────────────
+   Chromium le da `padding: 1px 6px` a todo botón, y con `box-sizing: border-box`
+   eso se come el INTERIOR de los controles chicos. En `.ox-check` —15px de
+   caja— dejaba una caja de contenido de 3px para un ícono de 11: el ícono
+   desbordaba, y cuando un ítem de grid desborda su área el centrado cae a
+   `start`. Resultado: el tilde arrancaba 4px a la derecha y se salía del cuadro.
+   El `.ox-iconbtn` tenía el mismo defecto, más chico (1,5px) y por eso invisible
+   de a uno, pero repetido en la titlebar, el rail y cada fila.
+
+   Se resetea acá y no control por control porque el sistema no puede heredar
+   métricas del navegador: cada componente declara las suyas —`.ox-btn`,
+   `.ox-select`, `.ox-tab`, `.ox-navitem` ya lo hacían— y el que no declara nada
+   tiene que quedar en cero, no en lo que opine el UA.
+
+   El borde va en el mismo reset: el UA le pone a todo <button> un `outset` de
+   2px —claro arriba-izquierda, oscuro abajo-derecha— que sobrevive aunque el
+   componente declare fondo y hairline. Toda tarjeta o tecla hecha con <button>
+   salía biselada sin que ninguna regla propia lo dijera. */
+button { padding: 0; border: 0; }
 img, svg { display: block; }
 a { color: inherit; text-decoration: none; }
 

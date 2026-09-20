@@ -280,13 +280,27 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
 .ox-check.is-on .ox-icon { stroke-dashoffset: 0; }
 
 /* ── Segmentado ───────────────────────────────────────────────────────────────
-   La cápsula seleccionada se DESLIZA entre opciones (--seg = índice activo).
-   Que viaje en vez de saltar es lo que lo hace sentir físico. */
+   La cápsula seleccionada se DESLIZA entre opciones. Que viaje en vez de
+   saltar es lo que lo hace sentir físico. La cápsula copia la geometría REAL
+   de la opción activa (--seg-x / --seg-w, medidas en motion.js): antes se
+   calculaba como ancho/n asumiendo opciones iguales, y con rótulos de
+   distinto largo ("Junto al original" vs "Descargas") caía corrida y el texto
+   parecía descentrado.
+
+   `width: max-content` es lo que hace que las opciones midan lo mismo también
+   adentro de una celda de tabla (el `1fr` reparte parejo solo cuando el ancho
+   del control es indefinido). `max-width: 100%` es su contrapeso: en el
+   inspector, con 288px útiles, el control a max-content medía 317 y se salía
+   por debajo del `overflow: hidden`; acotado al contenedor, el `1fr` reparte
+   lo que hay y las columnas quedan desparejas solo cuando no entra otra cosa
+   —y la cápsula, que mide en vez de suponer, las sigue igual. */
 .ox-segmented {
   position: relative;
   display: inline-grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
+  width: max-content;
+  max-width: 100%;
   padding: 2px;
   border-radius: var(--ox-r-sm);
   background: var(--ox-sunken);
@@ -296,13 +310,13 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   content: '';
   position: absolute;
   top: 2px;
-  left: 2px;
+  left: 0;
   width: var(--seg-w, 0px);
   height: calc(100% - 4px);
   border-radius: var(--ox-r-xs);
   background: var(--ox-s3);
   box-shadow: var(--ox-e1);
-  transform: translateX(calc(var(--seg, 0) * var(--seg-w, 0px)));
+  transform: translateX(var(--seg-x, 2px));
   transition: transform var(--ox-t-3) var(--ox-ease), width var(--ox-t-3) var(--ox-ease);
 }
 .ox-segmented__opt {

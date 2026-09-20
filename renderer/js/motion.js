@@ -91,13 +91,16 @@ export function initScrollFades(root = document) {
    La cápsula del segmentado y el subrayado de los tabs se DESLIZAN entre
    opciones. Que viajen en vez de saltar es lo que los hace sentir físicos. */
 
+/* La cápsula copia la geometría REAL de la opción activa, igual que el
+   subrayado de los tabs. Antes se calculaba como ancho/n asumiendo opciones
+   iguales, y no lo son: la cápsula caía corrida y el texto parecía
+   descentrado. offsetLeft es relativo al segmentado (position: relative), así
+   que ya incluye su padding. */
 export function syncSegmented(seg) {
-  const opts = [...seg.querySelectorAll('.ox-segmented__opt')];
-  if (!opts.length) return;
-  const active = Math.max(0, opts.findIndex((o) => o.classList.contains('is-active')));
-  const w = (seg.clientWidth - 4) / opts.length;
-  seg.style.setProperty('--seg-w', `${w}px`);
-  seg.style.setProperty('--seg', String(active));
+  const active = seg.querySelector('.ox-segmented__opt.is-active') || seg.querySelector('.ox-segmented__opt');
+  if (!active) return;
+  seg.style.setProperty('--seg-x', `${active.offsetLeft}px`);
+  seg.style.setProperty('--seg-w', `${active.offsetWidth}px`);
 }
 
 export function syncTabs(tabs) {
