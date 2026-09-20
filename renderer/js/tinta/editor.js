@@ -98,6 +98,8 @@ export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, onCa
       // La goma del stylus borra sin cambiar de herramienta en la barra.
       if (h.id === 'borrador' || mods.eraser) {
         ultimoBorrado = h;
+        // Toda la pasada de la goma es UN deshacer: ver borrarEn() en capa.js.
+        capa.empezarBorrado();
         borrarEn(pt, h);
         return;
       }
@@ -128,7 +130,7 @@ export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, onCa
     },
 
     end() {
-      if (ultimoBorrado) { ultimoBorrado = null; onCambio?.(); return; }
+      if (ultimoBorrado) { ultimoBorrado = null; gomaAnterior = null; capa.terminarBorrado(); onCambio?.(); return; }
       if (!enCurso) return;
       camino.end();
 
@@ -140,10 +142,29 @@ export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, onCa
     },
   });
 
+  /* Por dónde pasó la goma la última vez, en coordenadas de página. La
+     tablet entrega un punto cada tantos píxeles, y con una pasada rápida los
+     círculos quedan separados: un trazo que cruce el hueco entre dos no se
+     borra. Se rellena el camino de un punto al otro con círculos a medio
+     radio, así la goma borra una franja continua como en el papel. */
+  let gomaAnterior = null;
+
   function borrarEn(pt, h) {
     const [x, y] = aPagina(pt);
     const radio = (h.ancho || 16) / 2;
-    if (capa.borrarEn(pagina, x, y, radio)) redibujar();
+    let hubo = false;
+
+    if (gomaAnterior) {
+      const [x0, y0] = gomaAnterior;
+      const pasos = Math.ceil(Math.hypot(x - x0, y - y0) / (radio / 2));
+      for (let i = 1; i < pasos; i++) {
+        const t = i / pasos;
+        if (capa.borrarEn(pagina, x0 + (x - x0) * t, y0 + (y - y0) * t, radio)) hubo = true;
+      }
+    }
+    if (capa.borrarEn(pagina, x, y, radio)) hubo = true;
+    gomaAnterior = [x, y];
+    if (hubo) redibujar();
   }
 
   redibujar();

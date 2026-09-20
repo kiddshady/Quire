@@ -34,7 +34,7 @@ app.whenReady().then(async () => {
   const r = await win.webContents.executeJavaScript(`(async () => {
     const { CapaDeTinta, idDocumento } = await import('./js/tinta/capa.js');
     const { aplanarTinta } = await import('./js/tinta/aplanar.js');
-    const { contornoDeTrazo, pathDeContorno, trazoTocado, cajaDeTrazo } = await import('./js/tinta/contorno.js');
+    const { contornoDeTrazo, pathDeContorno, trazoTocado, cajaDeTrazo, recortarTrazo } = await import('./js/tinta/contorno.js');
     const { abrirDocumento } = await import('./js/pdf/documento.js');
 
     const bytes = new Uint8Array(await (await fetch('./vendor/cobayo.pdf')).arrayBuffer());
@@ -184,12 +184,63 @@ app.whenReady().then(async () => {
     h.agregar(1, { herramienta: 'pluma', color: '#000', ancho: 2, puntos: [[40, 40, 1]] });
     salida.historial = { tras2, trasDeshacer, trasRehacer, ramaCortada: h.deshechos.length, final: h.cuenta };
 
-    // ── Borrar por área ──────────────────────────────────────────────────
+    // ── La goma corta un TRAMO, en el borde exacto del círculo ────────────
+    const recta = [[0, 0, 1], [100, 0, 0.5]];           // presión que baja a lo largo
+    salida.recorte = {
+      // por el medio, con los dos extremos afuera: dos pedazos que terminan
+      // y empiezan justo en el borde, con la presión interpolada ahí
+      medio: recortarTrazo(recta, 50, 0, 10),
+      // mordida en una punta: un pedazo
+      punta: recortarTrazo(recta, 0, 0, 10),
+      // se lo come entero
+      entero: recortarTrazo(recta, 50, 0, 80),
+      // ni lo toca
+      lejos: recortarTrazo(recta, 50, 40, 10),
+      // un toque de un solo punto: se va o se queda, no se parte
+      toqueDentro: recortarTrazo([[5, 5, 1]], 0, 0, 10),
+      toqueFuera: recortarTrazo([[50, 50, 1]], 0, 0, 10),
+      // los puntos que caen adentro se van, y el corte cae entre muestras
+      muestreado: recortarTrazo([[0, 0, 1], [20, 0, 1], [40, 0, 1], [60, 0, 1], [80, 0, 1]], 40, 0, 15),
+    };
+
+    // ── Borrar por área: recorta, respeta el orden, y un gesto es UN deshacer
     const bo = new CapaDeTinta({ ruta: 'C:/x/bo.pdf', nombre: 'bo.pdf', tamano: 1 });
-    bo.agregar(1, { herramienta: 'pluma', color: '#000', ancho: 2, puntos: [[0, 0, 1], [50, 0, 1]] });
+    const abajo = bo.agregar(1, { herramienta: 'pluma', color: '#000', ancho: 2, puntos: [[0, 0, 1], [50, 0, 1]] });
+    // a 30 pt de la pluma: la goma (radio 6 + medio ancho 7) no lo alcanza
+    const arriba = bo.agregar(1, { herramienta: 'resaltador', color: '#ff0', ancho: 14, puntos: [[0, 30, 1], [50, 30, 1]] });
     bo.agregar(1, { herramienta: 'pluma', color: '#000', ancho: 2, puntos: [[300, 300, 1], [350, 300, 1]] });
-    const borrados = bo.borrarEn(1, 25, 0, 6);
-    salida.borrarEn = { borrados, quedan: bo.cuenta, seDeshace: (bo.deshacer(), bo.cuenta) };
+    // radio 6 sobre la pluma de ancho 2: alcance 7, el hueco va de 18 a 32
+    const recortados = bo.borrarEn(1, 25, 0, 6);
+    const tras = bo.trazos(1);
+    salida.borrarEn = {
+      recortados,
+      quedan: bo.cuenta,
+      pedazos: tras.filter((t) => t.herramienta === 'pluma' && t.puntos[0][1] === 0).map((t) => t.puntos),
+      // el resaltador que estaba ENCIMA sigue encima de los dos pedazos
+      ordenRespetado: tras.findIndex((t) => t.id === arriba.id) === 2,
+      originalSeFue: !tras.some((t) => t.id === abajo.id),
+      historial: bo.historial.length,
+      seDeshace: (bo.deshacer(), bo.cuenta),
+      vuelveElOriginal: bo.trazos(1)[0].id === abajo.id,
+      seRehace: (bo.rehacer(), bo.cuenta),
+    };
+
+    // Un gesto: dos toques de goma que van comiendo el mismo trazo son una
+    // sola entrada del historial, y deshacerla devuelve el trazo entero.
+    const ge = new CapaDeTinta({ ruta: 'C:/x/ge.pdf', nombre: 'ge.pdf', tamano: 1 });
+    const largoTrazo = ge.agregar(1, { herramienta: 'pluma', color: '#000', ancho: 2, puntos: [[0, 0, 1], [100, 0, 1]] });
+    ge.empezarBorrado();
+    ge.borrarEn(1, 25, 0, 4);
+    ge.borrarEn(1, 75, 0, 4);       // muerde el pedazo de la derecha del corte anterior
+    ge.terminarBorrado();
+    salida.gesto = {
+      pedazos: ge.cuenta,
+      historial: ge.historial.length,
+      cortes: ge.historial[1].cortes.length,
+      seDeshaceDeUna: (ge.deshacer(), ge.cuenta),
+      entero: ge.trazos(1)[0]?.id === largoTrazo.id && ge.trazos(1)[0].puntos.length === 2,
+      seRehaceDeUna: (ge.rehacer(), ge.cuenta),
+    };
 
     // ── El id del documento es estable y seguro como nombre de archivo ────
     const doc1 = { ruta: 'C:/x/a.pdf', nombre: 'a.pdf', tamano: 100 };
@@ -254,9 +305,40 @@ app.whenReady().then(async () => {
   ok('y cerquita también', r.borrador.cerca);
   ok('pero no si está lejos', !r.borrador.lejos);
   ok('ni antes de donde empieza', !r.borrador.antesDelInicio);
-  ok('borrarEn saca solo el trazo tocado', r.borrarEn.borrados === 1 && r.borrarEn.quedan === 1,
-    JSON.stringify(r.borrarEn));
-  ok('y se puede deshacer', r.borrarEn.seDeshace === 2);
+  {
+    const c = r.recorte;
+    const iguales = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    ok('por el medio parte en dos, cortando en el borde exacto',
+      c.medio.length === 2 && iguales(c.medio[0], [[0, 0, 1], [40, 0, 0.8]]) && iguales(c.medio[1], [[60, 0, 0.7], [100, 0, 0.5]]),
+      JSON.stringify(c.medio));
+    ok('mordida en la punta deja un pedazo', c.punta.length === 1 && iguales(c.punta[0], [[10, 0, 0.95], [100, 0, 0.5]]),
+      JSON.stringify(c.punta));
+    ok('la goma grande se lo come entero', c.entero.length === 0, JSON.stringify(c.entero));
+    ok('lejos no pasa nada', c.lejos.length === 1 && iguales(c.lejos[0], [[0, 0, 1], [100, 0, 0.5]]), JSON.stringify(c.lejos));
+    ok('un toque adentro se va, uno afuera se queda', c.toqueDentro.length === 0 && c.toqueFuera.length === 1);
+    ok('con puntos muestreados el corte cae ENTRE muestras',
+      c.muestreado.length === 2 && iguales(c.muestreado[0], [[0, 0, 1], [20, 0, 1], [25, 0, 1]])
+        && iguales(c.muestreado[1], [[55, 0, 1], [60, 0, 1], [80, 0, 1]]),
+      JSON.stringify(c.muestreado));
+  }
+  {
+    const b = r.borrarEn;
+    ok('borrarEn recorta solo el trazo tocado', b.recortados === 1, JSON.stringify(b));
+    ok('y lo deja en dos pedazos con el hueco del tamaño de la goma',
+      b.quedan === 4 && JSON.stringify(b.pedazos) === JSON.stringify([[[0, 0, 1], [18, 0, 1]], [[32, 0, 1], [50, 0, 1]]]),
+      JSON.stringify(b.pedazos));
+    ok('los pedazos ocupan el lugar del original: lo de arriba sigue arriba', b.ordenRespetado && b.originalSeFue);
+    ok('es UNA entrada del historial', b.historial === 4, `${b.historial}`);
+    ok('deshacer devuelve el trazo entero, en su lugar', b.seDeshace === 3 && b.vuelveElOriginal);
+    ok('y rehacer vuelve a partirlo', b.seRehace === 4);
+  }
+  {
+    const g = r.gesto;
+    ok('una pasada de goma con varios toques es una sola operación',
+      g.pedazos === 3 && g.historial === 2 && g.cortes === 1, JSON.stringify(g));
+    ok('deshacerla devuelve el trazo entero de una', g.seDeshaceDeUna === 1 && g.entero);
+    ok('y rehacerla vuelve a los tres pedazos', g.seRehaceDeUna === 3);
+  }
 
   console.log('\n5. Historial');
   ok('dos trazos', r.historial.tras2 === 2);

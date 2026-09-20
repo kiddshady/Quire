@@ -18,7 +18,7 @@
    y la rotación que el lector le haya aplicado.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-import { pathDeTrazo, trazoTocado } from './contorno.js';
+import { pathDeTrazo, trazoTocado, recortarTrazo } from './contorno.js';
 
 const api = window.onyx;
 
@@ -56,6 +56,9 @@ export class CapaDeTinta {
     this.sucia = false;
     this._guardado = null;
     this._contador = 0;
+    /* El gesto de la goma en curso: la operación del historial a la que se
+       le van sumando los recortes hasta levantar el lápiz. Ver borrarEn(). */
+    this._borrado = null;
     this.onCambio = null;
     /* Sube con cada cambio. Sirve para saber si el PDF aplanado que hay en
        caché sigue valiendo, sin tener que comparar los trazos uno por uno. */
@@ -89,18 +92,64 @@ export class CapaDeTinta {
     return t;
   }
 
-  /** Borra los trazos que el borrador tocó. Devuelve cuántos se fueron. */
+  /**
+   * La goma: le saca a cada trazo tocado el tramo que cae bajo el círculo.
+   * Devuelve cuántos trazos recortó.
+   *
+   * Borra un TRAMO y no el trazo entero, como en el papel: lo que queda de
+   * cada lado sigue viviendo como trazos nuevos, con las mismas propiedades
+   * y en el mismo lugar de la lista —el orden de apilado importa, un
+   * resaltador que pase por encima de una pluma se ve distinto que debajo—.
+   *
+   * ── Un gesto, un deshacer ─────────────────────────────────────────────
+   * El editor llama a esto en cada movimiento del lápiz. Si cada llamada
+   * fuera una entrada del historial, deshacer una pasada de goma serían
+   * treinta Ctrl+Z. Entre empezarBorrado() y terminarBorrado() los recortes
+   * se van sumando a UNA operación; un pedazo recortado por un movimiento y
+   * vuelto a recortar por el siguiente se reemplaza dentro de ella, así el
+   * historial siempre relaciona los trazos originales con lo que quedó al
+   * final, sin estados intermedios. */
   borrarEn(pagina, x, y, radio) {
     const lista = this.paginas.get(pagina);
     if (!lista?.length) return 0;
 
-    const tocados = lista.filter((t) => trazoTocado(t, x, y, radio));
-    if (!tocados.length) return 0;
+    const cortes = [];
+    const nueva = [];
+    for (const t of lista) {
+      if (!trazoTocado(t, x, y, radio)) { nueva.push(t); continue; }
+      const piezas = recortarTrazo(t.puntos, x, y, radio + t.ancho / 2)
+        .map((puntos) => ({ ...t, id: `s${++this._contador}`, puntos }));
+      cortes.push({ original: t, piezas });
+      nueva.push(...piezas);
+    }
+    if (!cortes.length) return 0;
 
-    const ids = new Set(tocados.map((t) => t.id));
-    this.paginas.set(pagina, lista.filter((t) => !ids.has(t.id)));
-    this.#anotar({ tipo: 'borrar', pagina, trazos: tocados });
-    return tocados.length;
+    this.paginas.set(pagina, nueva);
+    this.#anotarRecorte(pagina, cortes);
+    return cortes.length;
+  }
+
+  /** Abre el gesto de la goma: hasta terminarBorrado(), todo recorte es una sola operación. */
+  empezarBorrado() { this._borrado = { op: null }; }
+  terminarBorrado() { this._borrado = null; }
+
+  #anotarRecorte(pagina, cortes) {
+    const abierto = this._borrado;
+    const op = abierto?.op;
+    // Se suma al gesto solo si su operación sigue siendo la última: si en el
+    // medio alguien deshizo, lo que viene es un gesto nuevo.
+    if (op && op.pagina === pagina && this.historial.at(-1) === op) {
+      for (const c of cortes) {
+        const previo = op.cortes.find((k) => k.piezas.some((p) => p.id === c.original.id));
+        if (previo) previo.piezas = previo.piezas.flatMap((p) => (p.id === c.original.id ? c.piezas : [p]));
+        else op.cortes.push(c);
+      }
+      this.#marcar();
+      return;
+    }
+    const nueva = { tipo: 'recortar', pagina, cortes };
+    if (abierto) abierto.op = nueva;
+    this.#anotar(nueva);
   }
 
   limpiarPagina(pagina) {
@@ -140,14 +189,34 @@ export class CapaDeTinta {
   #aplicar(op) {
     const lista = this.paginas.get(op.pagina) || [];
     if (op.tipo === 'agregar') this.paginas.set(op.pagina, [...lista, ...op.trazos]);
-    else {
+    else if (op.tipo === 'borrar') {
       const ids = new Set(op.trazos.map((t) => t.id));
       this.paginas.set(op.pagina, lista.filter((t) => !ids.has(t.id)));
+    } else {
+      // recortar: cada original se reemplaza, en su lugar, por sus pedazos
+      this.paginas.set(op.pagina, lista.flatMap((t) => {
+        const c = op.cortes.find((k) => k.original.id === t.id);
+        return c ? c.piezas : [t];
+      }));
     }
   }
 
   #aplicarInverso(op) {
-    this.#aplicar({ ...op, tipo: op.tipo === 'agregar' ? 'borrar' : 'agregar' });
+    if (op.tipo !== 'recortar') {
+      this.#aplicar({ ...op, tipo: op.tipo === 'agregar' ? 'borrar' : 'agregar' });
+      return;
+    }
+    /* Al revés: el original vuelve donde está su primer pedazo y los demás se
+       van. Un trazo que la goma se comió entero no tiene pedazo que marque su
+       lugar: vuelve al final, igual que lo hace deshacer un borrado de página. */
+    const lista = this.paginas.get(op.pagina) || [];
+    const vuelta = lista.flatMap((t) => {
+      const c = op.cortes.find((k) => k.piezas.some((p) => p.id === t.id));
+      if (!c) return [t];
+      return c.piezas[0].id === t.id ? [c.original] : [];
+    });
+    for (const c of op.cortes) if (!c.piezas.length) vuelta.push(c.original);
+    this.paginas.set(op.pagina, vuelta);
   }
 
   #marcar() {

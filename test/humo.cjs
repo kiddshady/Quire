@@ -411,6 +411,72 @@ app.whenReady().then(async () => {
     };
   })()`)]);
 
+  /* ── 6-ter. La goma, con el mismo stylus ─────────────────────────────────
+     Una pasada vertical que cruza el trazo rojo por el medio, RÁPIDA: tres
+     puntos y listo. Así el hueco entre dos muestras de la goma es más grande
+     que la goma misma, y lo que se mide es que el editor rellene el camino —
+     sin eso, la pasada pasa entre dos círculos y no borra nada. Lo que tiene
+     que quedar es el trazo partido en dos, con un solo deshacer que lo vuelva
+     a juntar. */
+  notas.push(['goma', await js(`(async () => {
+    const est = await import('./js/estado.js');
+    const capa = est.S.tinta;
+    const pliego = document.querySelector('.qr-pliego[data-pagina="1"]');
+    const canvas = pliego?.querySelector('.qr-tinta');
+    if (!canvas || !capa) return { error: 'sin canvas o sin capa' };
+
+    const antes = { trazos: capa.trazos(1).length, historial: capa.historial.length };
+    const original = capa.trazos(1)[0];
+
+    document.querySelector('[data-tinta-tool="borrador"]')?.click();
+    await new Promise((r) => setTimeout(r, 150));
+
+    canvas.setPointerCapture = () => {};
+    canvas.releasePointerCapture = () => {};
+    const r = canvas.getBoundingClientRect();
+    const disparar = (tipo, fx, fy) => canvas.dispatchEvent(new PointerEvent(tipo, {
+      pointerId: 7, pointerType: 'pen', isPrimary: true, bubbles: true, cancelable: true,
+      pressure: tipo === 'pointerup' ? 0 : 0.5, buttons: tipo === 'pointerup' ? 0 : 1,
+      clientX: r.left + r.width * fx, clientY: r.top + r.height * fy,
+    }));
+    // de arriba a abajo por x = 0.5, donde el trazo va de 0.2 a 0.8
+    disparar('pointerdown', 0.5, 0.55);
+    disparar('pointermove', 0.5, 0.62);
+    disparar('pointermove', 0.5, 0.69);
+    disparar('pointerup', 0.5, 0.69);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const pedazos = capa.trazos(1);
+    const xs = pedazos.map((t) => [Math.round(t.puntos[0][0]), Math.round(t.puntos.at(-1)[0])]);
+    const resultado = {
+      antes,
+      pedazos: pedazos.length,
+      historial: capa.historial.length,
+      // el hueco: el primer pedazo termina antes de la mitad y el segundo empieza después
+      hueco: xs,
+      mismaHerramienta: pedazos.every((t) => t.herramienta === original?.herramienta && t.color === original?.color),
+      deshecho: (capa.deshacer(), capa.trazos(1).length),
+      vuelveEntero: capa.trazos(1)[0]?.id === original?.id,
+      rehecho: (capa.rehacer(), capa.trazos(1).length),
+    };
+    // La captura de la tinta va con el trazo partido: es lo nuevo que hay que ver.
+    document.querySelector('[data-tinta-tool="fibra"]')?.click();
+    return resultado;
+  })()`)]);
+  {
+    const g = notas.at(-1)[1];
+    if (g.error) problemas.push('goma: ' + g.error);
+    else {
+      if (g.antes.trazos !== 1) problemas.push(`goma: arrancó con ${g.antes.trazos} trazos, no con 1`);
+      if (g.pedazos !== 2) problemas.push(`goma: tenía que partir el trazo en 2 y quedaron ${g.pedazos}`);
+      if (g.historial !== g.antes.historial + 1) problemas.push(`goma: la pasada tiene que ser UNA entrada del historial (${g.antes.historial} → ${g.historial})`);
+      if (!g.mismaHerramienta) problemas.push('goma: los pedazos perdieron la herramienta o el color');
+      if (g.deshecho !== 1 || !g.vuelveEntero) problemas.push(`goma: deshacer no devolvió el trazo entero (${g.deshecho}, entero ${g.vuelveEntero})`);
+      if (g.rehecho !== 2) problemas.push(`goma: rehacer no volvió a partirlo (${g.rehecho})`);
+    }
+  }
+  await esperar(300);
+
   fs.writeFileSync(path.join(RAIZ, 'test', 'humo-tinta.png'), (await win.webContents.capturePage()).toPNG());
   fs.writeFileSync(path.join(RAIZ, 'test', 'humo.png'), (await win.webContents.capturePage()).toPNG());
 

@@ -151,6 +151,89 @@ export function trazoTocado(trazo, x, y, radio) {
   return false;
 }
 
+/**
+ * Le saca a un trazo lo que cae dentro del círculo del borrador y devuelve
+ * los pedazos que quedan, como listas de puntos: cero si se lo comió entero,
+ * uno si lo mordió por una punta, dos si lo partió por el medio.
+ *
+ * La goma borra un TRAMO, no el trazo: como en el papel. Y corta en el borde
+ * exacto del círculo, no en el punto más cercano: los puntos de un trazo
+ * vienen espaciados por el muestreo, y cortar ahí dejaría el tajo dentado y
+ * corrido de donde apoyaste la goma. Por eso, donde un segmento cruza el
+ * borde se inserta el punto del cruce, con la presión interpolada, y el
+ * pedazo termina o empieza justo ahí.
+ *
+ * `alcance` es el radio de la goma más medio ancho del trazo: lo que se
+ * busca es que el hueco visible en la tinta mida lo que mide la goma, y el
+ * cuerpo del trazo se pasa medio ancho del eje para cada lado.
+ *
+ * Un pedazo de un solo punto no vale: sería una miga dejada por la goma, no
+ * un toque que alguien quiso dar.
+ */
+export function recortarTrazo(puntos, x, y, alcance) {
+  const dentro = (p) => Math.hypot(p[0] - x, p[1] - y) <= alcance;
+  const pedazos = [];
+  let actual = [];
+  const cerrar = () => { if (actual.length >= 2) pedazos.push(actual); actual = []; };
+
+  if (puntos.length === 1) return dentro(puntos[0]) ? [] : [puntos.slice()];
+
+  if (!dentro(puntos[0])) actual.push(puntos[0]);
+  for (let i = 1; i < puntos.length; i++) {
+    const a = puntos[i - 1];
+    const b = puntos[i];
+    const aDentro = dentro(a);
+    const bDentro = dentro(b);
+
+    if (aDentro && bDentro) continue;
+
+    const [t1, t2] = crucesConCirculo(a, b, x, y, alcance);
+    if (!aDentro && !bDentro) {
+      // los dos afuera: o el segmento pasa de largo, o atraviesa el círculo
+      if (t1 !== null) { actual.push(enSegmento(a, b, t1)); cerrar(); actual.push(enSegmento(a, b, t2)); }
+      actual.push(b);
+    } else if (!aDentro) {
+      // entra: el pedazo termina en el borde
+      if (t1 !== null) actual.push(enSegmento(a, b, t1));
+      cerrar();
+    } else {
+      // sale: el pedazo nuevo empieza en el borde
+      if (t2 !== null) actual.push(enSegmento(a, b, t2));
+      actual.push(b);
+    }
+  }
+  cerrar();
+  return pedazos;
+}
+
+/** Dónde el segmento a→b cruza el círculo, como [t entrada, t salida] en (0,1); [null, null] si no lo toca. */
+function crucesConCirculo(a, b, cx, cy, r) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const fx = a[0] - cx;
+  const fy = a[1] - cy;
+  const A = dx * dx + dy * dy;
+  if (A === 0) return [null, null];
+  const B = 2 * (fx * dx + fy * dy);
+  const C = fx * fx + fy * fy - r * r;
+  const disc = B * B - 4 * A * C;
+  if (disc <= 0) return [null, null];
+  const raiz = Math.sqrt(disc);
+  const t1 = (-B - raiz) / (2 * A);
+  const t2 = (-B + raiz) / (2 * A);
+  // El cruce tiene que estar dentro del segmento; en las puntas no cuenta.
+  if (t2 <= 0 || t1 >= 1) return [null, null];
+  return [Math.max(0, t1), Math.min(1, t2)];
+}
+
+/** El punto a la fracción t del segmento a→b, con la presión interpolada. */
+function enSegmento(a, b, t) {
+  const r = (v) => Math.round(v * 100) / 100;
+  const pa = a[2] ?? 0.5;
+  const pb = b[2] ?? 0.5;
+  return [r(a[0] + (b[0] - a[0]) * t), r(a[1] + (b[1] - a[1]) * t), r(pa + (pb - pa) * t)];
+}
+
 function distanciaASegmento(px, py, a, b) {
   const dx = b[0] - a[0];
   const dy = b[1] - a[1];
