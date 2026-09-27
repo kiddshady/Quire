@@ -1694,10 +1694,21 @@
   animation: qr-act-entra var(--ox-t-3) var(--ox-ease);
 }
 
-/* La salida es más corta que la entrada: el que se va no puede hacer esperar
-   al que llega, o el cruce se siente lento. */
+/* El relevo: el que llega espera a que el que se va esté casi borrado (a los
+   90 ms la salida va por ~30 %). `backwards` lo deja invisible durante la
+   espera y no retiene nada al terminar — `both` dejaría un transform aplicado
+   para siempre. La espera la pone actualizar.js solo si hay alguien saliendo. */
+.qr-act__paso.is-after {
+  animation-delay: 90ms;
+  animation-fill-mode: backwards;
+}
+
+/* La salida es más corta que la entrada, y in-out y no ease-in: hay alguien
+   esperando detrás, y con ease-in la opacidad cae de golpe al final, justo
+   cuando el nuevo está asomando. Sin `from`: arranca desde donde esté (ver
+   salirDesdeDondeEsta en actualizar.js). */
 .qr-act__paso[data-state="closing"] {
-  animation: qr-act-sale 180ms var(--ox-ease-in) both;
+  animation: qr-act-sale 160ms var(--ox-ease-both) both;
   pointer-events: none;
 }
 
@@ -1707,8 +1718,7 @@
 }
 
 @keyframes qr-act-sale {
-  from { opacity: 1; transform: none; }
-  to   { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 0; transform: translateY(-6px); }
 }
 
 .qr-act__marca {

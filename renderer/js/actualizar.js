@@ -220,6 +220,19 @@ function alTeclado(ev) {
   cerrar();
 }
 
+/* Lo que se LEE de un paso. Dos estados con la misma firma no rehacen nada:
+   al pedir una búsqueda, el proceso principal manda primero `manual` con la
+   fase de antes, y rehacer ese paso idéntico era un cruce de un texto consigo
+   mismo — se veía como letras temblando. */
+function firma(e) {
+  const g = guion(e);
+  return [e.fase || 'inactivo', g.titulo, g.sub, g.acciones.map((a) => a.id).join()].join('|');
+}
+
+/* El relevo entre pasos (ver la skill de movimiento, regla 2). Los números van
+   con el CSS: la salida dura 160 ms, el que llega espera 90. */
+const ESPERA_RELEVO = 90;
+
 /** Cambia el paso sin que la caja pegue un salto: los dos comparten celda. */
 function repintar() {
   if (!overlay) return;
@@ -235,9 +248,43 @@ function repintar() {
     return;
   }
 
-  if (viejo) exit(viejo, { fallback: 320 });
-  cuerpo.appendChild(paso(estado));
-  setTimeout(() => overlay?.cuerpo.querySelector('.ox-btn--primary')?.focus(), 80);
+  const nueva = firma(estado);
+  if (viejo?.dataset.firma === nueva) return;
+
+  const el = paso(estado);
+  el.dataset.firma = nueva;
+
+  if (viejo && viejo.dataset.asoma && performance.now() < +viejo.dataset.asoma) {
+    /* El que está llegando todavía espera su turno y no se vio nunca: se lo
+       cambia por el nuevo en el mismo lugar, sin cruce. Si no, dos estados a
+       60 ms apilaban tres y cuatro pasos a medio desvanecer. */
+    viejo.replaceWith(el);
+    el.classList.add('is-after');
+    el.dataset.asoma = viejo.dataset.asoma;
+    el.style.animationDelay = `${Math.max(0, +viejo.dataset.asoma - performance.now())}ms`;
+  } else {
+    if (viejo) salirDesdeDondeEsta(viejo);
+    // Solo espera si hay a quién relevar: sin nadie saliendo, esperar es lentitud.
+    if (viejo) {
+      el.classList.add('is-after');
+      el.dataset.asoma = String(performance.now() + ESPERA_RELEVO);
+    }
+    cuerpo.appendChild(el);
+  }
+  setTimeout(() => overlay?.cuerpo.querySelector('.qr-act__paso:not([data-state="closing"]) .ox-btn--primary')?.focus(), 80);
+}
+
+/* Un paso que se va a mitad de su entrada tiene que irse desde la opacidad que
+   tenía, no desde 1: la animación de salida reemplaza a la de entrada, y su
+   punto de partida implícito es el estilo de base. Sin esto saltaba de 63 % a
+   100 % y recién ahí se desvanecía. Se congela lo que se ve como estilo en
+   línea y la salida (que no declara `from`) arranca de ahí. */
+function salirDesdeDondeEsta(el) {
+  const cs = getComputedStyle(el);
+  el.style.opacity = cs.opacity;
+  el.style.transform = cs.transform === 'none' ? '' : cs.transform;
+  el.style.animationDelay = '';
+  exit(el, { fallback: 240 });
 }
 
 async function accion(id) {
@@ -258,26 +305,66 @@ async function accion(id) {
    Lo que queda visible cuando cerrás el cartel: sin esto, una descarga de 90 MB
    pasa a ser invisible y el "listo para instalar" se pierde. */
 
+/* Nada aparece ni se va de golpe, tampoco acá. Tres casos:
+   · mismo aviso, solo avanzó la descarga → cambia el número en su lugar;
+   · aparece de la nada → entra con fade;
+   · cambia de aviso o se va → primero se desvanece el que está, y recién
+     después entra el otro (o se esconde). Un `hidden` + innerHTML directos
+     lo hacían saltar, y en 'disponible → descargando → lista' se veía el
+     texto cambiar de un cuadro al otro. */
+const STAT_AVISOS = ['disponible', 'descargando', 'listo'];
+let statAviso = null;
+let statTurno = 0;
+
+const tok = (n) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(n)) || 0;
+
+function contenidoStat(el, aviso) {
+  if (aviso === 'descargando') {
+    el.dataset.tip = 'Bajando la actualización';
+    el.innerHTML = `${Icons.svg('download', 'ox-icon--sm')}<span class="ox-statusbar__value ox-num">${Math.round((estado.progreso?.pct || 0) * 100)}%</span>`;
+  } else if (aviso === 'listo') {
+    el.dataset.tip = 'Reiniciá para instalarla';
+    el.innerHTML = `${Icons.svg('zap', 'ox-icon--sm')}<span class="ox-statusbar__value">Quire ${esc(estado.version || '')} lista</span>`;
+  } else {
+    el.dataset.tip = 'Hay una versión nueva';
+    el.innerHTML = `${Icons.svg('download', 'ox-icon--sm')}<span class="ox-statusbar__value">${esc(estado.version || '')}</span>`;
+  }
+}
+
 function pintarStatus() {
   const el = document.getElementById('stat-update');
   if (!el) return;
+  const aviso = STAT_AVISOS.includes(estado.fase) ? estado.fase : null;
 
-  if (estado.fase === 'descargando') {
-    el.hidden = false;
-    el.dataset.tip = 'Bajando la actualización';
-    el.innerHTML = `${Icons.svg('download', 'ox-icon--sm')}<span class="ox-statusbar__value ox-num">${Math.round((estado.progreso?.pct || 0) * 100)}%</span>`;
-  } else if (estado.fase === 'listo') {
-    el.hidden = false;
-    el.dataset.tip = 'Reiniciá para instalarla';
-    el.innerHTML = `${Icons.svg('zap', 'ox-icon--sm')}<span class="ox-statusbar__value">Quire ${esc(estado.version || '')} lista</span>`;
-  } else if (estado.fase === 'disponible') {
-    el.hidden = false;
-    el.dataset.tip = 'Hay una versión nueva';
-    el.innerHTML = `${Icons.svg('download', 'ox-icon--sm')}<span class="ox-statusbar__value">${esc(estado.version || '')}</span>`;
-  } else {
-    el.hidden = true;
-    el.innerHTML = '';
+  if (aviso === statAviso) {
+    if (aviso === 'descargando') {
+      const v = el.querySelector('.ox-statusbar__value');
+      if (v) v.textContent = `${Math.round((estado.progreso?.pct || 0) * 100)}%`;
+    } else if (aviso) contenidoStat(el, aviso);
+    return;
   }
+
+  statAviso = aviso;
+  const turno = ++statTurno;        // si llega otro cambio en el medio, gana el último
+  const entrar = () => {
+    if (turno !== statTurno) return;
+    if (!aviso) { el.hidden = true; el.innerHTML = ''; return; }
+    contenidoStat(el, aviso);
+    el.hidden = false;
+    el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: tok('--ox-t-2'), easing: 'cubic-bezier(.33, 1, .68, 1)' });
+  };
+
+  if (el.hidden) { entrar(); return; }
+  // Se va desde donde esté (puede venir a mitad de su propia entrada), en
+  // in-out: hay alguien esperando detrás.
+  const sale = el.animate(
+    [{ opacity: getComputedStyle(el).opacity }, { opacity: 0 }],
+    { duration: tok('--ox-t-1'), easing: 'cubic-bezier(.65, 0, .35, 1)', fill: 'forwards' },
+  );
+  sale.finished.then(() => {
+    entrar();          // primero lo nuevo (o el hidden)…
+    sale.cancel();     // …y recién ahí se suelta la salida: si no, un cuadro a 100 %
+  }).catch(() => {});
 }
 
 /* ── Arranque ───────────────────────────────────────────────────────────── */
