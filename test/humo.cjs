@@ -421,15 +421,28 @@ app.whenReady().then(async () => {
   notas.push(['goma', await js(`(async () => {
     const est = await import('./js/estado.js');
     const capa = est.S.tinta;
-    const pliego = document.querySelector('.qr-pliego[data-pagina="1"]');
-    const canvas = pliego?.querySelector('.qr-tinta');
-    if (!canvas || !capa) return { error: 'sin canvas o sin capa' };
+    if (!capa) return { error: 'sin capa' };
 
     const antes = { trazos: capa.trazos(1).length, historial: capa.historial.length };
     const original = capa.trazos(1)[0];
 
     document.querySelector('[data-tinta-tool="borrador"]')?.click();
     await new Promise((r) => setTimeout(r, 150));
+
+    /* El canvas se busca RECIÉN ACÁ, y tiene que estar quieto. El paso de la
+       rueda de arriba manda un Ctrl+rueda que hace zoom, y el visor redibuja
+       las hojas con canvas nuevos: agarrado antes, el canvas quedaba fuera del
+       DOM, medía 0×0 y la pasada caía en la esquina de la hoja. Pasaba o no
+       según cuánto tardara el redibujo. Se espera a que el de la página 1 siga
+       siendo el mismo dos lecturas seguidas. */
+    const tintaDeLa1 = () => document.querySelector('.qr-pliego[data-pagina="1"] .qr-tinta');
+    let canvas = null;
+    for (let i = 0; i < 30; i++) {
+      const a = tintaDeLa1();
+      await new Promise((r) => setTimeout(r, 120));
+      if (a && a === tintaDeLa1() && a.isConnected && a.getBoundingClientRect().width > 0) { canvas = a; break; }
+    }
+    if (!canvas) return { error: 'el canvas de la página 1 nunca se quedó quieto' };
 
     canvas.setPointerCapture = () => {};
     canvas.releasePointerCapture = () => {};
