@@ -94,8 +94,15 @@
   /* Chrome de la app, no contenido: acá no hay nada que alguien quiera copiar,
      y arrastrar el nombre al hacer doble click para cambiar de pestaña molesta. */
   user-select: none;
-  transition: var(--tr-color);
+  /* El anillo de foco va hacia adentro: la pestaña ocupa todo el alto de la
+     franja, que recorta (overflow: hidden, para plegarse), y el de base.css
+     —3.5px por fuera— se cortaba arriba y abajo. Es un outline como el de
+     .ox-tr, que se pinta encima del fondo de la pestaña. */
+  outline: 1.5px solid transparent;
+  outline-offset: -1.5px;
+  transition: var(--tr-color), outline-color var(--ox-t-1) var(--ox-ease-soft);
 }
+.qr-tab:focus-visible { box-shadow: none; border-radius: 0; outline-color: var(--ox-ring); }
 
 .qr-tab .ox-icon {
   flex: 0 0 auto;
@@ -611,8 +618,16 @@
   overflow: auto;
   /* Hundido: el documento flota sobre la mesa, no está pegado a la pared. */
   background: var(--ox-sunken);
-  outline: none;
+  /* Lleva tabindex para scrollear con el teclado, así que con Tab recibe el
+     anillo. El de base.css sale 3.5px por fuera y el visor va de borde a borde
+     del área de la vista: se cortaba contra el canto de la ventana y se
+     encimaba al panel de miniaturas. Va hacia adentro, como el de una fila de
+     tabla, y como outline: se pinta encima de las hojas y no debajo del fondo. */
+  outline: 1.5px solid transparent;
+  outline-offset: -1.5px;
+  transition: outline-color var(--ox-t-1) var(--ox-ease-soft);
 }
+.qr-visor:focus-visible { box-shadow: none; outline-color: var(--ox-ring); }
 
 /* Acá NO va `align-items: center`, y es a propósito.
 

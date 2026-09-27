@@ -14,6 +14,7 @@
 
 const { app, BrowserWindow } = require('electron');
 const { vigilarConsola } = require('./consola.cjs');
+const { auditarAnillos } = require('./anillos.cjs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
@@ -205,6 +206,58 @@ app.whenReady().then(async () => {
   ok('scrollbar propia', reglas.scrollbar);
   ok('::selection propia', reglas.seleccion);
   ok('focus ring propio (:focus-visible)', reglas.focus);
+
+  /* ── 8. Un ícono dentro de un dato chico va en el renglón ──────────────────
+     `.ox-meta` y `.ox-label` son texto en línea y todo svg es display:block:
+     el ícono se iba solo a un renglón de arriba (salió de Pharos, arreglado en
+     Onyx). Se arman los dos casos y se mide que ícono y texto compartan
+     renglón. Sin la regla de base.css da 13.5px de desfase y 27px de alto. */
+  console.log('\n8. Un ícono dentro de un dato chico va en el renglón');
+  const renglon = await js(`(async () => {
+    const { Icons } = await import('./js/icons.js');
+    const caja = document.createElement('div');
+    caja.innerHTML = '<span class="ox-meta">' + Icons.svg('clock', 'ox-icon--sm') + ' hace 2 h</span>'
+      + '<div><span class="ox-label">' + Icons.svg('settings', 'ox-icon--sm') + ' Ajustes</span></div>';
+    document.getElementById('view').prepend(caja);
+    const medir = (el) => {
+      const i = el.querySelector('svg').getBoundingClientRect();
+      const r = document.createRange(); r.selectNodeContents(el.lastChild);
+      const t = r.getBoundingClientRect();
+      return { dy: +Math.abs((i.top + i.bottom) / 2 - (t.top + t.bottom) / 2).toFixed(1), alto: Math.round(el.getBoundingClientRect().height) };
+    };
+    const out = { meta: medir(caja.querySelector('.ox-meta')), label: medir(caja.querySelector('.ox-label')) };
+    caja.remove();
+    return out;
+  })()`);
+  ok('en .ox-meta el ícono va al lado del texto', renglon.meta.dy <= 2 && renglon.meta.alto < 20, JSON.stringify(renglon));
+  ok('y en .ox-label también', renglon.label.dy <= 2 && renglon.label.alto < 22, JSON.stringify(renglon));
+
+  /* ── 9. Ningún anillo de foco se corta ─────────────────────────────────────
+     Traído de Onyx (9-bis de su humo). El anillo de base.css sale 3.5px por
+     fuera del elemento. Si el elemento se ve entero pero esos 3.5px caen afuera
+     de un contenedor que recorta (un .ox-scroll, el borde de la ventana) o
+     encima del canto de una superficie (una card, el carril del segmentado),
+     con Tab se ve cortado: pasó en los controles de ventana, el primer ítem del
+     rail, el segmentado y las filas de una tabla de borde a borde. Cada
+     elemento se enfoca como con teclado y se mide su anillo real (solo las
+     sombras duras: una difusa es elevación, no anillo), así los que van hacia
+     adentro cuentan cero. */
+  console.log('\n9. Ningún anillo de foco se corta');
+  const AUDITAR_ANILLOS = auditarAnillos();
+  // Sin foco en la ventana, :focus-visible no se aplica y todo anillo mide
+  // cero: la auditoría pasaría sin haber medido nada.
+  win.focus();
+  win.webContents.focus();
+  await sleep(150);
+  ok('la ventana tiene el foco (si no, no hay anillos que medir)', await js('document.hasFocus()'));
+  for (const v of ['lector', 'paginas', 'imprimir', 'herramientas', 'convertir', 'piezas', 'ajustes']) {
+    await click(`[data-view="${v}"]`);
+    await sleep(700);
+    await js(`document.querySelectorAll('#view tbody tr').forEach((tr) => tr.tabIndex = 0)`);
+    const cortes = await js(AUDITAR_ANILLOS);
+    ok(`${v}: ningún anillo de foco se corta ni roza un canto`, cortes.length === 0, '\n      ' + cortes.join('\n      '));
+  }
+  await js(`document.getElementById('aud-notr')?.remove()`);
 
   /* No hay limpieza que hacer: este archivo ya no escribe nada en disco. La
      que había borraba el ítem que creaba la app demo y reponía el ajuste

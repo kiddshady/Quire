@@ -35,6 +35,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const { vigilarConsola } = require('./consola.cjs');
+const { auditarAnillos } = require('./anillos.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 const ORIGEN = path.join(RAIZ, 'renderer', 'vendor', 'cobayo.pdf');
@@ -198,6 +199,23 @@ async function correr() {
     ok('la activa es la recién abierta', n.activaEs === 1, `índice ${n.activaEs}`);
     ok('el titlebar deja de repetir el nombre', n.contextoTitlebar === '', n.contextoTitlebar);
     ok('está el botón de abrir otro', n.hayMas);
+  }
+
+  /* ── 2-bis. El anillo de foco de una pestaña no se corta ────────────────────
+     La franja es un contenedor que recorta (scrollea en horizontal cuando no
+     entran), y las pestañas son divs con tabindex: el anillo de base.css sale
+     3.5px por fuera y ahí caía sobre el borde. Lo mide el mismo auditor que el
+     humo de Onyx. Sin foco en la ventana :focus-visible no se aplica y todo
+     mediría cero, por eso se lo pide y se lo exige. */
+  console.log('\n2-bis. El anillo de foco de las pestañas');
+  win.focus();
+  win.webContents.focus();
+  await esperar(150);
+  ok('la ventana tiene el foco (si no, no hay anillos que medir)', await js('document.hasFocus()'));
+  {
+    const cortes = await js(auditarAnillos('#qr-tabs'));
+    await js(`document.getElementById('aud-notr')?.remove()`);
+    ok('ningún anillo de la franja se corta ni roza un canto', cortes.length === 0, '\n      ' + cortes.join('\n      '));
   }
 
   /* ── 3. El estado es de cada pestaña ────────────────────────────────────── */
