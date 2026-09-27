@@ -309,6 +309,18 @@ Estado: `.ox-spinning` · `.ox-breathing` · `.ox-shaking` · `.ox-skeleton` ·
 `.ox-ticked`. `.ox-view` es la transición de vista (la aplica el router).
 `.ox-reveal` con `.is-open` para el alto.
 
+**El cambio de vista es un relevo.** Al navegar (y en `refresh({ animar: true })`,
+que es cambiar de documento), el router pasa el contenido de la vista vieja a
+un calco (`.ox-main--saliente`: misma clase, sin ids, inerte y con su scroll) en
+la misma celda de `.ox-body`, y lo esfuma encima (160 ms, in-out) mientras la
+nueva entra con 90 ms de espera. Antes la vieja se iba de un cuadro al otro y
+la nueva arrancaba desde transparente: un cuadro vacío en cada navegación.
+Terminada la entrada, `#view` lleva `.is-settled` y no retiene la animación.
+`refresh()` sin animar repinta en el lugar, sin relevo. El humo (`npm run
+smoke`, 9-ter) mide la curva. Durante esos 160 ms hay un segundo `.ox-main` en
+el DOM: buscá por id o dentro de `#view`, no con un `document.querySelector`
+suelto que pueda agarrar el calco.
+
 ---
 
 ## Router
@@ -320,7 +332,8 @@ Router.define({
 }, document.getElementById('view'));
 
 Router.go('item', 'n-0003');
-Router.refresh();                 // remonta la actual
+Router.refresh();                 // remonta la actual, en el lugar
+Router.refresh({ animar: true }); // remonta con relevo (llegó otro documento)
 Router.onLeave(store.onEvent(f)); // limpieza de la vista que se está montando
 Router.onChange((a, desde) => {});
 Router.current / .name / .param

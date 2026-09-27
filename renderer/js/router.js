@@ -10,6 +10,8 @@
    la app se degrada sola después de un rato de uso.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+import { exit } from './motion.js';
+
 const routes = new Map();
 const listeners = new Set();
 
@@ -53,6 +55,40 @@ function release() {
   }
 }
 
+/**
+ * La vista que se va no desaparece de un cuadro al otro: su contenido pasa a
+ * un calco con la misma clase de `.ox-main`, en la misma celda de la grilla, y
+ * se esfuma encima mientras la nueva entra. Sin esto, la vieja se iba de golpe
+ * y la nueva arrancaba desde transparente: un cuadro vacío en cada navegación.
+ *
+ * El calco va sin ids (nadie tiene que encontrar un #campo que se está yendo),
+ * inerte, y conserva su scroll. Si la vista vieja todavía estaba entrando, el
+ * calco arranca desde la opacidad y el corrimiento en que la agarró.
+ */
+function retirarVista() {
+  if (!host || !host.firstChild || !host.parentElement) return null;
+  const cs = getComputedStyle(host);
+  const calco = document.createElement(host.tagName);
+  calco.className = host.className;
+  calco.classList.remove('ox-view', 'is-after', 'is-settled');
+  calco.classList.add('ox-main--saliente');
+  calco.setAttribute('aria-hidden', 'true');
+  calco.inert = true;
+  calco.style.opacity = cs.opacity;
+  if (cs.transform !== 'none') calco.style.transform = cs.transform;
+
+  const scrolls = [...host.querySelectorAll('*')]
+    .filter((el) => el.scrollTop || el.scrollLeft)
+    .map((el) => [el, el.scrollTop, el.scrollLeft]);
+  calco.append(...host.childNodes);
+  for (const el of calco.querySelectorAll('[id]')) el.removeAttribute('id');
+  host.after(calco);
+  for (const [el, top, left] of scrolls) { el.scrollTop = top; el.scrollLeft = left; }
+
+  exit(calco, { fallback: 260 });
+  return calco;
+}
+
 /** Navega. Repetir la vista+parámetro actual no hace nada (evita repintados). */
 export function go(name, param = null) {
   const route = routes.get(name);
@@ -72,8 +108,9 @@ export function go(name, param = null) {
   document.querySelectorAll('.ox-navitem').forEach((b) =>
     b.classList.toggle('is-active', b.dataset.view === navKey));
 
+  const saliente = retirarVista();
   route.view(param);
-  animarEntrada();
+  animarEntrada(saliente);
 
   listeners.forEach((fn) => fn({ ...current }, from));
   return true;
@@ -81,13 +118,25 @@ export function go(name, param = null) {
 
 /**
  * La transición de vista se reinicia a mano: sin el reflow intermedio el
- * navegador no vuelve a disparar la animación al re-agregar la clase.
+ * navegador no vuelve a disparar la animación al re-agregar la clase. Si hay
+ * una vista yéndose, la nueva espera su turno (is-after); si no (el
+ * arranque), entra sin esperar.
  */
-function animarEntrada() {
+function animarEntrada(saliente) {
   if (!host) return;
-  host.classList.remove('ox-view');
+  host.classList.remove('ox-view', 'is-after', 'is-settled');
   void host.offsetWidth;
   host.classList.add('ox-view');
+  if (saliente) host.classList.add('is-after');
+  // Terminada la entrada, se apaga con una clase: una animación con fill
+  // `both` deja su último cuadro aplicado para siempre, y una opacidad
+  // retenida vuelve a la vista frontera de backdrop para lo que tenga adentro.
+  const settle = (ev) => {
+    if (ev.target !== host || ev.animationName !== 'ox-glide-in') return;
+    host.removeEventListener('animationend', settle);
+    host.classList.add('is-settled');
+  };
+  host.addEventListener('animationend', settle);
 }
 
 /**
@@ -102,13 +151,16 @@ function animarEntrada() {
  *
  * Por defecto NO anima, que es como se comportaba antes de que existiera el
  * parámetro: así ningún llamador viejo cambia de conducta sin que se lo pidan.
+ * Cuando anima, es un relevo como al navegar: el documento de antes se
+ * esfuma mientras entra el nuevo, en vez de irse de un cuadro al otro.
  */
 export function refresh({ animar = false } = {}) {
   const route = routes.get(current.name);
   if (!route) return;
   release();
+  const saliente = animar ? retirarVista() : null;
   route.view(current.param);
-  if (animar) animarEntrada();
+  if (animar) animarEntrada(saliente);
 }
 
 /** Se avisa después de cada navegación: (a, desde) => {} */

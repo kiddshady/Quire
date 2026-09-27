@@ -259,6 +259,56 @@ app.whenReady().then(async () => {
   }
   await js(`document.getElementById('aud-notr')?.remove()`);
 
+  /* ── 9-ter. El relevo de vistas ────────────────────────────────────────────
+     Antes, la vista vieja se iba de un cuadro al otro y la nueva arrancaba
+     desde transparente: un cuadro vacío en cada navegación (medido en las
+     seis navegaciones del rail, sep 2026). Ahora la vieja se esfuma en un
+     calco, en la misma celda, mientras la nueva entra. Lo mismo al cambiar de
+     documento, que es un refresh({ animar: true }). Se muestrea cada 40 ms y
+     se mide la curva, no se mira. */
+  console.log('\n9-ter. El relevo de vistas');
+  const MEDIR_RELEVO = (disparar) => `(async () => {
+    const view = document.getElementById('view');
+    const rv = view.getBoundingClientRect();
+    ${disparar};
+    const op = (el) => el?.isConnected ? Math.round(+getComputedStyle(el).opacity * 100) : null;
+    const calco = document.querySelector('.ox-main--saliente');
+    const filas = [];
+    for (let t = 0; t <= 400; t += 40) {
+      const rc = calco?.getBoundingClientRect();
+      filas.push({ t, viejo: op(calco), nuevo: op(view),
+        mismoLugar: !rc || !calco.isConnected || (rc.left === rv.left && rc.top === rv.top && rc.width === rv.width && rc.height === rv.height),
+        views: document.querySelectorAll('#view').length });
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    await new Promise((r) => setTimeout(r, 500));
+    return { filas, hayCalco: !!calco, settled: view.classList.contains('is-settled'),
+      animaciones: view.getAnimations().length, calcos: document.querySelectorAll('.ox-main--saliente').length };
+  })()`;
+  const revisarRelevo = (quien, r) => {
+    const s = r.filas.map((f) => `${f.t}:${f.viejo ?? '-'}/${f.nuevo}`).join(' ');
+    ok(`${quien}: lo de antes queda en un calco`, r.hayCalco, JSON.stringify(r));
+    ok(`${quien}: que se esfuma de a poco (no se va de un cuadro al otro)`, r.filas.some((f) => f.viejo > 5 && f.viejo < 95), s);
+    ok(`${quien}: lo nuevo espera su turno: arranca invisible`, r.filas[0].nuevo <= 5, s);
+    ok(`${quien}: cuando lo nuevo ya se ve, lo viejo va por menos de la mitad`, r.filas.every((f) => !(f.nuevo > 50 && f.viejo > 50)), s);
+    ok(`${quien}: los dos en la misma celda, sin salto`, r.filas.every((f) => f.mismoLugar), s);
+    ok(`${quien}: un solo #view en todo el relevo`, r.filas.every((f) => f.views === 1), s);
+    ok(`${quien}: el calco se va del DOM al terminar`, r.calcos === 0, JSON.stringify(r));
+    ok(`${quien}: la entrada se apaga (sin opacidad retenida)`, r.settled && r.animaciones === 0, JSON.stringify(r));
+  };
+  await click('[data-view="ajustes"]');
+  await sleep(800);
+  revisarRelevo('navegar', await js(MEDIR_RELEVO(`document.querySelector('.ox-navitem[data-view="piezas"]').click()`)));
+  revisarRelevo('cambiar de documento', await js(MEDIR_RELEVO(`await import('./js/router.js').then((m) => m.refresh({ animar: true }))`)));
+  const enElLugar = await js(`(async () => {
+    const m = await import('./js/router.js');
+    m.refresh();
+    const hay = !!document.querySelector('.ox-main--saliente');
+    await new Promise((r) => setTimeout(r, 300));
+    return hay;
+  })()`);
+  ok('refrescar sin animar sigue siendo en el lugar: sin calco', enElLugar === false);
+
   /* No hay limpieza que hacer: este archivo ya no escribe nada en disco. La
      que había borraba el ítem que creaba la app demo y reponía el ajuste
      `densidad`, y ninguna de las dos cosas existe en Quire. */
