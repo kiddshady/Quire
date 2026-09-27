@@ -57,9 +57,17 @@
   pointer-events: none;
 }
 
-/* Controles de ventana: propios, no los de Windows. */
+/* Controles de ventana: propios, no los de Windows. El botón ocupa todo el
+   alto (maximizada, tirar el mouse a la esquina tiene que acertar la cruz),
+   pero lo que se ve — hover, press y anillo de foco — es una pastilla
+   adentro, a la escala de un .ox-iconbtn. Pintado sobre el botón, el anillo
+   del teclado se cortaba contra el canto de la ventana, y el rojo de cerrar
+   llegaba hasta el borde. `--ox-wincontrol-nudge` la corre en vertical, para
+   alinearla con lo que tenga al lado la titlebar de cada app. */
 .ox-wincontrols { display: flex; margin-left: auto; height: 100%; }
 .ox-wincontrol {
+  position: relative;
+  z-index: 0;
   width: 46px;
   height: 100%;
   display: grid;
@@ -70,9 +78,24 @@
   cursor: default;
   transition: var(--tr-color);
 }
-.ox-wincontrol:hover { background: var(--ox-wash-1); color: var(--ox-text); }
-.ox-wincontrol:active { background: var(--ox-wash-2); }
-.ox-wincontrol--close:hover { background: var(--ox-danger-dim); color: #fff; }
+.ox-wincontrol::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: 5px;
+  right: 5px;
+  top: calc((100% - 28px) / 2 + var(--ox-wincontrol-nudge, 0px));
+  height: 28px;
+  border-radius: var(--ox-r-sm);
+  transition: background var(--ox-t-2) var(--ox-ease-soft), box-shadow var(--ox-t-1) var(--ox-ease-soft);
+}
+.ox-wincontrol:hover { color: var(--ox-text); }
+.ox-wincontrol:hover::before { background: var(--ox-wash-1); }
+.ox-wincontrol:active::before { background: var(--ox-wash-2); }
+.ox-wincontrol--close:hover { color: #fff; }
+.ox-wincontrol--close:hover::before { background: var(--ox-danger-dim); }
+.ox-wincontrol:focus-visible { box-shadow: none; }
+.ox-wincontrol:focus-visible::before { box-shadow: 0 0 0 2px var(--ox-bg), 0 0 0 3.5px var(--ox-ring); }
 .ox-wincontrol .ox-icon { width: 11px; height: 11px; stroke-width: 1.2; }
 
 /* ── Cuerpo ───────────────────────────────────────────────────────────────── */
@@ -91,7 +114,14 @@
   min-height: 0;
 }
 .ox-rail__top { padding: var(--ox-3) var(--ox-3) var(--ox-2); }
-.ox-rail__nav { flex: 1 1 auto; min-height: 0; padding: 0 var(--ox-3); }
+/* El nav es un .ox-scroll, que recorta: sin padding arriba y abajo, el anillo
+   de foco del primer y del último ítem se cortaba contra ese borde. Arriba es
+   además el respiro entre el botón principal y la navegación, que iban
+   pegados. (El esfumado no molesta: en reposo, .is-top lo apaga.) */
+.ox-rail__nav { flex: 1 1 auto; min-height: 0; padding: var(--ox-2) var(--ox-3) var(--ox-1); }
+/* Abajo el nav muere contra la línea del pie, no al aire: ahí no va esfumado.
+   Con :has(), si una app se queda sin pie el fade vuelve solo. */
+.ox-rail__nav:has(~ .ox-rail__foot) { --ox-fade-bottom: 0px; }
 .ox-rail__group { margin-bottom: var(--ox-1); }
 .ox-rail__group-label {
   padding: var(--ox-3) var(--ox-2) var(--ox-1);
@@ -210,6 +240,19 @@
 }
 .ox-viewhead__actions { margin-left: auto; display: flex; align-items: center; gap: var(--ox-2); }
 
+/* El encabezado cerrado con su propia línea, en vez de cortar al aire. Lo piden
+   dos casos:
+   — una vista simple que lo dice: la clase `.ox-viewhead--line`;
+   — y toda vista con inspector, sola. El panel es de otro plano y arranca con
+     un borde duro justo debajo del encabezado; si la columna principal se
+     esfuma arriba, el encabezado se ve derretido de un lado y sólido del otro.
+     Colapsado también: el encabezado no cambia de forma con el panel.
+   Va como box-shadow inset y no como border: un border real suma 1px a la caja
+   y corre el contenido. El esfumado de arriba del scroll se apaga solo —está
+   más abajo, con el resto de los fades— porque la línea ya es el límite. */
+.ox-viewhead--line,
+.ox-main:has(> .ox-viewbody > .ox-inspector) > .ox-viewhead { box-shadow: inset 0 -1px 0 var(--ox-line); }
+
 /* Breadcrumb: el separador es un chevron SVG, nunca un "/" ni un "›". */
 .ox-crumbs { display: flex; align-items: center; gap: var(--ox-1); font-size: var(--ox-fs-12); }
 .ox-crumbs__item {
@@ -234,11 +277,31 @@
   position: relative;
 }
 
+/* Arriba la vista corta al aire —el viewhead no lleva línea, salvo que la traiga—
+   y ahí el fade es lo único que avisa que hay más. Abajo cierra la statusbar con
+   la suya, así que el corte ya está explicado y el esfumado solo taparía la
+   línea. */
+.ox-app:has(> .ox-statusbar) :is(.ox-main, .ox-viewbody__main) > .ox-scroll {
+  --ox-fade-bottom: 0px;
+}
+
+/* Y cuando el encabezado SÍ trae su línea —porque la pidió, o porque la vista
+   tiene inspector— arriba tampoco se esfuma: la línea es el límite, y el fade
+   encima la ensucia. Sale de `:has()` y no de una clase puesta a mano en la
+   vista para que las dos mitades no se puedan desencontrar: el día que se
+   saque la línea, el esfumado vuelve solo. Cubre los dos layouts. */
+.ox-main:has(> .ox-viewhead--line) > .ox-scroll,
+.ox-main:has(> .ox-viewhead--line) .ox-viewbody__main > .ox-scroll,
+.ox-main:has(> .ox-viewbody > .ox-inspector) .ox-viewbody__main > .ox-scroll {
+  --ox-fade-top: 0px;
+}
+
 /* ── Inspector (panel derecho) ────────────────────────────────────────────── */
 .ox-inspector {
   width: var(--ox-inspector);
   flex: 0 0 auto;
-  background: var(--ox-s1);
+  --ox-surface: var(--ox-s1);
+  background: var(--ox-surface);
   box-shadow: inset 1px 0 0 var(--ox-line);
   display: flex;
   flex-direction: column;
@@ -258,6 +321,13 @@
   flex: 0 0 auto;
 }
 .ox-inspector__body { flex: 1 1 auto; min-height: 0; padding-left: var(--ox-4); padding-right: var(--ox-4); }
+/* Arriba corta al aire: el head no lleva línea. Abajo NUNCA — si hay pie, lo
+   cierra el pie; si no lo hay, lo cierra la línea de la statusbar. Con solo la
+   primera condición, un inspector sin pie recuperaba el esfumado y se lo
+   encimaba a esa línea: la ensucia, y además miente, porque el contenido no se
+   pierde en la nada sino que muere contra un borde. */
+.ox-inspector__body:has(~ .ox-inspector__foot),
+.ox-app:has(> .ox-statusbar) .ox-inspector__body { --ox-fade-bottom: 0px; }
 .ox-inspector__foot {
   padding: var(--ox-3) var(--ox-4);
   box-shadow: inset 0 1px 0 var(--ox-line);

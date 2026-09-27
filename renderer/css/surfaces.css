@@ -40,17 +40,13 @@
   transition: opacity var(--ox-t-3) var(--ox-ease-soft);
 }
 
-/* Formas — la identidad del nodo */
-.ox-mark--diamond .ox-mark__core { border-radius: 1.5px; transform: rotate(45deg) scale(.84); }
-.ox-mark--diamond .ox-mark__halo { border-radius: 2px; transform: rotate(45deg) scale(.8); }
-.ox-mark--square  .ox-mark__core { border-radius: 1.5px; }
-.ox-mark--square  .ox-mark__halo { border-radius: 3px; }
-.ox-mark--hex     .ox-mark__core {
-  border-radius: 0;
-  width: 9px; height: 10px;
-  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
-}
-.ox-mark--hex .ox-mark__halo { clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); box-shadow: none; }
+/* Formas — la identidad del nodo.
+   Dos: círculo (el default) y cuadrado. El rombo y el hexágono se sacaron a
+   propósito — la esquina en punta y la silueta de seis lados desentonan con
+   el redondeo sutil del resto del sistema. Si hace falta una tercera forma,
+   que salga de la misma familia geométrica, no de sumar aristas. */
+.ox-mark--square .ox-mark__core { border-radius: 1.5px; }
+.ox-mark--square .ox-mark__halo { border-radius: 3px; }
 
 /* Estados */
 .ox-mark[data-state='idle']    { color: var(--ox-text-4); }
@@ -58,7 +54,6 @@
 
 .ox-mark[data-state='queued']  { color: var(--ox-text-4); }
 .ox-mark[data-state='queued']  .ox-mark__core { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; transform: scale(.8); }
-.ox-mark--diamond[data-state='queued'] .ox-mark__core { transform: rotate(45deg) scale(.7); }
 
 .ox-mark[data-state='running'] { color: var(--ox-accent); }
 .ox-mark[data-state='running'] .ox-mark__halo { opacity: 1; animation: ox-breathe 2.2s var(--ox-ease-both) infinite; }
@@ -114,7 +109,8 @@
    La jerarquía la construye la ELEVACIÓN, no un borde marcado. El hairline
    existe para definir el filo, no para separar planos. */
 .ox-card {
-  background: var(--ox-s2);
+  --ox-surface: var(--ox-s2);
+  background: var(--ox-surface);
   border-radius: var(--ox-r-lg);
   box-shadow: var(--ox-hairline), var(--ox-e2);
   transition: var(--tr-surface);
@@ -139,8 +135,12 @@
 
    Pero una tarjeta SIN head —`<div class="ox-card"><div class="ox-card__body">`,
    que es la forma más común— se quedaba sin nada arriba: 0 px contra 16 abajo,
-   con el contenido pegado al borde superior. Las cuatro tarjetas de Ajustes son
-   de esa forma, y era ahí donde se veía. */
+   con el contenido pegado al borde superior.
+
+   Lo que lo dejó pasar tanto tiempo: la vitrina mostraba `ox-card` una sola vez
+   y con un `padding` inline, saltándose el componente. El único lugar que
+   existe para ver las piezas nunca dibujaba la que estaba rota. Ahora están las
+   dos formas en «Superficies». */
 .ox-card__body { padding: var(--ox-4); }
 .ox-card__head + .ox-card__body { padding-top: 0; }
 .ox-card__foot {
@@ -184,7 +184,20 @@
   font-size: var(--ox-fs-12);
 }
 .ox-kv__k { color: var(--ox-text-4); }
-.ox-kv__v { color: var(--ox-text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; user-select: text; }
+/* `text-overflow: ellipsis` sin `white-space: nowrap` no hace absolutamente
+   nada: la línea envuelve, y lo que igual no entra —una ruta, un id largo— se
+   corta al aire contra el borde de la tarjeta. La elipsis estaba declarada
+   desde el principio; lo que faltaba era dejarla trabajar. El valor que SÍ
+   tiene que envolver lo pide con --wrap, así queda dicho en el markup. */
+.ox-kv__v {
+  color: var(--ox-text-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+.ox-kv__v--wrap { white-space: normal; overflow-wrap: anywhere; }
 
 /* ── Lista ────────────────────────────────────────────────────────────────── */
 .ox-list { display: flex; flex-direction: column; gap: 2px; }
@@ -231,7 +244,13 @@
 }
 .ox-listitem__aside { display: flex; align-items: center; gap: var(--ox-3); flex: 0 0 auto; }
 
-/* Las acciones de fila se materializan con el hover, no ocupan sitio siempre. */
+/* Las acciones de fila se materializan con el hover, no ocupan sitio siempre.
+   También con el foco, pero SOLO el de teclado (:focus-visible, como el
+   anillo de base.css): la fila es un botón con tabindex y el clic la deja
+   enfocada. Con :focus-within, las acciones quedaban pegadas en la última
+   fila clickeada aunque el mouse ya se hubiera ido. El :has() cubre el foco
+   de una acción de adentro, para que no se esfumen mientras se tabula entre
+   ellas. */
 .ox-rowactions {
   display: flex;
   align-items: center;
@@ -241,7 +260,7 @@
   transition: opacity var(--ox-t-2) var(--ox-ease-soft), transform var(--ox-t-2) var(--ox-ease);
 }
 .ox-listitem:hover .ox-rowactions,
-.ox-listitem:focus-within .ox-rowactions,
+.ox-listitem:is(:focus-visible, :has(:focus-visible)) .ox-rowactions,
 .ox-tr:hover .ox-rowactions { opacity: 1; transform: none; }
 
 /* ── Tabla ────────────────────────────────────────────────────────────────── */
@@ -257,7 +276,11 @@
   letter-spacing: var(--ox-track-caps);
   text-transform: uppercase;
   color: var(--ox-text-4);
-  background: var(--ox-bg);
+  /* Opaco porque es sticky y las filas pasan por debajo. Del color de la
+     superficie donde cayó la tabla —la vista, una card, un modal— vía
+     --ox-surface, y no de un plano fijo: con --ox-bg a secas, la tabla dentro
+     de una card llevaba el encabezado más oscuro que sus propias filas. */
+  background: var(--ox-surface);
   box-shadow: inset 0 -1px 0 var(--ox-line);
   white-space: nowrap;
   user-select: none;
@@ -270,11 +293,37 @@
   box-shadow: inset 0 -1px 0 var(--ox-line);
   user-select: text;
 }
-.ox-tr { transition: background-color var(--ox-t-1) var(--ox-ease-soft); }
+/* Una fila con tabindex (se abre con Enter) lleva el anillo hacia adentro: la
+   fila va de borde a borde de su tabla, y la tabla muchas veces de borde a
+   borde de su card, así que el de base.css se pisaba con el canto de la card.
+   Es un outline y no una sombra: el outline se pinta encima de las celdas, y
+   una sombra de la fila quedaba debajo de su fondo. */
+.ox-tr {
+  outline: 1.5px solid transparent;
+  outline-offset: -1.5px;
+  transition: background-color var(--ox-t-1) var(--ox-ease-soft), outline-color var(--ox-t-1) var(--ox-ease-soft);
+}
+.ox-tr:focus-visible { box-shadow: none; outline-color: var(--ox-ring); }
 .ox-tr:hover td { background: var(--ox-wash-1); }
 .ox-tr.is-selected td { background: var(--ox-wash-2); }
 .ox-tr.is-failed td:first-child { box-shadow: inset 2px 0 0 var(--ox-danger), inset 0 -1px 0 var(--ox-line); }
 .ox-td--num { text-align: right; font-variant-numeric: tabular-nums; }
+/* El encabezado de una columna numérica tiene que alinearse con sus cifras.
+   `.ox-table th` trae text-align:left y su especificidad (0,1,1) le gana a
+   `.ox-td--num` (0,1,0): sin esta regla el título queda pegado a la izquierda
+   mientras los números se van a la derecha, y la columna entera se lee
+   corrida — los valores no caen debajo de su propio título. */
+.ox-table th.ox-td--num { text-align: right; }
+/* Una tabla adentro de un .ox-scroll, sea hija directa o metida en una card. El
+   `th` sticky se engancha al borde del CONTENIDO del scroller, no al de su
+   caja: con el padding-top que el .ox-scroll reserva para el esfumado, el
+   encabezado se clavaba --ox-fade más abajo del borde y las filas pasaban por
+   ese hueco, por ENCIMA de sus propios títulos. El top negativo devuelve ese
+   padding y lo clava contra el borde de verdad. Mientras está clavado,
+   scrollFade() le pone .is-stuck-head al scroller y el fade de arriba se va: el
+   encabezado opaco con su hairline ya es el límite. */
+.ox-scroll .ox-table th { top: calc(var(--ox-fade) * -1); }
+.ox-scroll.is-stuck-head { --ox-fade-top: 0px; }
 .ox-td--tight { width: 1%; white-space: nowrap; }
 
 /* ── Tabs ─────────────────────────────────────────────────────────────────────
@@ -408,7 +457,9 @@
   text-align: center;
   animation: ox-rise-in var(--ox-t-4) var(--ox-ease) both;
 }
-.ox-empty .ox-icon { width: 34px; height: 34px; color: var(--ox-text-4); stroke-width: 1; }
+/* Solo el ícono grande del estado vacío (hijo directo): un botón de acción
+   con ícono adentro se quedaba con estos 34px y salía un botón con lupa gigante. */
+.ox-empty > .ox-icon { width: 34px; height: 34px; color: var(--ox-text-4); stroke-width: 1; }
 .ox-empty__title { font-size: var(--ox-fs-15); font-weight: var(--ox-w-medium); color: var(--ox-text-2); }
 .ox-empty__text { font-size: var(--ox-fs-12); color: var(--ox-text-4); max-width: 320px; line-height: var(--ox-lh-loose); }
 

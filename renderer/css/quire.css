@@ -25,10 +25,19 @@
    el contenido sin nada que dijera dónde termina. */
 
 .ox-rail__foot { box-shadow: none; }
+/* Onyx apaga el esfumado de abajo del nav cuando hay pie, porque su pie trae
+   línea y la línea es el límite. Acá el pie no la lleva: el nav corta al aire y
+   el fade vuelve. */
+.ox-rail__nav:has(~ .ox-rail__foot) { --ox-fade-bottom: var(--ox-fade); }
 
 /* Hairline como sombra interior y nunca como `border`: un border deja hilacha
    en las esquinas cuando el contenedor recorta. Es la regla de la casa. */
 .ox-viewhead { box-shadow: inset 0 -1px 0 var(--ox-line); }
+/* Y como TODO encabezado trae su línea, arriba ninguna vista esfuma: la línea
+   ya es el límite, y el fade encima la ensucia. En Onyx eso lo dispara la clase
+   .ox-viewhead--line; acá es la regla general, y se cubren los dos layouts. */
+.ox-main:has(> .ox-viewhead) > .ox-scroll,
+.ox-main:has(> .ox-viewhead) .ox-viewbody__main > .ox-scroll { --ox-fade-top: 0px; }
 
 /* ── Pestañas ────────────────────────────────────────────────────────────────
    Una fila más en el chasis, entre el titlebar y el cuerpo. La declaración
@@ -1385,22 +1394,18 @@
 
 .qr-herr__tabs { margin: 0 var(--ox-6); flex: 0 0 auto; }
 
-/* Esfuma abajo y NO arriba: arriba está la línea de las tabs, y ese corte ya
-   está resuelto — un fade encima solo la ensucia. El fade es para el borde que
-   recorta al aire. */
+/* Sin esfumado de ningún lado: arriba está la línea de las tabs y abajo la de
+   la statusbar, y los dos cortes ya están resueltos — un fade encima solo
+   ensucia la línea. El fade es para el borde que recorta al aire, y acá no hay
+   ninguno. (Hasta la 0.9 esfumaba abajo, de cuando la regla no miraba la
+   statusbar.) */
 .qr-herr__cuerpo {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  --ox-fade: 26px;
   padding: var(--ox-4) var(--ox-6) 26px;
-  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--ox-fade)), transparent 100%);
-  transition: mask-image var(--ox-t-3) var(--ox-ease-soft);
 }
-
-/* Llegado al final no queda nada recortado: se apaga. */
-.qr-herr__cuerpo.is-bottom { mask-image: none; }
 
 /* ── Sobre el `both` en las animaciones de entrada ───────────────────────────
    Las que revelan contenido van SIN fill-mode. Con `both`, un keyframe que

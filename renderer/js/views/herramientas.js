@@ -18,7 +18,7 @@ import { Toast, Modal } from '../overlays.js';
 import Router from '../router.js';
 import { paint, head, empty, esc, attempt } from '../ui.js';
 import { fmtBytes, plural } from '../format.js';
-import { bindSwitcher, scrollFade, bindStepper } from '../motion.js';
+import { bindSwitcher, bindStepper } from '../motion.js';
 import { combinar, dividir, reorganizar } from '../imposicion/motor.js';
 import { aplanarTinta, contarTinta } from '../tinta/aplanar.js';
 import { exportarImagenes, FORMATOS, DPIS, medidaAlDPI } from '../exportar.js';
@@ -62,8 +62,6 @@ export function viewHerramientas() {
 
   bindSwitcher(document.getElementById('herr-tabs'), (v) => { V.seccion = v; pintarSeccion(); });
   pintarSeccion();
-  // El fade de abajo se apaga solo al llegar al final del scroll.
-  scrollFade(document.getElementById('herr-cuerpo'));
 
   const off = alCambiar((que) => { if (que === 'documento') Router.refresh({ animar: true }); });
   Router.onLeave(off);

@@ -35,11 +35,28 @@
 /* ── Menú contextual / dropdown ──────────────────────────────────────────── */
 /* Los overlays que scrollean también se esfuman: la regla del corte-nunca no
    se suspende porque la superficie sea chica. Cada uno lleva un fade a su
-   escala, y su padding vertical lo iguala para que en reposo no coma ítems. */
+   escala, y su padding vertical lo iguala para que en reposo no coma ítems.
+
+   Pero estos dos están casi todos cerrados por una línea, y el fade solo va
+   donde el corte es al aire. El único lado al aire acá es el de arriba del
+   modal, contra su cabecera. Cada --ox-fade se queda igual aunque el lado esté
+   apagado: es la escala del esfumado de esa superficie, y si mañana desaparece
+   la pieza que la cierra, el fade tiene que volver con el tamaño correcto. */
 .ox-menu.ox-scroll,
 .ox-modal__body.ox-scroll { overflow-x: hidden; }
 .ox-menu.ox-scroll        { --ox-fade: 10px; padding-top: 10px; padding-bottom: 10px; }
 .ox-modal__body.ox-scroll { --ox-fade: 20px; padding-top: 20px; padding-bottom: 20px; }
+
+/* El menú es su propio marco: el hairline lo cierra por los cuatro lados. Acá
+   el fade no solo sobraba — como la máscara y el borde viven en el MISMO
+   elemento, se comía el hairline justo arriba y abajo y dejaba el marco abierto. */
+.ox-menu.ox-scroll {
+  --ox-fade-top: 0px;
+  --ox-fade-bottom: 0px;
+  mask-image: none;
+}
+/* El modal corta al aire arriba (la cabecera no lleva línea) y contra el pie abajo. */
+.ox-modal__body:has(~ .ox-modal__foot)     { --ox-fade-bottom: 0px; }
 
 .ox-menu {
   position: absolute;
@@ -74,9 +91,26 @@
 .ox-menuitem:hover, .ox-menuitem.is-active { background: var(--ox-wash-2); color: var(--ox-text); }
 .ox-menuitem:hover .ox-icon, .ox-menuitem.is-active .ox-icon { color: var(--ox-text-2); }
 .ox-menuitem.is-selected .ox-icon:last-child { color: var(--ox-accent); }
-.ox-menuitem--danger { color: var(--ox-danger); }
-.ox-menuitem--danger .ox-icon { color: var(--ox-danger); }
-.ox-menuitem--danger:hover { background: var(--ox-danger-wash); color: var(--ox-danger); }
+/* El peligro tiene que ganarle al resaltado, y por especificidad venía
+   perdiendo. `.ox-menuitem:hover .ox-icon` es (0,3,0) y `.ox-menuitem--danger
+   .ox-icon` es (0,2,0): al pasar el mouse por encima, el tachito se volvía gris
+   mientras el texto y el fondo seguían rojos —el ícono decía una cosa y el
+   resto de la fila decía otra—. Con is-active, que es el resaltado del teclado,
+   era peor: se caía TODO el rojo y Eliminar quedaba igual que Duplicar.
+
+   El arreglo no es inflar la especificidad con un truco, es nombrar los tres
+   estados. Reposo, mouse encima y foco de teclado son el mismo item peligroso y
+   se pintan igual; escribirlos así los empata con las reglas de arriba y, al
+   venir después, ganan. De paso el que navega con el teclado ve lo mismo que el
+   que navega con el mouse, que hasta acá no pasaba. */
+.ox-menuitem--danger,
+.ox-menuitem--danger:hover,
+.ox-menuitem--danger.is-active { color: var(--ox-danger); }
+.ox-menuitem--danger:hover,
+.ox-menuitem--danger.is-active { background: var(--ox-danger-wash); }
+.ox-menuitem--danger .ox-icon,
+.ox-menuitem--danger:hover .ox-icon,
+.ox-menuitem--danger.is-active .ox-icon { color: var(--ox-danger); }
 .ox-menuitem__key { margin-left: auto; font-size: var(--ox-fs-10); color: var(--ox-text-4); }
 .ox-menu__sep { height: 1px; margin: var(--ox-1) var(--ox-2); background: var(--ox-line); }
 .ox-menu__label {
@@ -130,7 +164,8 @@
   flex-direction: column;
   margin: 0;
   border-radius: var(--ox-r-xl);
-  background: var(--ox-s3);
+  --ox-surface: var(--ox-s3);
+  background: var(--ox-surface);
   box-shadow: var(--ox-hairline), var(--ox-e4);
   overflow: hidden;
 }
@@ -176,6 +211,7 @@
 .ox-toast__main { flex: 1 1 auto; min-width: 0; }
 .ox-toast__title { font-size: var(--ox-fs-12); font-weight: var(--ox-w-medium); color: var(--ox-text); }
 .ox-toast__text { font-size: var(--ox-fs-11); color: var(--ox-text-3); margin-top: 2px; line-height: var(--ox-lh); user-select: text; }
+.ox-toast__action { margin-top: 8px; }
 .ox-toast--error > .ox-icon { color: var(--ox-danger); }
 .ox-toast--error { box-shadow: inset 0 0 0 1px var(--ox-danger-ring), var(--ox-e4); }
 /* La barra de vida: se consume sola y muestra cuánto le queda. */

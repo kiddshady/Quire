@@ -69,10 +69,20 @@ export function scrollFade(el) {
     const slack = el.scrollHeight - el.clientHeight;
     if (slack <= 1) {                       // no hay nada que recortar
       el.classList.add('is-top', 'is-bottom');
+      el.classList.remove('is-stuck-head');
       return;
     }
     el.classList.toggle('is-top', el.scrollTop <= 1);
     el.classList.toggle('is-bottom', el.scrollTop >= slack - 1);
+    // Un encabezado de tabla clavado contra el borde: su tabla ya empezó arriba
+    // del borde y todavía no terminó. Ahí la línea es el límite y el fade sobra.
+    const top = el.getBoundingClientRect().top;
+    const stuck = [...el.querySelectorAll('.ox-table')].some((t) => {
+      if (t.closest('.ox-scroll') !== el) return false;
+      const r = t.getBoundingClientRect();
+      return r.top < top - 1 && r.bottom > top;
+    });
+    el.classList.toggle('is-stuck-head', stuck);
   };
 
   el.addEventListener('scroll', update, { passive: true });

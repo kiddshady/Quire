@@ -6,11 +6,18 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* `--ox-surface` es «la superficie sobre la que estoy». La declara cada plano
+   que aloja contenido —acá la base; y la card, el inspector y el modal— en el
+   mismo renglón donde pinta su fondo, y pinta CON ella, así las dos no se pueden
+   desencontrar. La lee lo que necesita ser opaco del color de su entorno sin
+   saber dónde cayó: el encabezado sticky de una tabla, que sobre la vista es
+   --ox-bg y dentro de una card es --ox-s2. */
 html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--ox-bg);
+  --ox-surface: var(--ox-bg);
+  background: var(--ox-surface);
 }
 
 body {
@@ -126,6 +133,19 @@ p, code, pre,
   font-size: var(--ox-fs-11);
   color: var(--ox-text-3);
 }
+/* Un ícono adentro de una etiqueta o un dato chico va en el renglón, al lado
+   del texto. Los dos son texto en línea, y como todo `svg` es display:block,
+   el ícono se iba solo a un renglón de arriba. Salió de Pharos, donde «de la
+   red», «guardado hace…» y «Aplicar descuento» tenían el ícono flotando encima
+   del texto. Con :has() la regla toca solo a los que llevan ícono; los que son
+   texto pelado siguen en línea. */
+:is(.ox-meta, .ox-label):has(> .ox-icon) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ox-meta > .ox-icon { width: 12px; height: 12px; }
+.ox-label > .ox-icon { width: 14px; height: 14px; color: var(--ox-text-3); }
 /* La versalita espaciada: el gesto editorial del sistema. */
 .ox-eyebrow {
   font-size: var(--ox-fs-10);
@@ -148,12 +168,41 @@ p, code, pre,
 .ox-dim  { color: var(--ox-text-3); }
 .ox-dim2 { color: var(--ox-text-4); }
 .ox-danger { color: var(--ox-danger); }
+
+/* `display: block` no es decoración: sobre un elemento INLINE —un <span> suelto
+   dentro de un div— `overflow` y `text-overflow` no aplican, la clase no hace
+   absolutamente nada y el texto termina cortado al aire contra el contenedor.
+   Se notaba solo donde el span no era ítem de un flex (que lo blockifica), y
+   por eso pasó desapercibido tanto tiempo: en los menús anda. */
 .ox-truncate {
+  display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Una ruta larga se recorta por el MEDIO, nunca por la cola.
+   El principio lo comparten todas —C:\Users\fulano\AppData\Roaming\…— y el
+   final es lo único que dice de qué carpeta se está hablando. `ox-truncate` a
+   secas deja «C:\Users\fulano\AppData\Roam…», que es justo la mitad que no
+   informa; y sin recorte ninguno el texto se corta al aire contra el borde.
+
+   Cuánto entra depende del ancho de la ventana, así que el recorte lo decide el
+   CSS y no un conteo de caracteres en JS —que tendría que volver a medir en
+   cada resize—. La cola NO se encoge (`flex: 0 0 auto`): toda la elipsis se la
+   come la cabeza, que es la que sobra. El `max-width` es el caso degenerado —
+   una cola más ancha que la caja entera—: ahí se recorta con la suya en vez de
+   empujar a la cabeza fuera de la vista. */
+.ox-path { display: flex; min-width: 0; }
+.ox-path__head,
+.ox-path__tail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ox-path__head { flex: 0 1 auto; min-width: 2ch; }
+.ox-path__tail { flex: 0 0 auto; max-width: 100%; }
 
 /* ── Layout utilitario ───────────────────────────────────────────────────── */
 .ox-row  { display: flex; align-items: center; gap: var(--ox-2); }
@@ -189,43 +238,69 @@ p, code, pre,
 .ox-icon--fill { fill: currentColor; stroke: none; }
 
 /* ── Esfumado del scroll ─────────────────────────────────────────────────────
-   Donde el scroll recorta, el contenido se DESVANECE. Nunca un corte duro:
-   un corte se lee como un bug, el fade dice "hay más, seguí".
+   Donde el scroll recorta AL AIRE, el contenido se DESVANECE: un corte al aire
+   se lee como un bug, el fade dice "hay más, seguí".
+
+   Pero el fade no va en todo corte. Va donde nada más explica el límite. Si de
+   ese lado hay una línea — la statusbar, el pie de un panel, el hairline del
+   propio bloque — el límite YA está dicho: el esfumado encima la ensucia, y
+   además miente, porque el contenido no se pierde en la nada sino que muere
+   contra un borde. Ese lado lleva --line-top / --line-bottom y corta limpio.
+
    El padding ≥ --ox-fade evita que en reposo la banda coma el primer/último item.
    Las clases .is-top / .is-bottom las maneja scrollFade() en motion.js. */
+
+/* Registradas para que el fade ANIME por lado: una custom property sin @property
+   no interpola, y el esfumado entraría de golpe al empezar a scrollear. */
+@property --ox-fade-top    { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --ox-fade-bottom { syntax: '<length>'; inherits: false; initial-value: 0px; }
+
 .ox-scroll {
   overflow-y: auto;
   overflow-x: hidden;
   padding-top: var(--ox-fade);
   padding-bottom: var(--ox-fade);
-  transition: mask-image var(--ox-t-3) var(--ox-ease-soft);
+  --ox-fade-top: var(--ox-fade);
+  --ox-fade-bottom: var(--ox-fade);
+  transition: --ox-fade-top var(--ox-t-3) var(--ox-ease-soft),
+              --ox-fade-bottom var(--ox-t-3) var(--ox-ease-soft);
   mask-image: linear-gradient(
     to bottom,
     transparent 0,
-    #000 var(--ox-fade),
-    #000 calc(100% - var(--ox-fade)),
+    #000 var(--ox-fade-top),
+    #000 calc(100% - var(--ox-fade-bottom)),
     transparent 100%
   );
 }
 /* Pegado arriba: no esfumamos arriba. Pegado abajo: no esfumamos abajo. */
-.ox-scroll.is-top {
-  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--ox-fade)), transparent 100%);
-}
-.ox-scroll.is-bottom {
-  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--ox-fade));
-}
-.ox-scroll.is-top.is-bottom { mask-image: none; }
+.ox-scroll.is-top    { --ox-fade-top: 0px; }
+.ox-scroll.is-bottom { --ox-fade-bottom: 0px; }
+
+/* De ese lado hay una línea, y la línea es el límite: el fade sobra. */
+.ox-scroll.ox-scroll--line-top    { --ox-fade-top: 0px; }
+.ox-scroll.ox-scroll--line-bottom { --ox-fade-bottom: 0px; }
+
+/* Sin nada que esfumar de ningún lado, la máscara solo cuesta una capa de más. */
+.ox-scroll.is-top.is-bottom,
+.ox-scroll.ox-scroll--line-top.ox-scroll--line-bottom { mask-image: none; }
+
+@property --ox-fade-left  { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --ox-fade-right { syntax: '<length>'; inherits: false; initial-value: 0px; }
 
 .ox-scroll-x {
   overflow-x: auto;
   overflow-y: hidden;
   padding-left: var(--ox-fade);
   padding-right: var(--ox-fade);
+  --ox-fade-left: var(--ox-fade);
+  --ox-fade-right: var(--ox-fade);
   mask-image: linear-gradient(
     to right,
     transparent 0,
-    #000 var(--ox-fade),
-    #000 calc(100% - var(--ox-fade)),
+    #000 var(--ox-fade-left),
+    #000 calc(100% - var(--ox-fade-right)),
     transparent 100%
   );
 }
+.ox-scroll-x.ox-scroll-x--line-left  { --ox-fade-left: 0px; }
+.ox-scroll-x.ox-scroll-x--line-right { --ox-fade-right: 0px; }
