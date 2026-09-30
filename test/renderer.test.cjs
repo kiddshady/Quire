@@ -60,6 +60,12 @@ app.whenReady().then(async () => {
   ok('el shell está montado', await js(`!!document.querySelector('.ox-titlebar') && !!document.querySelector('.ox-rail')`));
   ok('los <i data-icon> se reemplazaron por SVG', !(await js(`!!document.querySelector('i[data-icon]')`)));
   ok('la vista inicial pintó algo', (await js(`document.getElementById('view').children.length`)) > 0);
+  /* Los ítems de la statusbar son flex, y una regla de clase le ganaba al
+     `hidden` del navegador: sin documento, la barra mostraba «— — [impresora]
+     —» en vez de solo «Ningún documento». */
+  const statsVisibles = await js(`[...document.querySelectorAll('.ox-statusbar__item[hidden]')]
+    .filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.id)`);
+  ok('sin documento, la statusbar no muestra datos vacíos', statsVisibles.length === 0, statsVisibles.join(', '));
 
   /* Acá venían dos secciones que probaban la app demo de Onyx: crear un ítem
      por el modal (`#btn-new`, `#f-name`, la colección `items`) y abrir su

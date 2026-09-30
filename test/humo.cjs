@@ -969,6 +969,99 @@ app.whenReady().then(async () => {
     }
   }
 
+  /* ── 13. Lo que se prende y se apaga con `hidden` se pliega ───────────────
+     Con `display: none` a secas, la barra de tinta, la caja de fragmentos o un
+     dato de la statusbar aparecían y se iban de un cuadro al otro, y
+     empujaban de golpe a lo de al lado. Ahora el alto (o el ancho) se pliega
+     mientras se desvanece. Se muestrea cada cuadro al prender y al apagar:
+     tiene que haber medidas intermedias, y al apagar tiene que seguir en
+     pantalla mientras se va. Y la barra de tinta, que cambia el alto del
+     visor, no puede mandarte al principio de la página: reescalar en cada
+     cuadro del pliegue lo hacía, y es caro. */
+  notas.push(['plegables', await js(`(async () => {
+    const router = (await import('./js/router.js')).default;
+    const cuadros = (n) => new Promise((ok) => { const f = () => (--n ? requestAnimationFrame(f) : ok()); requestAnimationFrame(f); });
+    // Medir un elemento en cada cuadro durante 320 ms después de disparar.
+    const serie = async (el, disparar, eje) => {
+      disparar();
+      const out = []; const t0 = performance.now();
+      while (performance.now() - t0 < 320) {
+        const r = el.getBoundingClientRect(); const cs = getComputedStyle(el);
+        out.push({ t: Math.round(performance.now() - t0), med: Math.round(eje === 'ancho' ? r.width : r.height),
+          op: Math.round(+cs.opacity * 100), display: cs.display });
+        await cuadros(1);
+      }
+      return out;
+    };
+    const resumen = (s) => {
+      const fin = s.at(-1).med; const max = Math.max(...s.map((f) => f.med));
+      return { serie: s.map((f) => f.t + ':' + f.med + '/' + f.op).join(' '),
+        intermedias: s.filter((f) => f.med > 0 && f.med < max).length, max, fin,
+        visibleAlIrse: s[0].display !== 'none' && s[0].op > 50 };
+    };
+    const out = {};
+
+    // La barra de tinta, en el lector, con la hoja a mitad de página.
+    router.go('lector');
+    await new Promise((r) => setTimeout(r, 1200));
+    const visor = document.getElementById('qr-visor');
+    const barra = document.getElementById('qr-tintabarra');
+    const toggle = document.getElementById('qr-tinta-toggle');
+    if (barra && !barra.hidden) toggle.click();       // arrancar apagada
+    await new Promise((r) => setTimeout(r, 400));
+    visor.scrollTop = Math.round(visor.querySelector('.qr-pliego').offsetHeight * 0.4);
+    await new Promise((r) => setTimeout(r, 200));
+    const scrollAntes = visor.scrollTop;
+    out.barraEntra = resumen(await serie(barra, () => toggle.click(), 'alto'));
+    await new Promise((r) => setTimeout(r, 300));
+    out.scrollTinta = { antes: scrollAntes, despues: visor.scrollTop };
+    out.barraSale = resumen(await serie(barra, () => toggle.click(), 'alto'));
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Un dato de la statusbar: se pliega el ancho, y los de al lado no saltan.
+    const medida = document.getElementById('stat-medida');
+    out.statSale = resumen(await serie(medida, () => { medida.hidden = true; }, 'ancho'));
+    await new Promise((r) => setTimeout(r, 200));
+    out.statEntra = resumen(await serie(medida, () => { medida.hidden = false; }, 'ancho'));
+
+    // La caja de fragmentos de Convertir, que se prende con su interruptor.
+    router.go('convertir');
+    await new Promise((r) => setTimeout(r, 900));
+    const chunks = document.querySelector('.qr-conv__chunks');
+    const boton = document.querySelector('[data-salida="chunks"]');
+    if (chunks && boton) {
+      const prendida = !chunks.hidden;
+      out.chunks1 = resumen(await serie(chunks, () => boton.click(), 'alto'));
+      await new Promise((r) => setTimeout(r, 200));
+      out.chunks2 = resumen(await serie(chunks, () => boton.click(), 'alto'));
+      out.chunksArrancaba = prendida;
+    } else out.chunksFalta = true;
+    return out;
+  })()`)]);
+
+  {
+    const n = notas.at(-1)[1];
+    const plegado = (quien, r, alIrse) => {
+      if (!r) return problemas.push(`plegables: no se pudo medir ${quien}`);
+      if (r.intermedias < 2) problemas.push(`plegables[${quien}]: pasa de golpe, sin medidas intermedias (${r.serie})`);
+      if (alIrse && !r.visibleAlIrse) problemas.push(`plegables[${quien}]: desaparece en el primer cuadro en vez de irse (${r.serie})`);
+    };
+    plegado('barra de tinta, al prender', n.barraEntra);
+    plegado('barra de tinta, al apagar', n.barraSale, true);
+    if (n.barraSale && n.barraSale.fin !== 0) problemas.push(`plegables: la barra de tinta apagada sigue ocupando ${n.barraSale.fin} px`);
+    if (Math.abs(n.scrollTinta.despues - n.scrollTinta.antes) > 2) {
+      problemas.push(`plegables: prender la tinta movió la hoja (scroll ${n.scrollTinta.antes} → ${n.scrollTinta.despues})`);
+    }
+    plegado('dato de la statusbar, al esconder', n.statSale, true);
+    plegado('dato de la statusbar, al mostrar', n.statEntra);
+    if (n.chunksFalta) problemas.push('plegables: no encontré la caja de fragmentos de Convertir');
+    else {
+      plegado('caja de fragmentos, ida', n.chunks1, n.chunksArrancaba);
+      plegado('caja de fragmentos, vuelta', n.chunks2, !n.chunksArrancaba);
+      // El interruptor es un ajuste guardado: dos clicks lo dejan como estaba.
+    }
+  }
+
   /* ── Las dos formas de la tarjeta ─────────────────────────────────────────
      `.ox-card__body` llevaba `padding-top: 0` para no repetir el aire que el
      `__head` ya pone. Con encabezado quedaba perfecto; SIN encabezado el

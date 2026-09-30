@@ -473,7 +473,7 @@ function htmlExportar() {
         </label>` : ''}
 
       <div class="qr-herr__acciones">
-        <div class="qr-progreso" id="qr-exp-progreso" hidden>
+        <div class="qr-progreso qr-plegable" id="qr-exp-progreso" hidden>
           <div class="ox-meter"><div class="ox-meter__fill" style="--ox-pct:0%"></div></div>
           <span class="ox-meta" id="qr-exp-progreso-txt"></span>
         </div>

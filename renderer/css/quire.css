@@ -1017,17 +1017,9 @@
   box-shadow: inset 0 -1px 0 var(--ox-line);
   flex: 0 0 auto;
   user-select: none;
-
-  /* Entra deslizándose desde arriba, como si saliera de la barra de al lado.
-     Sin fill-mode: ver la nota sobre `both` más abajo, en .qr-herr__panel. */
-  animation: qr-barra-baja var(--ox-t-3) var(--ox-ease);
-}
-
-.qr-tintabarra[hidden] { display: none; }
-
-@keyframes qr-barra-baja {
-  from { opacity: 0; transform: translateY(-8px); }
-  to   { opacity: 1; transform: none; }
+  /* Entra y sale plegándose (.qr-plegable, al final del archivo): baja desde
+     la barra de al lado y empuja el visor de a poco, en vez de aparecer
+     entera y correr la hoja 40 px de un cuadro al otro. */
 }
 
 .qr-tintabarra__grupo {
@@ -1544,7 +1536,6 @@
 }
 
 .qr-progreso .ox-meter { flex: 1 1 auto; }
-.qr-progreso[hidden] { display: none; }
 
 /* ═══ ORGANIZAR PÁGINAS ══════════════════════════════════════════════════════ */
 
@@ -1842,7 +1833,6 @@
 
 /* La barra vive adentro del ítem y se reserva su alto solo mientras convierte. */
 .qr-conv__meter { margin-top: var(--ox-1); max-width: 360px; }
-.qr-conv__meter[hidden] { display: none; }
 
 /* Las salidas de un archivo listo: un chip por archivo escrito. El del PDF
    abre en Quire; los demás muestran la carpeta. */
@@ -1864,10 +1854,60 @@
 .qr-conv__salidas-lista { display: flex; flex-direction: column; gap: var(--ox-2); }
 
 .qr-conv__chunks { margin-top: var(--ox-1); }
-.qr-conv__chunks[hidden] { display: none; }
 
 .qr-resumen__n { font-size: var(--ox-fs-19); font-weight: var(--ox-w-semi); color: var(--ox-text); }
 
-/* El botón de unir aparece solo con dos textos o más en la cola. `.ox-btn` es
-   inline-flex y le gana al `hidden` del navegador: hay que decirlo. */
-.qr-pie__boton[hidden] { display: none; }
+/* ── Lo que se muestra y se esconde con `hidden` ────────────────────────────
+   La barra de tinta, el progreso de exportar, la barra de cada archivo que se
+   convierte, la caja de fragmentos, el botón de unir, los datos de la
+   statusbar: todo eso se prende y se apaga con `el.hidden`, y con
+   `display: none` a secas aparecía y se iba de un cuadro al otro —y empujaba
+   de golpe a lo que tenía abajo o al lado—.
+
+   Ahora el JS sigue haciendo `el.hidden = …` y el movimiento es del CSS: el
+   alto (o el ancho) se pliega hasta 0 mientras se desvanece, y recién al final
+   pasa a `display: none` (`allow-discrete`). Al aparecer, `@starting-style` le
+   da de dónde salir. `interpolate-size` es lo que deja ir de 0 a `auto`.
+
+   La lista de transiciones repite las del botón (`--tr-color` y el transform
+   del press): la de acá le gana por orden a la suya, y sin repetirlas el hover
+   de un `.ox-btn` plegable dejaría de ser suave.
+
+   El mínimo en 0 es lo que deja llegar a 0: casi todos viven en un flex, y el
+   `min-height: auto` de un ítem flex lo frenaba en el alto de su contenido —la
+   barra de tinta bajaba hasta 22 px y ahí se cortaba de golpe—. */
+.qr-plegable,
+.qr-plegable--ancho {
+  interpolate-size: allow-keywords;
+  overflow: clip;
+  min-height: 0;
+  transition:
+    var(--tr-color),
+    transform var(--ox-t-1) var(--ox-ease-soft),
+    height var(--ox-t-2) var(--ox-ease-both),
+    width var(--ox-t-2) var(--ox-ease-both),
+    padding var(--ox-t-2) var(--ox-ease-both),
+    margin var(--ox-t-2) var(--ox-ease-both),
+    opacity var(--ox-t-2) var(--ox-ease-soft),
+    display var(--ox-t-2) allow-discrete;
+}
+.qr-plegable[hidden] { display: none; height: 0; padding-block: 0; margin-block: 0; opacity: 0; }
+@starting-style {
+  .qr-plegable:not([hidden]) { height: 0; padding-block: 0; margin-block: 0; opacity: 0; }
+}
+
+/* En la statusbar se pliega el ancho. El margen negativo es el `gap` de la
+   barra: un ítem de ancho 0 igual cuenta un hueco, y sin descontarlo los de
+   al lado saltarían 16 px justo cuando pasa a `display: none`. */
+.qr-plegable--ancho { white-space: nowrap; min-width: 0; }
+.qr-plegable--ancho[hidden] {
+  display: none; width: 0; padding-inline: 0; margin-inline-end: calc(-1 * var(--ox-4)); opacity: 0;
+}
+@starting-style {
+  .qr-plegable--ancho:not([hidden]) { width: 0; padding-inline: 0; margin-inline-end: calc(-1 * var(--ox-4)); opacity: 0; }
+}
+
+/* Los ítems de la statusbar son flex, y una regla de clase le gana al
+   `hidden` del navegador: sin esto, sin documento abierto la barra mostraba
+   «— — [impresora] —». */
+.ox-statusbar__item[hidden] { display: none; }

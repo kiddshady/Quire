@@ -39,6 +39,7 @@ const V = {
   renders: new Map(),      // nº de página → tarea de render en curso
   textos: new Map(),       // nº de página → tarea de capa de texto en curso
   pintadas: new Set(),
+  escalaHecha: 0,          // la escala a la que están medidas las hojas ahora
   desuscribir: null,
   panel: 'miniaturas',     // 'miniaturas' | 'esquema'
   panelAbierto: true,
@@ -299,6 +300,7 @@ function construirPaginas() {
   if (!V.visor || !S.doc) return;
 
   const escala = escalaActual();
+  V.escalaHecha = escala;
   const pista = V.visor.querySelector('.qr-pista');
   pista.innerHTML = S.geometrias.map((g) => {
     const { ancho, alto } = medida(g, escala);
@@ -331,6 +333,7 @@ function reescalar({ anclarEn = null } = {}) {
 
   const ancla = anclarEn ?? S.pagina;
   const escala = escalaActual();
+  V.escalaHecha = escala;
 
   /* Se cancelan los renders en vuelo pero NO se tocan los bitmaps: el de la
      escala anterior, estirado por CSS, se ve borroso un instante y después se
@@ -1429,7 +1432,7 @@ export function viewLector() {
         </button>
       </div>
 
-      <div class="qr-tintabarra" id="qr-tintabarra" ${V.tintaActiva ? '' : 'hidden'}></div>
+      <div class="qr-tintabarra qr-plegable" id="qr-tintabarra" ${V.tintaActiva ? '' : 'hidden'}></div>
 
       <div class="qr-lector__cuerpo">
         <aside class="qr-panel${V.panelAbierto ? '' : ' is-collapsed'}" id="qr-panel">
@@ -1473,12 +1476,27 @@ export function viewLector() {
      eso cambia el tamaño del visor que se está observando. Hacerlo adentro es
      el "ResizeObserver loop" que Chromium reporta como error de consola; la
      vista se veía bien igual, pero el error estaba. Diferido, además, dos
-     avisos seguidos se vuelven un solo reescalado. */
+     avisos seguidos se vuelven un solo reescalado.
+
+     La barra de tinta se pliega (.qr-plegable): el alto del visor cambia en
+     cada cuadro durante la transición. Reescalar es caro —cancela renders,
+     rehace la capa de texto y los editores y vuelve al principio de la
+     página—, así que no se hace si la escala sale igual (en modo ancho, un
+     cambio de alto no la mueve) y, si cambia, se espera a que la barra
+     termine de moverse para hacerlo una sola vez. */
   let reescaladoPendiente = 0;
+  const reescalarSiCambio = () => {
+    if (S.modoZoom === 'fijo') return;
+    if (document.getElementById('qr-tintabarra')?.getAnimations().length) {
+      reescaladoPendiente = requestAnimationFrame(reescalarSiCambio);
+      return;
+    }
+    if (Math.abs(escalaActual() - V.escalaHecha) > 1e-4) reescalar();
+  };
   const ro = new ResizeObserver(() => {
     if (S.modoZoom === 'fijo') return;
     cancelAnimationFrame(reescaladoPendiente);
-    reescaladoPendiente = requestAnimationFrame(() => { if (S.modoZoom !== 'fijo') reescalar(); });
+    reescaladoPendiente = requestAnimationFrame(reescalarSiCambio);
   });
   ro.observe(V.visor);
 
