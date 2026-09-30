@@ -251,7 +251,7 @@ async function correr() {
     ok('volver devuelve el zoom', n.vuelta.zoom === 2, `${n.vuelta.zoom}`);
   }
 
-  /* ── 3-bis. Cambiar de pestaña ANIMA la vista ───────────────────────────── */
+  /* ── 3-bis. Cambiar de pestaña FUNDE la vista ───────────────────────────── */
   console.log('\n3-bis. La transición al cambiar de documento');
   notas.push(['transicion', await js(`(async () => {
     const est = await import('./js/estado.js');
@@ -277,14 +277,18 @@ async function correr() {
        aunque esté todo bien. */
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-    const anims = vista.getAnimations();
+    /* Desde la 0.9.5 el cambio es un fundido: el documento de antes queda en
+       un calco que se esfuma encima, y la vista nueva no anima nada. */
+    const calco = document.querySelector('.ox-main--saliente');
+    const anims = calco ? calco.getAnimations() : [];
     return {
       antes,
-      nombre: getComputedStyle(vista).animationName,
+      hayCalco: !!calco,
+      nombre: calco ? getComputedStyle(calco).animationName : 'sin calco',
       corriendo: anims.filter((a) => a.playState === 'running').length,
-      /* El reloj de la animación. Es lo que separa "arrancó de nuevo" de
-         "quedó una vieja dando vueltas": una recién nacida está cerca de 0, y
-         la anterior ya iba por los 420 ms cuando la medimos quieta. */
+      vistaQuieta: vista.getAnimations().length === 0,
+      /* El reloj del fundido. Es lo que separa "arrancó recién" de "quedó uno
+         viejo dando vueltas": uno recién nacido está cerca de 0. */
       reloj: Math.round(anims[0]?.currentTime || 0),
       cambio: otra.doc.nombre,
       vista: router.name,
@@ -295,9 +299,10 @@ async function correr() {
     const n = notas.at(-1)[1];
     // Sin esto, una animación vieja todavía corriendo daría un falso verde.
     ok('la vista está quieta antes de cambiar', n.antes === 0, `${n.antes}`);
-    ok('cambiar de pestaña dispara la animación de vista', n.corriendo === 1, `${n.corriendo}`);
-    ok('y es la de entrada del sistema', n.nombre === 'ox-glide-in', n.nombre);
-    ok('arrancó de cero, no es una vieja colgada', n.reloj < 120, `${n.reloj} ms`);
+    ok('cambiar de pestaña funde el documento de antes', n.hayCalco && n.corriendo === 1, `calco=${n.hayCalco} corriendo=${n.corriendo}`);
+    ok('y es el fundido del sistema', n.nombre === 'ox-desvanecer', n.nombre);
+    ok('arrancó de cero, no es uno viejo colgado', n.reloj < 120, `${n.reloj} ms`);
+    ok('la vista nueva queda quieta debajo', n.vistaQuieta);
     ok('sin salirse de Páginas', n.vista === 'paginas', n.vista);
   }
 
