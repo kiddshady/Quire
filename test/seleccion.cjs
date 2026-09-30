@@ -20,6 +20,9 @@ const path = require('node:path');
 const { vigilarConsola } = require('./consola.cjs');
 
 const RAIZ = path.join(__dirname, '..');
+
+// Datos propios, antes de requerir src/ (el porqué, en datos-propios.cjs).
+require('./datos-propios.cjs')('seleccion');
 const PDF = process.argv.find((a) => a.endsWith('.pdf'))
   || path.join(RAIZ, 'renderer', 'vendor', 'cobayo.pdf');
 

@@ -17,15 +17,14 @@ const os = require('node:os');
 const { vigilarConsola } = require('./consola.cjs');
 
 const RAIZ = path.join(__dirname, '..');
+
+// Datos propios, antes de requerir src/ (el porqué, en datos-propios.cjs).
+require('./datos-propios.cjs')('convertir');
 const MOODLE = path.join(__dirname, 'fixtures', 'ejemplo-moodle.htm');
 
 const problemas = [];
 const notas = [];
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/* Los ajustes son los de la app instalada en esta máquina (mismo userData):
-   se guardan antes y se restauran al final, pase lo que pase. */
-let ajustesPrevios = null;
 
 app.whenReady().then(async () => {
   const store = require(path.join(RAIZ, 'src', 'store.cjs'));
@@ -63,10 +62,12 @@ app.whenReady().then(async () => {
   }
 
   // ── 2. La app, con la vista Convertir ──────────────────────────────────────
-  ajustesPrevios = await store.loadSettings();
+  /* Los ajustes son los de la carpeta de datos propia de esta prueba: no hay
+     nada que guardar antes ni reponer después. */
+  const ajustes = await store.loadSettings();
   await store.saveSettings({
     conversion: {
-      ...ajustesPrevios.conversion,
+      ...ajustes.conversion,
       salidas: { pdf: true, markdown: true, txt: false, json: false, chunks: false },
       destino: 'carpeta',
       carpeta,
@@ -218,20 +219,13 @@ app.whenReady().then(async () => {
   console.log('\n----- problemas: ' + problemas.length + ' -----');
   for (const p of problemas) console.log('  ! ' + p);
 
-  /* Y las pestañas: la app de este test abrió PDFs temporales que ya no van a
-     existir, y sin esto quedan en la sesión guardada de la app instalada. */
   win.destroy();
   await esperar(300);
-  await store.saveSettings({ conversion: ajustesPrevios.conversion, ultimosDocumentos: ajustesPrevios.ultimosDocumentos });
   app.exit(problemas.length ? 1 : 0);
 }).catch(async (err) => {
   console.error('convertir FALLÓ:', err);
   for (const [k, v] of notas) console.log(k + ': ' + JSON.stringify(v));
   for (const p of problemas) console.log('  ! ' + p);
-  if (ajustesPrevios) {
-    const store = require(path.join(RAIZ, 'src', 'store.cjs'));
-    await store.saveSettings({ conversion: ajustesPrevios.conversion, ultimosDocumentos: ajustesPrevios.ultimosDocumentos }).catch(() => {});
-  }
   app.exit(1);
 });
 

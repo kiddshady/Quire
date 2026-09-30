@@ -25,6 +25,9 @@ const path = require('path');
 const fs = require('fs');
 
 const ROOT = path.join(__dirname, '..');
+
+// Datos propios, antes de requerir src/ (el porqué, en datos-propios.cjs).
+require('./datos-propios.cjs')('cartel');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let pass = 0; let fail = 0;

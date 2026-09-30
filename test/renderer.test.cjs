@@ -18,6 +18,9 @@ const { auditarAnillos } = require('./anillos.cjs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
+
+// Datos propios, antes de requerir src/ (el porqué, en datos-propios.cjs).
+require('./datos-propios.cjs')('smoke');
 const W = 1440; const H = 900;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -137,20 +140,33 @@ app.whenReady().then(async () => {
   console.log('\n4. El medidor indeterminado nunca se va de la pista');
   // Una barra que se sale de su pista se lee como un componente roto, no como
   // "esperando". Se muestrea el recorrido entero en vez de mirar un instante.
+  //
+  // Pero el barrido sale por la derecha y vuelve a entrar por la izquierda, y
+  // en esa vuelta la pista queda vacía un instante: medido, ~3 ms por borde
+  // (un cuadro en dos ciclos, con 0,4 px asomando). Antes se exigía cero
+  // muestras vacías, cada 60 ms: el ciclo dura 1500, exactamente 25 muestras,
+  // así que quedaban en fase con él y según cómo arrancara una caía siempre en
+  // la vuelta —la muestra 21, en cinco de ocho corridas—. Ahora se mira cada
+  // cuadro durante dos ciclos: la vuelta puede dejar un cuadro vacío por
+  // ciclo, nunca dos seguidos; una barra que se sale de verdad deja muchos.
   const fuera = await js(`(async () => {
     const m = document.querySelector('.ox-meter--indeterminate');
     const f = m && m.querySelector('.ox-meter__fill');
     if (!f) return 'no existe';
-    const malos = [];
-    for (let i = 0; i < 30; i++) {
+    const vacios = []; let cuadros = 0; let seguidos = 0; let peorRacha = 0;
+    const t0 = performance.now();
+    while (performance.now() - t0 < 3000) {
       const p = m.getBoundingClientRect(); const r = f.getBoundingClientRect();
       const visible = Math.min(r.right, p.right) - Math.max(r.left, p.left);
-      if (visible < 1) malos.push(i);
-      await new Promise(res => setTimeout(res, 60));
+      cuadros++;
+      if (visible < 1) { vacios.push(Math.round(performance.now() - t0)); seguidos++; peorRacha = Math.max(peorRacha, seguidos); }
+      else seguidos = 0;
+      await new Promise((res) => requestAnimationFrame(res));
     }
-    return malos;
+    return { cuadros, vacios, peorRacha };
   })()`);
-  ok('siempre hay barra sobre la pista', Array.isArray(fuera) && fuera.length === 0, JSON.stringify(fuera));
+  ok('siempre hay barra sobre la pista (salvo la vuelta del barrido)',
+    typeof fuera === 'object' && fuera.cuadros > 60 && fuera.vacios.length <= 2 && fuera.peorRacha <= 1, JSON.stringify(fuera));
 
   console.log('\n5. La fuente empaquetada carga de verdad');
   /* Éste es el chequeo que evita el fracaso silencioso: con CSP estricta y

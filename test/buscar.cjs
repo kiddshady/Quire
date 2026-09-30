@@ -27,13 +27,8 @@ const { vigilarConsola } = require('./consola.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 
-/* Datos propios, y ANTES de requerir nada de src/ (el porqué está en
-   pestanas.cjs). Sin esto el cobayo, que vive en una carpeta temporal que se
-   borra al final, quedaba en los recientes de data/ del repo, y la prueba
-   siguiente que arrancara sin aislar intentaba reabrirlo: una advertencia de
-   consola que hacía fallar a cartel.cjs según el orden en que corrieran. */
-const DATOS = fs.mkdtempSync(path.join(os.tmpdir(), 'quire-buscar-datos-'));
-process.env.QUIRE_DATA = DATOS;
+// Datos propios, antes de requerir src/ (el porqué, en datos-propios.cjs).
+require('./datos-propios.cjs')('buscar');
 
 let pass = 0; let fail = 0;
 const ok = (n, c, x = '') => { if (c) { pass++; console.log(`  ok   ${n}`); } else { fail++; console.log(`  FALLA ${n} ${x}`); } };
@@ -445,7 +440,6 @@ app.whenReady().then(async () => {
   await esperar(400);
 
   fs.rmSync(dir, { recursive: true, force: true });
-  fs.rmSync(DATOS, { recursive: true, force: true });
   clearTimeout(reloj);
   console.log(`\n═══ ${pass} ok · ${fail} fallas ═══\n`);
   app.exit(fail ? 1 : 0);
