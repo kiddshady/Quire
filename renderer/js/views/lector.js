@@ -1189,7 +1189,7 @@ function cablearNavegacion() {
 
     const g = V.gesto;
     if (!g) {
-      if (V.navegando) V.puck.hover(V.puck.zonaEn(pt.x, pt.y));
+      if (V.navegando) { V.puck.hover(V.puck.zonaEn(pt.x, pt.y)); cursorNav(); }
       return;
     }
     if (e.pointerId !== g.puntero) return;
@@ -1210,6 +1210,7 @@ function cablearNavegacion() {
   visor.addEventListener('pointerleave', () => {
     V.puntero = null;
     if (V.navegando && !V.gesto) V.puck.hover(null);
+    cursorNav();
   });
 
   visor.addEventListener('pointerdown', (e) => {
@@ -1230,6 +1231,7 @@ function cablearNavegacion() {
       V.gesto = { tipo: 'pan', puntero: e.pointerId, x0: pt.x, y0: pt.y, sl: visor.scrollLeft, st: visor.scrollTop };
       V.puck.activo('anillo');
     }
+    cursorNav();
   });
 
   const soltar = (e) => {
@@ -1243,6 +1245,7 @@ function cablearNavegacion() {
     /* La barra se soltó a mitad del arrastre y el gesto se dejó terminar
        igual: recién ahora se apaga el modo navegación. */
     else salirNav();
+    cursorNav();
   };
   visor.addEventListener('pointerup', soltar);
   visor.addEventListener('pointercancel', soltar);
@@ -1287,12 +1290,29 @@ function entrarNav() {
   V.puck.mostrar(x, y);
   V.puck.hover(V.puck.zonaEn(x, y));
   V.visor.classList.add('is-navegando');
+  cursorNav();
 }
 
 function salirNav() {
   V.navegando = false;
   V.puck?.ocultar();
   V.visor?.classList.remove('is-navegando');
+  if (V.visor) delete V.visor.dataset.cursor;
+}
+
+/* El cursor mientras se navega, como en Scrawl. En el anillo —y en el resto
+   del visor, que también desplaza— es la mano: abierta mientras apuntás,
+   cerrada mientras arrastrás, que ahí la mano es toda la señal de que la hoja
+   se mueve. Sobre el núcleo y durante el zoom desaparece: el disco ya ilumina
+   la zona bajo el puntero, y la flecha del sistema no agrega ubicación y
+   encima tapa la lupa, que es lo que dice que ahí se hace zoom. El CSS lo
+   lee de data-cursor (ver .qr-visor.is-navegando en quire.css). */
+function cursorNav() {
+  if (!V.visor?.classList.contains('is-navegando')) return;
+  const g = V.gesto;
+  const sobreNucleo = !g && V.puntero && V.puck?.zonaEn(V.puntero.x, V.puntero.y) === 'nucleo';
+  V.visor.dataset.cursor = g?.tipo === 'zoom' || sobreNucleo ? 'none'
+    : g?.tipo === 'pan' ? 'grabbing' : 'grab';
 }
 
 function prepararZoomVivo(g) {

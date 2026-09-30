@@ -123,6 +123,11 @@ async function correr() {
     return hit;
   })()`);
 
+  /* El cursor que se ve en un punto de la ventana: el del elemento que está
+     ahí. Es lo que importa y no el del visor —si la capa de texto le ganara a
+     la mano, sobre las letras se vería la I de texto—. */
+  const cursorEn = (x, y) => js(`getComputedStyle(document.elementFromPoint(${x}, ${y})).cursor`);
+
   /* ── 1. Sin tinta, Espacio pasa de página ───────────────────────────────── */
   console.log('\n1. Sin tinta');
   {
@@ -159,6 +164,8 @@ async function correr() {
     JSON.stringify(n.puckXY));
   ok('el visor entra en modo navegación', n.navegando);
   ok('y la tinta suelta el puntero', n.tintaRecibe === 'none', n.tintaRecibe);
+  // Como en Scrawl: sobre el núcleo el cursor se va, el disco ya dice dónde estás.
+  ok('sobre el núcleo no hay cursor', (await cursorEn(centro.x, centro.y)) === 'none', await cursorEn(centro.x, centro.y));
   const paginaConDisco = n.pagina;
 
   /* ── 3. Arrastrar el anillo desplaza ────────────────────────────────────── */
@@ -167,12 +174,21 @@ async function correr() {
     const antes = await estado();
     // a 40 px del centro cae en el anillo (24 < 40 < 54)
     const de = { x: centro.x, y: centro.y + 40 };
+    raton('mouseMove', de.x, de.y);
+    await esperar(60);
+    const cursorAnillo = await cursorEn(de.x, de.y);
     raton('mouseDown', de.x, de.y);
     for (let i = 1; i <= 10; i++) { raton('mouseMove', de.x, de.y - 15 * i); await esperar(16); }
     const enVuelo = await estado();
+    const cursorArrastre = await cursorEn(de.x, de.y - 150);
     raton('mouseUp', de.x, de.y - 150);
     await esperar(200);
     const despues = await estado();
+    const cursorSuelto = await cursorEn(de.x, de.y - 150);
+
+    ok('sobre el anillo, la mano abierta', cursorAnillo === 'grab', cursorAnillo);
+    ok('arrastrando, la mano cerrada', cursorArrastre === 'grabbing', cursorArrastre);
+    ok('al soltar, la mano se vuelve a abrir', cursorSuelto === 'grab', cursorSuelto);
 
     ok('mientras se arrastra, el anillo está activo', enVuelo.activo === 'anillo', enVuelo.activo);
     ok('el scroll sigue a la mano, píxel por píxel', despues.scrollTop - antes.scrollTop === 150,
@@ -192,11 +208,17 @@ async function correr() {
     const anclaAntes = await bajo(px, py);
     const escalaAntes = parseInt(antes.etiqueta, 10);
 
+    raton('mouseMove', centro.x, centro.y);
+    await esperar(60);
     raton('mouseDown', centro.x, centro.y);
     // 180 px hacia arriba: exactamente el doble
     for (let i = 1; i <= 12; i++) { raton('mouseMove', centro.x, centro.y - 15 * i); await esperar(16); }
     await esperar(60);
     const enVuelo = await estado();
+    /* Ya fuera del núcleo —la mano subió 165 px—, pero el gesto es zoom: el
+       cursor sigue sin verse hasta soltar. */
+    const cursorZoom = await cursorEn(centro.x, centro.y - 165);
+    ok('haciendo zoom no hay cursor, aunque la mano salga del núcleo', cursorZoom === 'none', cursorZoom);
     raton('mouseUp', centro.x, centro.y - 180);
     await esperar(400);
     const despues = await estado();
@@ -226,6 +248,8 @@ async function correr() {
     ok('el disco se va', !n2.puck);
     ok('el visor deja de navegar', !n2.navegando);
     ok('y la tinta recupera el puntero', n2.tintaRecibe === 'auto', n2.tintaRecibe);
+    const cursorTinta = await cursorEn(centro.x, centro.y);
+    ok('y el cursor vuelve a ser el de anotar', cursorTinta === 'crosshair', cursorTinta);
     ok('la tinta sigue prendida', n2.anotando);
     /* Espacio con tinta no pasa de página: el zoom y el paneo pueden haber
        movido la actual, pero nunca por la tecla. Se compara con la página que

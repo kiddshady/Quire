@@ -906,6 +906,14 @@
 .qr-visor.is-navegando .qr-tinta { pointer-events: none; }
 .qr-visor.is-navegando { user-select: none; touch-action: none; }
 
+/* El cursor lo decide cursorNav() en lector.js —mano abierta, mano cerrada o
+   nada sobre el núcleo— y lo de adentro lo hereda: si no, las letras de la
+   capa de texto (cursor: text) le ganarían a la mano justo encima de la hoja. */
+.qr-visor.is-navegando { cursor: grab; }
+.qr-visor.is-navegando[data-cursor='grabbing'] { cursor: grabbing; }
+.qr-visor.is-navegando[data-cursor='none'] { cursor: none; }
+.qr-visor.is-navegando * { cursor: inherit; }
+
 /* La pista escalándose en vivo. El transform se pone desde el lector, con el
    origen en el centro del disco; acá solo se avisa al compositor. */
 .qr-pista.is-escalando { will-change: transform; }
