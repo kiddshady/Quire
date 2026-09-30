@@ -37,6 +37,7 @@ const Tooltip = (() => {
   let current = null;
   let anchor = null;
   let timer = null;
+  let left = -Infinity;  // cuándo se fue el último por salir de su ancla
 
   function hide(immediate = false) {
     clearTimeout(timer);
@@ -44,7 +45,8 @@ const Tooltip = (() => {
     const el = current;
     current = null;
     anchor = null;
-    immediate ? el.remove() : exit(el, { fallback: 160 });
+    if (immediate) el.remove();
+    else { left = performance.now(); exit(el, { fallback: 160 }); }
   }
 
   function show(el) {
@@ -87,9 +89,14 @@ const Tooltip = (() => {
       const el = e.target.closest?.('[data-tip]');
       if (!el || el === anchor) return;
       clearTimeout(timer);
-      // Si ya hay uno abierto, el siguiente entra sin demora: moverse entre
-      // botones vecinos no debería reiniciar la espera cada vez.
-      timer = setTimeout(() => show(el), current ? 60 : 420);
+      /* Moverse entre botones vecinos no reinicia la espera larga. No alcanza con
+         mirar `current`: el pointerout del botón anterior llega ANTES que este
+         pointerover y ya lo cerró. Por eso cuenta también el que se acaba de ir.
+         La espera corta (100 ms) es lo que dura su salida: el nuevo aparece
+         cuando el viejo terminó de irse, sin encimarse. Si el ancla se fue del
+         DOM durante la espera, no hay dónde anclarlo: saldría en la esquina. */
+      const warm = current || performance.now() - left < 400;
+      timer = setTimeout(() => { if (el.isConnected) show(el); }, warm ? 100 : 420);
     });
     root.addEventListener('pointerout', (e) => {
       const el = e.target.closest?.('[data-tip]');
