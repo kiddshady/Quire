@@ -248,6 +248,73 @@ async function correr() {
     ok('apagar la tinta se lo lleva', !sin.puck && !sin.navegando && !sin.anotando);
   }
 
+  /* ── 7. El vidrio desenfoca también mientras entra y sale ──────────────────
+     La opacidad animada iba en el contenedor del disco, y un ancestro con
+     opacidad menor que 1 le corta al vidrio de adentro lo que hay detrás:
+     mientras aparecía, el disco era vidrio transparente con las letras nítidas
+     a través, y al llegar a 1 el desenfoque se prendía de un cuadro al otro
+     (al irse, al revés). Medido congelando la transición: con y sin
+     backdrop-filter las fotos salían idénticas a 30, 70 y 120 ms, y distintas
+     solo en reposo. Se monta un disco aparte sobre un rayado propio —así no
+     depende de qué parte del PDF quedó debajo— y en cada instante se compara
+     la foto con vidrio contra la foto sin él: si el vidrio anda, difieren. */
+  console.log('\n7. El vidrio, mientras entra y sale');
+  {
+    await js(`(async () => {
+      const { montarPuck } = await import('./js/puck.js');
+      const ancla = document.getElementById('qr-puck-ancla');
+      ancla.style.left = document.getElementById('qr-visor').offsetLeft + 'px';
+      const rayas = document.createElement('div');
+      rayas.id = 'prueba-rayas';
+      rayas.style.cssText = 'position:absolute;left:100px;top:100px;width:200px;height:200px;' +
+        'background:repeating-linear-gradient(90deg,#fff 0 3px,#000 3px 6px)';
+      ancla.append(rayas);
+      window.__disco = montarPuck(ancla);
+      window.__discoEl = [...ancla.querySelectorAll('.qr-puck')].pop();
+    })()`);
+    const foto = async (instante, conVidrio) => {
+      const r = await js(`(async () => {
+        document.getElementById('prueba-sin-vidrio')?.remove();
+        if (!${conVidrio}) {
+          const s = document.createElement('style'); s.id = 'prueba-sin-vidrio';
+          s.textContent = '.qr-puck__vidrio { backdrop-filter: none !important; }';
+          document.head.append(s);
+        }
+        const d = window.__disco; const el = window.__discoEl;
+        const congelar = (ms) => { for (const a of el.getAnimations({ subtree: true })) { a.pause(); a.currentTime = ms; } };
+        const soltar = () => el.getAnimations({ subtree: true }).forEach((a) => a.finish());
+        const dos = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+        d.ocultar(); soltar(); await dos();
+        const { at, ms } = ${JSON.stringify(instante)};
+        d.mostrar(200, 200);
+        if (at === 'entrando') { await new Promise((ok) => requestAnimationFrame(ok)); congelar(ms); }
+        else { await new Promise((ok) => setTimeout(ok, 400)); soltar(); }
+        if (at === 'saliendo') { d.ocultar(); await new Promise((ok) => requestAnimationFrame(ok)); congelar(ms); }
+        await dos();
+        const b = el.getBoundingClientRect();
+        // El centro del disco, adentro del núcleo: vidrio y rayas debajo.
+        return { x: Math.round(b.left + b.width / 2 - 16), y: Math.round(b.top + b.height / 2 - 16), width: 32, height: 32 };
+      })()`);
+      return (await win.webContents.capturePage(r)).toBitmap();
+    };
+    const diferencia = (a, b) => {
+      let s = 0;
+      for (let i = 0; i < a.length; i += 4) s += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+      return s / (a.length / 4) / 3;
+    };
+    const instantes = [
+      { at: 'entrando', ms: 30 }, { at: 'entrando', ms: 70 }, { at: 'entrando', ms: 120 },
+      { at: 'reposo' }, { at: 'saliendo', ms: 40 },
+    ];
+    for (const i of instantes) {
+      const d = diferencia(await foto(i, true), await foto(i, false));
+      const nombre = i.ms ? `${i.at} a los ${i.ms} ms` : i.at;
+      ok(`${nombre}: el vidrio desenfoca lo de abajo`, d > 8, `diferencia media ${d.toFixed(1)} (con y sin vidrio)`);
+    }
+    await js(`document.getElementById('prueba-sin-vidrio')?.remove();
+      document.getElementById('prueba-rayas')?.remove(); window.__discoEl.remove();`);
+  }
+
   console.log(`\n═══ ${pass} ok · ${problemas.length} fallas ═══`);
   for (const p of problemas) console.log('  ! ' + p);
 

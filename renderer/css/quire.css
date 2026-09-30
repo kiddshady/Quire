@@ -941,11 +941,20 @@
      para la animación de entrada */
   margin: -56px 0 0 -56px;
   pointer-events: none;
-  opacity: 0;
   transform: scale(.82);
-  transition: opacity var(--ox-t-2) var(--ox-ease), transform var(--ox-t-2) var(--ox-ease);
+  transition: transform var(--ox-t-2) var(--ox-ease);
 }
-.qr-puck.is-visible { opacity: 1; transform: scale(1); }
+.qr-puck.is-visible { transform: scale(1); }
+/* El fundido va en los hijos y no en el disco. Un ancestro con opacidad menor
+   que 1 le corta al vidrio lo que hay detrás: mientras entraba, el disco era
+   vidrio transparente con las letras nítidas a través, y al llegar a 1 el
+   desenfoque se prendía de un cuadro al otro (al irse, al revés). Con la
+   opacidad en el propio vidrio, se desvanece el desenfoque junto con él. */
+.qr-puck > * {
+  opacity: 0;
+  transition: opacity var(--ox-t-2) var(--ox-ease);
+}
+.qr-puck.is-visible > * { opacity: 1; }
 
 /* El vidrio: desenfoca lo que hay debajo para que el disco se lea sobre
    cualquier hoja, y la sombra lo despega del papel. */
