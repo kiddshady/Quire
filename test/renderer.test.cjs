@@ -260,12 +260,18 @@ app.whenReady().then(async () => {
   await js(`document.getElementById('aud-notr')?.remove()`);
 
   /* ── 9-ter. El relevo de vistas ────────────────────────────────────────────
-     Antes, la vista vieja se iba de un cuadro al otro y la nueva arrancaba
-     desde transparente: un cuadro vacío en cada navegación (medido en las
-     seis navegaciones del rail, sep 2026). Ahora la vieja se esfuma en un
-     calco, en la misma celda, mientras la nueva entra. Lo mismo al cambiar de
-     documento, que es un refresh({ animar: true }). Se muestrea cada 40 ms y
-     se mide la curva, no se mira. */
+     Primero la vista vieja se iba de un cuadro al otro y la nueva arrancaba
+     desde transparente: un cuadro vacío en cada navegación (sep 2026). El
+     arreglo la pasó a un calco que se esfumaba encima, pero la nueva seguía
+     esperando 90 ms invisible y entraba corrida 10 px: la pantalla bajaba
+     hasta un tercio de tapada (medido 100 → 29/5 → 100) y volvía, y con las
+     hojas blancas de un PDF eso se ve como un parpadeo, más el temblor de
+     todo lo que las dos vistas tienen en el mismo lugar (títulos, barras).
+     Ahora es un fundido: la nueva ya está entera y quieta DEBAJO del calco,
+     que es opaco, y lo único que se mueve es la opacidad del calco. La
+     pantalla está tapada en todo momento. Lo mismo al cambiar de documento,
+     que es un refresh({ animar: true }). Se muestrea cada 40 ms y se mide la
+     curva, no se mira. */
   console.log('\n9-ter. El relevo de vistas');
   const MEDIR_RELEVO = (disparar) => `(async () => {
     const view = document.getElementById('view');
@@ -273,28 +279,38 @@ app.whenReady().then(async () => {
     ${disparar};
     const op = (el) => el?.isConnected ? Math.round(+getComputedStyle(el).opacity * 100) : null;
     const calco = document.querySelector('.ox-main--saliente');
+    const cc = calco && getComputedStyle(calco);
+    // El fondo sale de un token OKLCH: se mide el alfa pintándolo, no parseándolo.
+    const alfa = (color) => { const c = document.createElement('canvas').getContext('2d');
+      c.fillStyle = color; c.fillRect(0, 0, 1, 1); return c.getImageData(0, 0, 1, 1).data[3]; };
+    const opaco = !!cc && alfa(cc.backgroundColor) === 255;
+    const encima = !!calco && +cc.zIndex > 0 && view.compareDocumentPosition(calco) === Node.DOCUMENT_POSITION_FOLLOWING;
     const filas = [];
     for (let t = 0; t <= 400; t += 40) {
       const rc = calco?.getBoundingClientRect();
-      filas.push({ t, viejo: op(calco), nuevo: op(view),
+      const viejo = op(calco); const nuevo = op(view);
+      filas.push({ t, viejo, nuevo,
+        tapado: Math.round(viejo == null ? nuevo : viejo + (100 - viejo) * nuevo / 100),
+        quieta: getComputedStyle(view).transform === 'none',
         mismoLugar: !rc || !calco.isConnected || (rc.left === rv.left && rc.top === rv.top && rc.width === rv.width && rc.height === rv.height),
         views: document.querySelectorAll('#view').length });
       await new Promise((r) => setTimeout(r, 40));
     }
     await new Promise((r) => setTimeout(r, 500));
-    return { filas, hayCalco: !!calco, settled: view.classList.contains('is-settled'),
+    return { filas, hayCalco: !!calco, opaco, encima,
       animaciones: view.getAnimations().length, calcos: document.querySelectorAll('.ox-main--saliente').length };
   })()`;
   const revisarRelevo = (quien, r) => {
     const s = r.filas.map((f) => `${f.t}:${f.viejo ?? '-'}/${f.nuevo}`).join(' ');
     ok(`${quien}: lo de antes queda en un calco`, r.hayCalco, JSON.stringify(r));
+    ok(`${quien}: el calco es opaco y va encima (tapa a la nueva mientras se va)`, r.opaco && r.encima, JSON.stringify(r));
     ok(`${quien}: que se esfuma de a poco (no se va de un cuadro al otro)`, r.filas.some((f) => f.viejo > 5 && f.viejo < 95), s);
-    ok(`${quien}: lo nuevo espera su turno: arranca invisible`, r.filas[0].nuevo <= 5, s);
-    ok(`${quien}: cuando lo nuevo ya se ve, lo viejo va por menos de la mitad`, r.filas.every((f) => !(f.nuevo > 50 && f.viejo > 50)), s);
+    ok(`${quien}: la pantalla no se destapa en ningún momento (sin parpadeo)`, r.filas.every((f) => f.tapado >= 97), s);
+    ok(`${quien}: lo nuevo no se corre mientras entra (sin temblor)`, r.filas.every((f) => f.quieta), s);
     ok(`${quien}: los dos en la misma celda, sin salto`, r.filas.every((f) => f.mismoLugar), s);
     ok(`${quien}: un solo #view en todo el relevo`, r.filas.every((f) => f.views === 1), s);
     ok(`${quien}: el calco se va del DOM al terminar`, r.calcos === 0, JSON.stringify(r));
-    ok(`${quien}: la entrada se apaga (sin opacidad retenida)`, r.settled && r.animaciones === 0, JSON.stringify(r));
+    ok(`${quien}: la vista nueva no retiene ninguna animación`, r.animaciones === 0, JSON.stringify(r));
   };
   await click('[data-view="ajustes"]');
   await sleep(800);

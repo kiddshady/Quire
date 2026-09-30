@@ -147,15 +147,21 @@
    gramática que los pasos del pipeline: todo en Onyx avanza hacia la derecha. */
 .ox-view { animation: ox-glide-in var(--ox-t-4) var(--ox-ease) both; }
 
-/* Relevo de vistas. La vieja pasa a un calco (.ox-main--saliente, lo arma el
-   router) en la misma celda que la nueva, y se esfuma encima de ella. La
-   salida va in-out, no ease-in: hay alguien esperando detrás, y con ease-in la
-   opacidad caería de golpe al final. La nueva asoma cuando la vieja ya va por
-   un tercio. Mismo lugar, no al lado: si no, la nueva saltaría al terminar. */
+/* Relevo de vistas: un fundido. La vieja pasa a un calco (.ox-main--saliente,
+   lo arma el router) en la misma celda que la nueva, encima de ella, y se
+   esfuma. La nueva ya está entera y quieta debajo: el calco es opaco (el fondo
+   de .ox-main), así que la pantalla está tapada en todo momento y lo único que
+   cambia es cuánto se ve de cada una.
+   Antes la nueva esperaba su turno invisible y entraba corrida 10 px. Eso sirve
+   para dos cosas chicas que se reemplazan sobre el mismo fondo; con dos vistas
+   enteras la pantalla bajaba a un tercio de tapada y volvía —con las hojas
+   blancas de un PDF, un parpadeo claro-oscuro-claro— y todo lo que las dos
+   tienen en el mismo lugar (título, barras) se veía temblar al correrse.
+   La salida va in-out: con ease-in la opacidad caería de golpe al final. Mismo
+   lugar, no al lado: si no, la nueva saltaría al terminar. */
 .ox-body > .ox-main { grid-column: 2; grid-row: 1; }
 .ox-main--saliente { pointer-events: none; z-index: 1; }
-.ox-main--saliente[data-state='closing'] { animation: ox-desvanecer 160ms var(--ox-ease-both) both; }
-.ox-view.is-after { animation-delay: 90ms; }
+.ox-main--saliente[data-state='closing'] { animation: ox-desvanecer var(--ox-t-2) var(--ox-ease-both) both; }
 /* Apagada con una clase, declarada antes que cualquier salida: si se apagara
    con style.animation, el inline le ganaría a la regla que la hace irse. */
 .ox-view.is-settled { animation: none; }
