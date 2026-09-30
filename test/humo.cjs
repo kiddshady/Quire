@@ -927,6 +927,48 @@ app.whenReady().then(async () => {
     if (!n.statusbarExiste) problemas.push('actualizar: falta el item de la statusbar');
   }
 
+  /* ── 12. Lo de adentro no vuelve a entrar en el calco ─────────────────────
+     Al navegar, el contenido de la vista vieja se MUEVE a un calco que se
+     esfuma, y mover un nodo le reinicia las animaciones CSS. Lo que tenía
+     entrada propia volvía a arrancar de cero adentro de lo que se estaba
+     yendo: medido en 0.9.5, las miniaturas del lector caían a 0 % y
+     reaparecían (63 → 86 → 97 %) mientras el calco bajaba, y lo mismo los
+     paneles de Herramientas. Son los dos casos reales; se muestrea cada 20 ms
+     mientras el calco todavía se ve. */
+  notas.push(['calco-quieto', await js(`(async () => {
+    const router = (await import('./js/router.js')).default;
+    const casos = [['lector', 'paginas', '.qr-mini__lienzo'], ['herramientas', 'lector', '.qr-herr__panel']];
+    const out = {};
+    for (const [de, a, sel] of casos) {
+      router.go(de);
+      await new Promise((r) => setTimeout(r, 1500));
+      router.go(a);
+      const calco = document.querySelector('.ox-main--saliente');
+      const filas = [];
+      for (let t = 0; t <= 120; t += 20) {
+        const hijos = calco ? [...calco.querySelectorAll(sel)] : [];
+        filas.push({ t, calco: calco?.isConnected ? Math.round(+getComputedStyle(calco).opacity * 100) : null,
+          hijos: hijos.length, minimo: hijos.length ? Math.min(...hijos.map((h) => Math.round(+getComputedStyle(h).opacity * 100))) : null });
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      out[de + '>' + a] = filas;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return out;
+  })()`)]);
+
+  {
+    const n = notas.at(-1)[1];
+    for (const [caso, filas] of Object.entries(n)) {
+      const serie = filas.map((f) => `${f.t}:${f.calco ?? '-'}/${f.minimo ?? '-'}`).join(' ');
+      if (!filas[0].hijos) problemas.push(`calco-quieto[${caso}]: el calco no se llevó lo que había que mirar (${serie})`);
+      // Mientras el calco se ve (>5 %), lo de adentro tiene que estar entero.
+      else if (filas.some((f) => f.calco > 5 && f.minimo < 95)) {
+        problemas.push(`calco-quieto[${caso}]: lo de adentro vuelve a entrar mientras el calco se va (${serie})`);
+      }
+    }
+  }
+
   /* ── Las dos formas de la tarjeta ─────────────────────────────────────────
      `.ox-card__body` llevaba `padding-top: 0` para no repetir el aire que el
      `__head` ya pone. Con encabezado quedaba perfecto; SIN encabezado el

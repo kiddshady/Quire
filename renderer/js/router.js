@@ -85,6 +85,16 @@ function retirarVista() {
   host.after(calco);
   for (const [el, top, left] of scrolls) { el.scrollTop = top; el.scrollLeft = left; }
 
+  // Mover un nodo en el DOM le REINICIA las animaciones CSS. Lo que tenía su
+  // propia entrada volvía a entrar desde cero adentro del calco que se está
+  // yendo: las miniaturas del lector caían a opacidad 0 y reaparecían
+  // (0 → 63 → 86 %) mientras la vista se esfumaba, y lo mismo los paneles de
+  // Herramientas. Se dan por terminadas; lo que gira para siempre (un spinner)
+  // sigue girando. Traído de Onyx.
+  for (const a of calco.getAnimations({ subtree: true })) {
+    if (a.effect?.getTiming().iterations !== Infinity) a.finish();
+  }
+
   exit(calco, { fallback: 260 });
   return calco;
 }

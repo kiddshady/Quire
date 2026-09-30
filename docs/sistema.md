@@ -326,6 +326,11 @@ vistas) y el título y las barras, que las dos tienen en el mismo lugar, se
 veían temblar al correrse. `.ox-view` (el deslizamiento) queda para el arranque,
 cuando no hay nada que relevar.
 
+Mover un nodo le reinicia las animaciones CSS, así que al pasar al calco las
+entradas propias de lo de adentro (las miniaturas del lector, los paneles de
+Herramientas) se dan por terminadas: si no, volvían a entrar desde 0 mientras
+el calco se iba. Las infinitas, como un spinner, siguen. Lo mide el humo (12).
+
 `refresh()` sin animar repinta en el lugar, sin fundido. El humo (`npm run
 smoke`, 9-ter) mide cuánto está tapada la pantalla cada 40 ms. Durante el
 fundido hay un segundo `.ox-main` en el DOM: buscá por id o dentro de `#view`,
