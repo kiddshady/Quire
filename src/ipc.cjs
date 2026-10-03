@@ -68,24 +68,28 @@ function register() {
      Los bytes de los PDFs viajan por acá en los dos sentidos. Son buffers
      grandes: el structured clone de Electron los pasa sin serializarlos a
      texto, pero igual conviene no pedirlos dos veces por gusto. */
-  handle('docs:elegir', () => documentos.elegir());
-  handle('docs:elegir-varios', () => documentos.elegirVarios());
+  handle('docs:elegir', (opciones) => documentos.elegir(opciones));
+  handle('docs:elegir-varios', (opciones) => documentos.elegirVarios(opciones));
   handle('docs:leer', (ruta, opciones) => documentos.leer(ruta, opciones));
   handle('docs:guardar-como', (bytes, nombre, filtros) => documentos.guardarComo(bytes, nombre, filtros));
   handle('docs:elegir-carpeta', () => documentos.elegirCarpeta());
-  handle('docs:escribir', (carpeta, nombre, bytes) => documentos.escribir(carpeta, nombre, bytes));
+  handle('docs:escribir', (carpeta, nombre, bytes, opciones) => documentos.escribir(carpeta, nombre, bytes, opciones));
   handle('docs:recientes', () => documentos.listarRecientes());
   handle('docs:olvidar-recientes', () => documentos.olvidarRecientes());
-  /* El PDF con el que te abrieron por doble click. El renderer lo reclama al
-     terminar de arrancar; devuelve null si arrancaste la app a secas. */
+  /* Los PDFs con los que te abrieron por doble click. El renderer los reclama
+     al terminar de arrancar. 'docs:pendientes' devuelve la lista entera, en
+     orden (main-02); 'docs:pendiente' queda para el renderer que abre uno
+     solo, y devuelve el primero o null si arrancaste la app a secas. */
+  handle('docs:pendientes', () => documentos.tomarPendientes());
   handle('docs:pendiente', () => documentos.tomarPendiente());
 
   /* ── Impresión ──────────────────────────────────────────────────────────
      El PDF que entra por 'print:imprimir' ya viene impuesto: este puente no
      lo transforma. Ver el encabezado de impresion.cjs. */
-  handle('print:listar', () => impresion.listar());
+  handle('print:listar', (opts) => impresion.listar(opts));
   handle('print:capacidades', (opts) => impresion.capacidades(opts));
   handle('print:imprimir', (bytes, opciones) => impresion.imprimir(bytes, opciones));
+  handle('print:papeles-con-nombre', () => impresion.papelesConNombre());
 
   /* ── Actualizaciones ────────────────────────────────────────────────────
      Nada de esto arranca solo una descarga ni cierra la app: `descargar` e
@@ -106,6 +110,10 @@ function register() {
   handle('conv:convertir', (lote) => conversion.convertir(lote));
   handle('conv:unir', (lote) => conversion.unir(lote));
   handle('conv:mostrar', (ruta) => conversion.mostrar(ruta));
+  /* Cortar el lote en curso (main-20). Lo implementa conversion.cancelar(),
+     que llega con el motor en su propio proceso; hasta entonces el canal
+     existe y contesta false, «no había nada que cortar», en vez de romper. */
+  handle('conv:cancelar', () => (typeof conversion.cancelar === 'function' ? conversion.cancelar() : false));
 }
 
 module.exports = { register, COLLECTIONS };

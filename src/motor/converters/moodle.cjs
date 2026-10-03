@@ -45,8 +45,14 @@ function inlineImage(src, baseDir) {
   if (/^[a-z]+:\/\//i.test(src)) return null; // remotas: no tocamos la red
   if (!baseDir) return null;
   try {
-    const abs = path.resolve(baseDir, decodeURIComponent(src));
-    if (!abs.startsWith(path.resolve(baseDir))) return null;
+    const base = path.resolve(baseDir);
+    const abs = path.resolve(base, decodeURIComponent(src));
+    /* Adentro de la carpeta del .htm, de verdad (main-10). Comparar por
+       prefijo dejaba pasar a la vecina: con baseDir `carpeta_x`, un
+       `..\carpeta_x2\foto.png` empieza igual. Con path.relative, salir
+       de la carpeta da `..` adelante, y otra unidad da una ruta absoluta. */
+    const rel = path.relative(base, abs);
+    if (!rel || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) return null;
     const mime = IMG_MIME[path.extname(abs).toLowerCase()];
     if (!mime) return null;
     const stat = fs.statSync(abs);
@@ -84,7 +90,12 @@ function sanitizedHtml($, $root, baseDir) {
         if (width) $el.attr('width', width);
         if (height) $el.attr('height', height);
       } else {
-        $el.replaceWith(alt ? `[imagen: ${alt}]` : '');
+        /* El alt va como TEXTO (main-10). attr() lo devuelve decodificado, y
+           un string en replaceWith se parsea como HTML: un alt con
+           `&lt;img src=…&gt;` se volvía una etiqueta de verdad, después de
+           la lista blanca (el nodo nuevo no está en `all`), y llegaba crudo
+           a la plantilla del PDF. */
+        $el.replaceWith(alt ? $copy('<span>').text(`[imagen: ${alt}]`) : '');
       }
       continue;
     }

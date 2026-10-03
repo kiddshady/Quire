@@ -36,8 +36,19 @@ const mm = (dip) => Math.round(dip * DIP_A_MM * 100) / 100;
 /* ── Capacidades ─────────────────────────────────────────────────────────── */
 
 /* Se consulta el área imprimible tamaño por tamaño: NO es la misma para A4 que
-   para A5, y el driver solo reporta la del tamaño que tenga configurado. */
+   para A5, y el driver solo reporta la del tamaño que tenga configurado.
+
+   La primera línea es el encoding de la salida, y no es decoración (main-01).
+   Windows PowerShell 5.1 con la salida redirigida escribe en la página de
+   códigos OEM (850 en es-AR) y correrPS la lee como UTF-8: medido con este
+   mismo execFile, «Impresora habitación — 2º ñ» volvía como «Impresora
+   habitaci?n - 2? ?», con un U+FFFD en cada signo de pregunta (y la raya
+   cambiada por un guion). Ese nombre ya no coincide con el que da
+   Electron, así que la impresora quedaba sin tamaños ni dúplex, y al imprimir
+   salía «ya no está». ConvertTo-Json de la 5.1 no escapa lo que no es ASCII,
+   así que el encoding es lo único que lo salva. */
 const PS_CAPACIDADES = String.raw`
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Printing | Out-Null
 $srv = New-Object System.Printing.LocalPrintServer
@@ -86,6 +97,13 @@ $out | ConvertTo-Json -Depth 6 -Compress
 `;
 
 let cacheCaps = null;
+/* La consulta que está corriendo, si hay una. Dos pedidos casi juntos (el del
+   arranque y un imprimir temprano, o dos clics en «Releer») lanzaban dos
+   PowerShell a la vez; ahora el segundo espera al primero (main-05). */
+let enCurso = null;
+/* Cuándo falló la última consulta (0 si la última anduvo). Ver capacidades(). */
+let fallo = 0;
+const REINTENTO_MS = 60000;
 
 function correrPS(script) {
   return new Promise((resolve, reject) => {
@@ -101,32 +119,19 @@ function correrPS(script) {
   });
 }
 
-/**
- * Capacidades reales de cada cola de impresión, en milímetros.
- * Tarda ~1s, así que se cachea: las impresoras no aparecen y desaparecen
- * mientras la app está abierta. `refrescar()` la vuelve a pedir.
- */
-async function capacidades({ refrescar = false } = {}) {
-  if (cacheCaps && !refrescar) return cacheCaps;
-
-  let crudo = [];
-  try {
-    const salida = await correrPS(PS_CAPACIDADES);
-    const json = JSON.parse(salida.trim() || '[]');
-    crudo = Array.isArray(json) ? json : [json];
-  } catch (err) {
-    // Sin capacidades la app sigue andando: se cae a los tamaños estándar y se
-    // pierde el borde no imprimible. Es degradado, no roto.
-    console.error('[impresion] no se pudieron leer las capacidades:', err.message);
-  }
-
-  cacheCaps = crudo.map((p) => ({
+/** Lo crudo de PowerShell → las fichas que usa la app, en milímetros. */
+function fichasDeCapacidades(crudo) {
+  return (crudo || []).map((p) => ({
     nombre: p.nombre,
     duplex: p.duplex || [],
     soportaDuplex: (p.duplex || []).some((d) => /TwoSided/i.test(d)),
     soloMonocromo: (p.color || []).length > 0 && !(p.color || []).some((c) => /Color/i.test(c)),
     intercalar: (p.intercalar || []).some((c) => /^Collated$/i.test(c)),
-    maxCopias: p.maxCopias || 1,
+    /* Un driver que no informa MaxCopyCount no está diciendo «una sola»: no
+       está diciendo nada. Con 1, el campo Copias nacía con la flecha de subir
+       apagada (imprimir-22). 999 es lo mismo que usa la rama sin capacidades
+       de listar(), y el tope que igual pone ajustesDeImpresion. */
+    maxCopias: p.maxCopias || 999,
     resoluciones: (p.resoluciones || []).map((r) => ({ x: r.x, y: r.y })),
     tamanos: (p.tamanos || []).map((t) => ({
       nombre: t.nombre,
@@ -141,18 +146,86 @@ async function capacidades({ refrescar = false } = {}) {
       } : null,
     })),
   }));
-
-  return cacheCaps;
 }
 
-/** Nombre + default de Electron, cruzado con las capacidades de Windows. */
-async function listar() {
-  const win = BrowserWindow.getAllWindows()[0];
-  const deElectron = win ? await win.webContents.getPrintersAsync() : [];
-  const caps = await capacidades();
+async function consultarCapacidades() {
+  try {
+    const salida = await correrPS(PS_CAPACIDADES);
+    const json = JSON.parse(salida.trim() || '[]');
+    cacheCaps = fichasDeCapacidades(Array.isArray(json) ? json : [json]);
+    fallo = 0;
+    return cacheCaps;
+  } catch (err) {
+    /* Sin capacidades la app sigue andando: se cae a los tamaños estándar y se
+       pierde el borde no imprimible. Es degradado, no roto.
+       Pero NO se cachea el fracaso para siempre (main-05). Antes quedaba `[]`
+       en la caché, y como `[]` es truthy, un PowerShell lento en el arranque
+       dejaba la sesión entera sin capacidades hasta que alguien pidiera
+       refrescar. Se anota cuándo falló, y capacidades() deja pasar un rato
+       antes de volver a probar. */
+    console.error('[impresion] no se pudieron leer las capacidades:', err.message);
+    cacheCaps = null;
+    fallo = Date.now();
+    return [];
+  }
+}
+
+/**
+ * Capacidades reales de cada cola de impresión, en milímetros.
+ * Tarda ~1s, así que se cachea: las impresoras no aparecen y desaparecen
+ * mientras la app está abierta. `{ refrescar: true }` la vuelve a pedir.
+ *
+ * Si la última consulta falló, durante un minuto contesta vacío sin volver a
+ * lanzar PowerShell. Sin ese freno, uno que falla siempre (bloqueado por
+ * directiva, System.Printing roto, el spooler colgado) se relanzaba en cada
+ * imprimir() —fichaDeImpresora pide las capacidades— y el trabajo esperaba
+ * a que fallara: hasta los 25 s del timeout, en cada impresión. Vacío es lo
+ * mismo que dejaba el `[]` cacheado de antes: se imprime sin la ficha.
+ * `refrescar` («Releer impresoras») reintenta siempre.
+ */
+async function capacidades(opciones) {
+  const refrescar = !!opciones?.refrescar;
+  if (cacheCaps && !refrescar) return cacheCaps;
+  if (!refrescar && !enCurso && fallo && Date.now() - fallo < REINTENTO_MS) return [];
+  enCurso ??= consultarCapacidades().finally(() => { enCurso = null; });
+  return enCurso;
+}
+
+/* La red de seguridad del encoding de main-01: aunque PowerShell vuelva a
+   devolver un nombre mal decodificado, la cola se tiene que encontrar igual.
+   No alcanza con cambiar el U+FFFD por un comodín: la página de códigos OEM
+   además «aproxima» lo que no tiene, y la raya de «— 2º» llega como un guion.
+   Así que se compara el esqueleto (solo letras y números ASCII), y únicamente
+   cuando el nombre exacto no está y el esqueleto apunta a UNA sola cola. */
+const esqueleto = (s) => String(s || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+
+function colaDe(caps, nombre) {
+  const exacta = caps.find((x) => x.nombre === nombre);
+  if (exacta) return exacta;
+  const buscado = esqueleto(nombre);
+  if (!buscado) return null;
+  const parecidas = caps.filter((x) => esqueleto(x.nombre) === buscado);
+  return parecidas.length === 1 ? parecidas[0] : null;
+}
+
+/**
+ * Nombre + default de Electron, cruzado con las capacidades de Windows.
+ *
+ * `{ refrescar: true }` vuelve a pedir las capacidades ANTES de cruzar
+ * (main-05). Antes «Releer impresoras» cruzaba con la caché vieja y recién
+ * después refrescaba, así que la impresora nueva aparecía sin tamaños ni
+ * dúplex hasta un segundo clic.
+ */
+async function listar(opciones) {
+  // Defensivo como el resto de los require de Electron: así lo prueba Node pelado.
+  const win = BrowserWindow?.getAllWindows?.()[0];
+  const [deElectron, caps] = await Promise.all([
+    win ? win.webContents.getPrintersAsync() : [],
+    capacidades({ refrescar: !!opciones?.refrescar }),
+  ]);
 
   return deElectron.map((p) => {
-    const c = caps.find((x) => x.nombre === p.name) || null;
+    const c = colaDe(caps, p.name);
     return {
       nombre: p.name,
       etiqueta: p.displayName || p.name,
@@ -212,12 +285,31 @@ function rutaDelAyudante() {
     : path.join(__dirname, '..', 'vendor', 'sumatrapdf', AYUDANTE_EXE);
 }
 
-/* Los papeles que SumatraPDF sabe nombrar en `paper=`. Coinciden con los que
-   nombra el plan (ver papelParaElDriver). Lista blanca a propósito: esto se
-   arma dentro de un argumento de línea de comandos. */
-const PAPELES_CON_NOMBRE = new Set(
-  ['A2', 'A3', 'A4', 'A5', 'A6', 'Letter', 'Legal', 'Tabloid', 'Statement', 'Executive']
-);
+/* Los papeles que se piden por nombre en `paper=`. Lista blanca a propósito:
+   esto se arma dentro de un argumento de línea de comandos.
+
+   Cómo los entiende SumatraPDF 3.6.1, leído en su src/Print.cpp
+   (GetPaperByName): compara el nombre contra los que REPORTA LA IMPRESORA
+   (DeviceCapabilities con DC_PAPERNAMES), sin distinguir mayúsculas ni
+   espacios. Si ninguno coincide, se queda con el papel que el driver ya tenía,
+   en silencio. O sea que no hay una lista fija de SumatraPDF: un nombre sirve
+   si el driver lo usa. La P1102w dice «A4», «A5», «Letter»…, y por eso
+   paper=A5 sale A5 (la medición de arriba).
+
+   De ahí sale la lista (imprimir-19): la unión de lo que nombra el plan
+   (renderer/js/imposicion/plan.js, PAPELES_CON_NOMBRE) y los nombres de
+   Windows de siempre. Sumar uno que la impresora no tiene no cambia nada: cae
+   al papel del driver, que es lo mismo que mandar el trabajo sin `paper=`. Por
+   eso entran A0 y A1, que solo un plotter reporta, y Statement y Executive,
+   que el plan todavía no nombra. El renderer la pide con papelesConNombre()
+   para saber cuándo un papel no se va a poder pedir y avisarlo. */
+const PAPELES_CON_NOMBRE = new Set([
+  'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6',
+  'Letter', 'Legal', 'Tabloid', 'Statement', 'Executive',
+]);
+
+/** La lista de arriba, para el renderer. */
+const papelesConNombre = () => [...PAPELES_CON_NOMBRE];
 
 /**
  * Los `-print-settings` del trabajo.
@@ -258,10 +350,37 @@ function ajustesDeImpresion({ pageSize, copies, duplexMode, monocromo }) {
 async function fichaDeImpresora(deviceName) {
   try {
     const caps = await capacidades();
-    return { hayLista: caps.length > 0, ficha: caps.find((p) => p.nombre === deviceName) || null };
+    return { hayLista: caps.length > 0, ficha: colaDe(caps, deviceName) };
   } catch {
     return { hayLista: false, ficha: null };
   }
+}
+
+/* El nombre del temporal lleva la etiqueta que manda el renderer, y path.join
+   resuelve los «..»: con «/../../x» el PDF se escribía donde quisiera
+   (imprimir-26). Es defensa en profundidad, no una puerta cerrada del todo
+   —docs:escribir acepta carpetas del renderer—, pero no cuesta nada. Las que
+   manda hoy (simple, nup, folleto, poster, frentes, dorsos) pasan tal cual. */
+function etiquetaSegura(etiqueta) {
+  const e = String(etiqueta ?? '');
+  return /^[a-z0-9-]{1,24}$/.test(e) ? e : 'trabajo';
+}
+
+/* Cuánto se le deja tardar al ayudante (main-06). Con `-exit-when-done`
+   termina cuando el trabajo quedó en el spooler, y SumatraPDF rasteriza cada
+   página a la resolución de la impresora: un cuadernillo largo a 600 dpi
+   puede pasar los 120 s de siempre, y ahí se lo mataba a mitad del spool.
+   Con las páginas del trabajo, 30 s más 3 s por página; nunca MENOS que los
+   120 s de antes, porque nadie midió que un trabajo corto tarde menos, y con
+   un techo de una hora para que un número absurdo no deje al ayudante colgado
+   para siempre. Sin páginas, como siempre. */
+const TIEMPO_AYUDANTE = 120000;
+const TIEMPO_AYUDANTE_MAX = 60 * 60000;
+
+function tiempoDelAyudante(paginas) {
+  const n = Number(paginas);
+  if (!Number.isInteger(n) || n < 1) return TIEMPO_AYUDANTE;
+  return Math.min(TIEMPO_AYUDANTE_MAX, Math.max(TIEMPO_AYUDANTE, 30000 + 3000 * n));
 }
 
 /* ── Mandar el papel ─────────────────────────────────────────────────────── */
@@ -288,15 +407,18 @@ let trabajoN = 0;
  *               papel del driver.
  *   duplexMode  'simplex' | 'longEdge' | 'shortEdge'
  *   etiqueta    para el nombre del temporal (diagnóstico)
+ *   paginas     cuántas páginas tiene el PDF, para el tiempo del ayudante.
+ *               Opcional: sin ella se le dan los 120 s de siempre.
  */
-async function imprimir(bytes, opciones = {}) {
+async function imprimir(bytes, opciones) {
   const {
     deviceName,
     copies = 1,
     pageSize,
     duplexMode = 'simplex',
     etiqueta = 'trabajo',
-  } = opciones;
+    paginas,
+  } = opciones || {};
 
   if (!deviceName) throw new Error('Falta elegir la impresora');
 
@@ -321,7 +443,7 @@ async function imprimir(bytes, opciones = {}) {
   }
 
   const dir = await carpetaTemp();
-  const archivo = path.join(dir, `${String(++trabajoN).padStart(3, '0')}-${etiqueta}.pdf`);
+  const archivo = path.join(dir, `${String(++trabajoN).padStart(3, '0')}-${etiquetaSegura(etiqueta)}.pdf`);
   await fs.writeFile(archivo, Buffer.from(bytes));
 
   const ajustes = ajustesDeImpresion({
@@ -341,7 +463,7 @@ async function imprimir(bytes, opciones = {}) {
         '-exit-when-done',
         archivo,
       ],
-      { windowsHide: true, timeout: 120000 },
+      { windowsHide: true, timeout: tiempoDelAyudante(paginas) },
       (err) => {
         if (!err) return resolve();
         if (err.killed) return reject(new Error('El ayudante de impresión no respondió'));
@@ -364,4 +486,8 @@ async function limpiarTemporales() {
 
 app?.on?.('will-quit', () => { limpiarTemporales(); });
 
-module.exports = { listar, capacidades, imprimir, limpiarTemporales };
+module.exports = {
+  listar, capacidades, imprimir, limpiarTemporales, papelesConNombre,
+  // Sueltas para los tests (test/main.test.cjs).
+  PS_CAPACIDADES, correrPS, fichasDeCapacidades, colaDe, etiquetaSegura, tiempoDelAyudante, ajustesDeImpresion,
+};

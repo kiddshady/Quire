@@ -15,6 +15,8 @@
 const path = require('path');
 const { makeDocument, makeSection } = require('../document.cjs');
 const { removeRepeatedLines } = require('../cleaners.cjs');
+const { crearPoolOcr } = require('../ocr.cjs');
+const { revisar, conCorte, esCorte } = require('../corte.cjs');
 
 // Fuentes estándar del propio pdfjs-dist: sin esto, los PDFs que no embeben
 // Helvetica/Times pierden el mapeo de glifos (y pdf.js grita en consola).
@@ -35,6 +37,42 @@ function loadPdfjs() {
   // pdfjs-dist es ESM; import dinámico desde CJS. Cacheado para no re-importar.
   if (!pdfjsPromise) pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs');
   return pdfjsPromise;
+}
+
+/* Para test/motor.test.cjs: le pasa un pdf.js envuelto que anota las tareas
+   que abre, y así puede mirar que una tarea que falló quedó destruida
+   (main-18). El namespace del módulo ESM está congelado y no se puede espiar
+   de otra forma. Con null vuelve al de verdad. */
+function usarPdfjsParaTests(ns) {
+  pdfjsPromise = ns ? Promise.resolve(ns) : null;
+}
+
+/* Ceder el hilo en cada vuelta de los bucles largos (main-03, paso 1). El
+   motor corre en el proceso principal, y ahí pdf.js no tiene worker: cae al
+   «fake worker», que hace todo el trabajo en el mismo hilo. El setImmediate
+   es un seguro barato, no una mejora medible: el bucle de páginas ya cedía
+   solo (en 0 de 300 páginas faltó una vuelta del event loop), así que lo que
+   llega por IPC ya se atendía entre página y página. Queda para que eso no
+   dependa de cómo resuelva sus promesas la próxima versión de pdf.js.
+
+   Lo que NO arregla, medido en el main de Electron con un libro de 2000
+   páginas (antes y después dan lo mismo, 285-316 ms de hueco máximo, lejos
+   de los 50 ms que pide el plan): el hueco más largo está en el primer
+   pedido a pdf.js, que indexa el documento entero y crece con el tamaño;
+   después viene el armado del texto al final (~110 ms) y, con OCR, el
+   render de cada página escaneada (~1,9 s por página a 300 dpi), que es
+   sincrónico. Eso se va con el utilityProcess (paso 2 de main-03), que
+   todavía no está: main-03 sigue abierto. */
+const ceder = () => new Promise((r) => setImmediate(r));
+
+/* pdf.js rechaza con su mensaje en inglés («No password given», «Invalid PDF
+   structure.») y Convertir lo mostraba tal cual (main-18). Se reconocen por
+   el nombre de la excepción, que es estable; el texto no. */
+function traducirError(err) {
+  const nombre = err && err.name;
+  if (nombre === 'PasswordException') return new Error('Tiene contraseña: Quire no puede leerlo.');
+  if (nombre === 'InvalidPDFException') return new Error('El PDF está dañado.');
+  return err;
 }
 
 /**
@@ -181,38 +219,77 @@ function probePages(total, k) {
   return [...new Set(out)];
 }
 
+/** Una página rasterizada para el OCR, en PNG. */
+async function rasterizar(doc, n, createCanvas) {
+  const page = await doc.getPage(n);
+  const viewport = page.getViewport({ scale: OCR_SCALE });
+  const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  page.cleanup();
+  return canvas.encode('png');
+}
+
 /**
  * OCR de un conjunto de páginas. Devuelve Map<pageNum, líneas[]>.
  * Cualquier error se propaga: el caller decide degradar con gracia.
+ *
+ * Mientras tesseract reconoce una página, acá ya se rasteriza la siguiente
+ * (main-22): el render corre en este hilo y el reconocimiento en los workers,
+ * así que se solapan. Se adelantan como mucho tantas páginas como workers
+ * más una, para no apilar PNGs de varios MB en memoria. La ganancia hoy es
+ * chica: medido en Electron con 4 páginas escaneadas a 300 dpi, 10,4 s → 9,7 s,
+ * porque lo que manda es el render (~1,9 s por página, en este hilo) y no
+ * tesseract. Lo que más se ahorra es en lotes: un worker por lote y no uno
+ * por PDF.
  */
 async function ocrPages(doc, pageNums, options, onProgress) {
   const { createCanvas } = require('@napi-rs/canvas');
-  const { createWorker } = require('tesseract.js');
-  const worker = await createWorker(options.ocrLangs || 'spa+eng', 1, {
-    langPath: options.tessdataPath,
-    cachePath: options.ocrCachePath || undefined,
-    gzip: true,
-  });
+  const { signal } = options;
+  const propio = !options.ocrPool;
+  const pool = options.ocrPool || crearPoolOcr(options);
   const out = new Map();
+  const enVuelo = new Set();
+  let hechas = 0;
+  let fallo = null;
+  const esperar = async (p) => {
+    await conCorte(p, signal);
+    if (fallo) throw fallo;
+  };
   try {
-    for (let i = 0; i < pageNums.length; i++) {
-      const n = pageNums[i];
-      const page = await doc.getPage(n);
-      const viewport = page.getViewport({ scale: OCR_SCALE });
-      const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-      const ctx = canvas.getContext('2d');
-      await page.render({ canvasContext: ctx, viewport }).promise;
-      page.cleanup();
-      const png = await canvas.encode('png');
-      const { data } = await worker.recognize(png);
-      const text = (data && data.text ? data.text : '').trim();
-      out.set(n, text ? text.split('\n').map((l) => l.trimEnd()) : []);
-      if (onProgress) {
-        onProgress({ done: i + 1, total: pageNums.length, label: `OCR ${i + 1}/${pageNums.length} (página ${n})` });
-      }
+    for (const n of pageNums) {
+      await ceder();
+      revisar(signal);
+      while (enVuelo.size > pool.tope) await esperar(Promise.race(enVuelo));
+      if (fallo) throw fallo;
+      const png = await rasterizar(doc, n, createCanvas);
+      revisar(signal);
+      const tarea = pool.reconocer(png)
+        .then((texto) => {
+          const t = texto.trim();
+          out.set(n, t ? t.split('\n').map((l) => l.trimEnd()) : []);
+          hechas++;
+          if (onProgress && !fallo && !(signal && signal.aborted)) {
+            onProgress({ done: hechas, total: pageNums.length, label: `OCR ${hechas}/${pageNums.length} (página ${n})` });
+          }
+        })
+        // Cada trabajo se atrapa acá (si no, los que fallan después del
+        // primero quedan como rechazos sin atender) y el primero se propaga.
+        .catch((err) => { if (!fallo) fallo = err; })
+        .finally(() => enVuelo.delete(tarea));
+      enVuelo.add(tarea);
     }
+    await esperar(Promise.all(enVuelo));
   } finally {
-    await worker.terminate().catch(() => {});
+    /* Si se sale por una falla (un reconocimiento que falló, un render que
+       tiró), los trabajos que ya estaban en vuelo siguen corriendo en el pool
+       del lote. Sin esta espera, su .then seguía avisando «OCR 3/6» con el
+       index de este archivo después de su file-done —y hasta después de
+       batch-done—, y ocupaban los workers cuando el PDF siguiente arrancaba
+       su OCR. Lo armó la revisión de 0B2 con un pool falso donde falla el
+       segundo reconocimiento. Con un corte no se espera: el pipeline termina
+       el pool en el acto, y eso los suelta a todos. */
+    if (!(signal && signal.aborted)) await Promise.allSettled(enVuelo);
+    if (propio) await pool.terminar();
   }
   return out;
 }
@@ -221,8 +298,11 @@ module.exports = {
   name: 'pdf',
   extensions: ['.pdf'],
   description: 'PDF → texto por páginas (pdf.js, con OCR para las escaneadas)',
+  usarPdfjsParaTests,
 
   async extract(data, filename, options = {}, onProgress) {
+    const { signal } = options;
+    revisar(signal);
     const pdfjs = await loadPdfjs();
     const task = pdfjs.getDocument({
       data: new Uint8Array(data),
@@ -231,7 +311,6 @@ module.exports = {
       useSystemFonts: false,
       standardFontDataUrl: STANDARD_FONTS_URL,
     });
-    const doc = await task.promise;
 
     const pages = [];
     let title = '';
@@ -240,7 +319,11 @@ module.exports = {
     let hyphensRestored = 0;
     const layoutAware = options.layoutAware !== false;
 
+    // El await de la tarea va ADENTRO del try (main-18): si rechaza —con
+    // contraseña, dañado— el finally igual destruye la tarea de pdf.js. Antes
+    // estaba afuera y el destroy no se llamaba nunca en ese caso.
     try {
+      const doc = await task.promise.catch((err) => { throw traducirError(err); });
       const meta = await doc.getMetadata().catch(() => null);
       title = (meta && meta.info && meta.info.Title || '').trim();
 
@@ -249,6 +332,8 @@ module.exports = {
       let rescueHyphens = false;
       if (options.restoreHyphens !== false) {
         for (const n of probePages(doc.numPages, SNIFF_PAGES)) {
+          await ceder();
+          revisar(signal);
           const page = await doc.getPage(n);
           try {
             if (operatorBlocks(await page.getOperatorList(), pdfjs.OPS).join('').includes(SHY)) {
@@ -264,6 +349,8 @@ module.exports = {
       const conflicts = new Set();
 
       for (let p = 1; p <= doc.numPages; p++) {
+        await ceder();
+        revisar(signal);
         const page = await doc.getPage(p);
         const content = await page.getTextContent();
         pages.push(pageLines(content, layoutAware));
@@ -293,6 +380,8 @@ module.exports = {
             }
             ocrCount = sparse.length;
           } catch (err) {
+            // Un corte pedido no es un OCR caído: corta la conversión entera.
+            if (esCorte(err)) throw err;
             // OCR caído ≠ conversión caída: seguimos con lo extraído.
             ocrError = err && err.message ? err.message : String(err);
           }

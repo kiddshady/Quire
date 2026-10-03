@@ -16,6 +16,8 @@ const os = require('os');
 const { findConverter, getOutput, getConverterByName, extOf } = require('./registry.cjs');
 const { cleanDocument } = require('./cleaners.cjs');
 const { decodeText } = require('./encoding.cjs');
+const ocr = require('./ocr.cjs');
+const { CANCELADA, esCorte, revisar } = require('./corte.cjs');
 
 function timestamp() {
   const d = new Date();
@@ -80,8 +82,32 @@ async function extractDocument(filePath, options = {}, onProgress) {
   return doc;
 }
 
+/** El resultado de un archivo al que el corte no lo dejó empezar. */
+const sinEmpezar = (filePath) => ({
+  file: path.basename(filePath), path: filePath, ok: false, outputs: [], error: CANCELADA, cancelado: true,
+});
+
 /**
  * Convierte un lote y guarda cada salida donde diga `options.destino`.
+ *
+ * Eventos de `onProgress`, en orden:
+ *   file-start       { index, total, file }
+ *   stage            { index, file, stage: 'extract', done, total, label } | { …, stage: 'render', output }
+ *   file-done        { index, total, file, ok, error, cancelado, outputs, outDir, meta }
+ *   batch-cancelled  { index, total, file }   solo si se canceló: dónde se cortó
+ *   batch-done       { outDirs, cancelado }
+ *
+ * `file-done` trae las salidas, la carpeta, la ficha y el motivo del error
+ * (herr-11): con eso la fila de Convertir se pone al día apenas termina SU
+ * archivo, sin esperar al último del lote. El resultado del invoke queda como
+ * confirmación.
+ *
+ * Cancelar (main-20): `signal` es el de un AbortController que maneja quien
+ * llama. Se mira antes de cada archivo, entre páginas (pdf.cjs) y antes de
+ * escribir: un archivo sale con todas sus salidas o con ninguna. El
+ * interrumpido y los que no llegaron a empezar vuelven con `cancelado: true`,
+ * así el resultado sigue teniendo una entrada por archivo del lote. Un corte
+ * no es un error: no va a `errors` ni a `_errores.txt`.
  *
  * @param {object} p
  * @param {string[]} p.files        rutas absolutas
@@ -89,15 +115,40 @@ async function extractDocument(filePath, options = {}, onProgress) {
  * @param {object}   p.options      opciones de limpieza/outputs/ocr/destino
  * @param {function} p.onProgress   (evt) => void
  * @param {function} [p.htmlToPdf]  html → Buffer (inyectado por main, para el output pdf)
+ * @param {AbortSignal} [p.signal]  para cancelar el lote
  */
-async function convertBatch({ files, outputs, options = {}, onProgress = () => {}, htmlToPdf }) {
+async function convertBatch(p) {
+  const options = p.options || {};
+  const { signal } = p;
+  /* Un pool de OCR para todo el lote (main-22). No arranca ningún worker
+     hasta que un PDF lo necesite; al cancelar se termina en el acto, para que
+     tesseract no siga reconociendo páginas que nadie va a usar. */
+  const ocrPool = options.ocr !== false && options.tessdataPath ? ocr.crearPoolOcr(options) : null;
+  const alCortar = () => { if (ocrPool) ocrPool.terminar(); };
+  if (signal) signal.addEventListener('abort', alCortar, { once: true });
+  try {
+    return await recorrerLote({ ...p, options, ocrPool });
+  } finally {
+    if (signal) signal.removeEventListener('abort', alCortar);
+    if (ocrPool) await ocrPool.terminar();
+  }
+}
+
+async function recorrerLote({ files, outputs, options, onProgress = () => {}, htmlToPdf, signal, ocrPool }) {
   const results = [];
   const errors = [];
   const outDirs = new Set();
+  let cortado = false;
 
   for (let i = 0; i < files.length; i++) {
     const filePath = files[i];
     const name = path.basename(filePath);
+    if (signal && signal.aborted) {
+      cortado = true;
+      onProgress({ type: 'batch-cancelled', index: i, total: files.length, file: name });
+      for (const f of files.slice(i)) results.push(sinEmpezar(f));
+      break;
+    }
     onProgress({ type: 'file-start', index: i, total: files.length, file: name });
 
     const result = { file: name, path: filePath, ok: false, outputs: [], error: null };
@@ -105,9 +156,11 @@ async function convertBatch({ files, outputs, options = {}, onProgress = () => {
       const outDir = await dirDeSalida(filePath, options.destino);
       outDirs.add(outDir);
 
-      const doc = await extractDocument(filePath, options, (prog) =>
+      const doc = await extractDocument(filePath, { ...options, ocrPool, signal }, (prog) =>
         onProgress({ type: 'stage', index: i, file: name, stage: 'extract', ...prog })
       );
+      // Última mirada antes de escribir: de acá en más el archivo sale entero.
+      revisar(signal);
 
       const stem = stemOf(name);
       for (const outName of outputs) {
@@ -133,11 +186,26 @@ async function convertBatch({ files, outputs, options = {}, onProgress = () => {
         hyphensRestored: doc.metadata.hyphensRestored,
       };
     } catch (err) {
-      result.error = err && err.message ? err.message : String(err);
-      errors.push(`[${timestamp()}] ${name}: ${result.error}`);
+      if (esCorte(err)) {
+        cortado = true;
+        result.cancelado = true;
+        result.error = CANCELADA;
+      } else {
+        result.error = err && err.message ? err.message : String(err);
+        errors.push(`[${timestamp()}] ${name}: ${result.error}`);
+      }
     }
     results.push(result);
-    onProgress({ type: 'file-done', index: i, total: files.length, file: name, ok: result.ok, error: result.error });
+    onProgress({
+      type: 'file-done', index: i, total: files.length, file: name,
+      ok: result.ok, error: result.error, cancelado: Boolean(result.cancelado),
+      outputs: result.outputs, outDir: result.outDir, meta: result.meta,
+    });
+    if (cortado) {
+      onProgress({ type: 'batch-cancelled', index: i, total: files.length, file: name });
+      for (const f of files.slice(i + 1)) results.push(sinEmpezar(f));
+      break;
+    }
   }
 
   /* Los errores quedan por escrito solo cuando todo fue a una misma carpeta
@@ -148,8 +216,8 @@ async function convertBatch({ files, outputs, options = {}, onProgress = () => {
     await fsp.appendFile(path.join(dir, '_errores.txt'), errors.join('\n') + '\n', 'utf8').catch(() => {});
   }
 
-  onProgress({ type: 'batch-done', outDirs: [...outDirs] });
-  return { outDirs: [...outDirs], results, errors };
+  onProgress({ type: 'batch-done', outDirs: [...outDirs], cancelado: cortado });
+  return { outDirs: [...outDirs], results, errors, cancelado: cortado };
 }
 
 // ---------------- Unir textos ----------------
@@ -161,8 +229,14 @@ const TEXT_EXTS = ['.md', '.markdown', '.txt', '.text', '.log', '.rst'];
  * "## <nombre>" por archivo, separados por "---" (el formato que ya usaba
  * Shapeshifter). Los PDFs no se unen acá: eso es Herramientas → Combinar, que
  * copia las páginas sin re-renderizar y acepta imágenes.
+ *
+ * Cancelar tiene el mismo contrato que convertBatch: un corte no es un error,
+ * así que resuelve con `{ cancelado: true }` y no escribe nada. Antes tiraba
+ * el error de corte, y el renderer lo recibía como una falla de IPC («Error
+ * invoking remote method 'conv:unir': Error: Conversión cancelada.») mientras
+ * que convertir volvía con `cancelado` (lo marcó la revisión de 0B2).
  */
-async function mergeFiles({ files, options = {}, onProgress = () => {} }) {
+async function mergeFiles({ files, options = {}, onProgress = () => {}, signal }) {
   if (!Array.isArray(files) || files.length < 2) {
     throw new Error('Para unir hacen falta al menos 2 archivos.');
   }
@@ -172,10 +246,17 @@ async function mergeFiles({ files, options = {}, onProgress = () => {} }) {
   }
 
   const parts = [];
-  for (let i = 0; i < files.length; i++) {
-    onProgress({ type: 'merge', index: i, total: files.length, file: path.basename(files[i]) });
-    const content = decodeText(await fsp.readFile(files[i])).trim();
-    parts.push(`## ${stemOf(files[i])}\n\n${content}`);
+  try {
+    for (let i = 0; i < files.length; i++) {
+      revisar(signal);   // cancelado: no se escribe nada
+      onProgress({ type: 'merge', index: i, total: files.length, file: path.basename(files[i]) });
+      const content = decodeText(await fsp.readFile(files[i])).trim();
+      parts.push(`## ${stemOf(files[i])}\n\n${content}`);
+    }
+    revisar(signal);
+  } catch (err) {
+    if (esCorte(err)) return { cancelado: true };
+    throw err;
   }
   const bytes = Buffer.from(parts.join('\n\n---\n\n') + '\n', 'utf8');
 

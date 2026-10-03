@@ -31,7 +31,7 @@
                anteriores es blanco hardcodeado y no hay forma de taparlo.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const { app, BrowserWindow, ipcMain, screen, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, screen, shell } = require('electron');
 const path = require('path');
 const ipc = require('./src/ipc.cjs');
 const store = require('./src/store.cjs');
@@ -41,6 +41,21 @@ const conversion = require('./src/conversion.cjs');
 const { rutaDeArgv, loteDeArgv } = require('./src/argv.cjs');
 
 const DEV = process.argv.includes('--dev');
+
+/* Para los tests que levantan la app de verdad (cerrar, apertura): con
+   QUIRE_FUERA=1 la ventana se queda en -20000, donde nació, y se muestra sin
+   tomar el foco (tests-09). Sin esto, `npm run verificar` le ponía Quire en
+   el escritorio a Fran dos veces y le robaba el foco a lo que estuviera
+   haciendo. Es lo mismo que PRISM_SHOTS=1 en Prism. */
+const FUERA = process.env.QUIRE_FUERA === '1';
+
+/* El mismo id que el appId de package.json (main-15). El instalador se lo pone
+   a los accesos directos (WinShell::SetLnkAUMI en el installer.nsh de
+   electron-builder), así que abriendo desde el anclado Windows agrupaba bien;
+   pero un doble click en un PDF lanza el proceso sin id, y la ventana podía
+   salir como un segundo botón al lado del anclado. Finway hace lo mismo. Va
+   antes de crear cualquier ventana. */
+app.setAppUserModelId('com.umbrovex.quire');
 
 /* Color base de arranque. Tiene que coincidir con --ox-bg de tokens.css.
    Como --ox-bg es oklch y Electron solo entiende hex, el renderer se lo vuelve
@@ -61,6 +76,11 @@ let win = null;
    guardar; en true, el cierre pasa derecho. Se levanta cuando el renderer
    avisa que terminó, o cuando se le acaba el tiempo. Ver win.on('close'). */
 let puedeCerrar = false;
+
+/* Cuándo fue la última vez que se recargó solo un renderer caído. Ver
+   'render-process-gone' en createWindow: más de una por minuto es un bucle. */
+let ultimaRecarga = 0;
+const RECARGA_MIN_MS = 60000;
 
 /* ── Estado de la ventana ────────────────────────────────────────────────────
    Recordar tamaño y posición entre sesiones. La trampa: si el monitor donde
@@ -132,6 +152,10 @@ function createWindow(state) {
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   win.once('ready-to-show', () => {
+    /* Fuera de pantalla pero VISIBLE, como las ventanas de humo: oculta,
+       Chromium congela las animaciones y el renderer no se comporta como el
+       de verdad. */
+    if (FUERA) { win.showInactive(); return; }
     win.show();
     setTimeout(() => {
       if (!win || win.isDestroyed()) return;
@@ -181,8 +205,16 @@ function createWindow(state) {
      salida es el administrador de tareas. Ante la duda se cierra: perder el
      último trazo es malo, no poder cerrar la app es peor. */
   let guardando = false;
+  /* Mientras no hay renderer —se cayó y todavía no terminó de recargar— no
+     hay nadie que guarde ni que conteste: el cierre pasa derecho, sin esperar
+     los 3 s (main-12). */
+  let sinRenderer = false;
+  /* Si se estaba esperando el aviso para cerrar y el renderer se cae, el aviso
+     no va a llegar: esto suelta la espera en el acto. */
+  let soltarCierre = null;
+
   win.on('close', (e) => {
-    if (puedeCerrar || !win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+    if (puedeCerrar || sinRenderer || !win || win.isDestroyed() || win.webContents.isDestroyed()) return;
     e.preventDefault();
     if (guardando) return;            // ya se lo pedimos; que termine
     guardando = true;
@@ -194,6 +226,7 @@ function createWindow(state) {
     const listo = () => {
       clearTimeout(reloj);
       ipcMain.off('app:guardado', listo);
+      soltarCierre = null;
       if (puedeCerrar) return;
       puedeCerrar = true;
       if (win && !win.isDestroyed()) win.close();
@@ -204,9 +237,101 @@ function createWindow(state) {
       listo();
     }, 3000);
 
+    soltarCierre = listo;
     ipcMain.on('app:guardado', listo);
     win.webContents.send('app:antes-de-cerrar');
   });
+
+  /* ── Si el renderer se cae ────────────────────────────────────────────────
+     El lector carga PDFs de hasta 512 MB y se puede quedar sin memoria. Sin
+     esto, la ventana quedaba en el color de fondo, sin nada adentro y sin
+     botones (frame:false: la titlebar es del renderer), y cerrarla esperaba
+     los 3 s de un renderer que ya no iba a contestar (main-12).
+
+     Se recarga sola, y al arrancar el renderer reabre la sesión. Lo pendiente
+     del doble click ya se entregó y no vuelve (tomarPendientes lo vacía), así
+     que nada se abre dos veces. Una vez por minuto como mucho: si se vuelve a
+     caer enseguida, recargar en automático sería un bucle —un PDF que no entra
+     en memoria, reabierto por la sesión, la tiraría cada vez—, y ahí se
+     pregunta qué hacer.
+
+     La pregunta tiene que traer una salida que exista. La primera versión
+     ofrecía «Volver a cargar» y aconsejaba «abrila de nuevo sin ese
+     documento», y ninguna de las dos servía: el documento que la tiraba está
+     en ultimosDocumentos desde que se abrió su pestaña, así que la recarga lo
+     reabría, y abrir Quire de nuevo también (proceso nuevo: se recarga sola,
+     se cae, diálogo otra vez). Por eso el botón principal vacía la sesión
+     ANTES de recargar (lo mide test/caida.cjs). Cerrar no la toca: hoy Quire
+     no muestra Recientes en ningún lado, y borrarla sin que lo pidas es
+     perder las pestañas para siempre. */
+  win.webContents.on('render-process-gone', (_e, detalles) => {
+    if (!win || win.isDestroyed()) return;
+    sinRenderer = true;
+    documentos.soltarReclamo();
+    /* Lo que sigue va en la vuelta siguiente, no adentro del evento: un
+       reload() llamado mientras Chromium todavía avisa la caída tiró el
+       proceso principal entero (medido: «Observers can only be added once!»,
+       un NOTREACHED de Chromium). */
+    setTimeout(() => recuperar(detalles?.reason), 0);
+  });
+
+  const recuperar = (motivo) => {
+    if (!win || win.isDestroyed()) return;
+    soltarCierre?.();
+    if (puedeCerrar || motivo === 'clean-exit') return;
+
+    const ahora = Date.now();
+    if (ahora - ultimaRecarga >= RECARGA_MIN_MS) {
+      ultimaRecarga = ahora;
+      console.error(`[renderer] se cayó (${motivo}): se recarga`);
+      win.reload();
+      return;
+    }
+
+    console.error(`[renderer] se volvió a caer (${motivo}) en menos de un minuto: no se recarga solo`);
+    const SIN_DOCUMENTOS = 0; const CERRAR = 2;  // el 1 es «Volver a cargar», con todo
+    dialog.showMessageBox(win, {
+      type: 'error',
+      title: 'Quire',
+      message: 'La ventana de Quire se cerró de golpe dos veces seguidas.',
+      detail: 'Puede ser uno de los documentos abiertos, demasiado pesado para la memoria que queda: '
+        + 'si Quire los vuelve a abrir al cargar, se cae otra vez. «Volver a cargar sin los '
+        + 'documentos» arranca con las pestañas vacías, y los abrís de nuevo de a uno. Cerrar no '
+        + 'los olvida: la próxima vez se reabren como siempre.',
+      buttons: ['Volver a cargar sin los documentos', 'Volver a cargar', 'Cerrar Quire'],
+      defaultId: SIN_DOCUMENTOS,
+      cancelId: CERRAR,
+      noLink: true,
+    }).then(async ({ response }) => {
+      if (!win || win.isDestroyed()) return;
+      if (response === CERRAR) { win.close(); return; }
+      if (response === SIN_DOCUMENTOS) {
+        /* Antes de recargar, no después: el renderer nuevo lee la sesión al
+           arrancar (restaurarSesion). Si el disco falla se recarga igual; en
+           el peor caso se cae de nuevo y vuelve esta pregunta. */
+        await store.saveSettings({ ultimosDocumentos: [], posicionActiva: 0 })
+          .catch((err) => console.error('[renderer] no se pudo vaciar la sesión:', err.message));
+        if (!win || win.isDestroyed()) return;
+      }
+      ultimaRecarga = Date.now();
+      win.reload();
+    }).catch(() => {});
+  };
+
+  /* Un documento nuevo en la ventana (el de arranque, o el de una recarga) es
+     un renderer que todavía no escucha 'docs:abrir': lo que llegue mientras
+     arranca se encola y lo reclama él (main-02, ver soltarReclamo). Va en
+     did-navigate, que llega cuando la navegación ya se hizo, y no en
+     did-start-navigation: esa salta también con la navegación que corta
+     will-navigate, y entonces el renderer que sigue vivo dejaba de recibir
+     rutas para siempre. */
+  win.webContents.on('did-navigate', () => { documentos.soltarReclamo(); });
+
+  /* Y cuando la página terminó de cargar, vuelve a haber quien guarde: el
+     cierre lo espera otra vez. (No se puede saber desde acá cuándo se suscribe
+     a onAntesDeCerrar; si cerrás antes, pasa lo mismo que en cualquier
+     arranque: a los 3 s cierra igual.) */
+  win.webContents.on('did-finish-load', () => { sinRenderer = false; });
 
   win.on('closed', () => { win = null; });
 }
@@ -282,11 +407,24 @@ function arrancar() {
 
   app.whenReady().then(async () => {
     ipc.register();
-    /* El actualizador se engancha a la ventana por función y no por referencia:
-       cuando esto corre, `win` todavía es null. */
-    actualizador.iniciar(() => win);
-    conversion.iniciar(() => win);
+    /* La ventana primero, y lo demás con red (main-11). Antes el actualizador
+       y la conversión arrancaban ANTES de crearla, sin catch: si uno tiraba,
+       quedaba un Quire sin ventana pero vivo y con el candado de instancia
+       única tomado, y cada doble click posterior le entregaba su ruta a ese
+       proceso invisible. Quire «no abría» hasta matarlo a mano.
+       Se enganchan a la ventana por función y no por referencia: la ventana
+       puede cambiar (ver 'activate'). */
     createWindow(await loadWindowState());
+    try { actualizador.iniciar(() => win); }
+    catch (err) { console.error('[actualizador] no arrancó:', err); }
+    try { conversion.iniciar(() => win); }
+    catch (err) { console.error('[conversion] no arrancó:', err); }
+  }).catch((err) => {
+    /* Lo que igual reviente acá es un arranque roto. Mejor decirlo y soltar el
+       candado que quedarse vivo y mudo. */
+    console.error('[arranque]', err);
+    dialog.showErrorBox('Quire no pudo arrancar', err?.message || String(err));
+    app.exit(1);
   });
 }
 

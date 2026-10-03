@@ -108,7 +108,16 @@ function iniciar(getWin) {
   });
   if (!s.ok) { fijar({ fase: 'sin-soporte', motivo: s.motivo }); return; }
 
-  ({ autoUpdater } = require('electron-updater'));
+  /* Si electron-updater no carga (una instalación rota), Quire tiene que
+     arrancar igual (main-11): el actualizador queda en error y sin
+     autoUpdater, y buscar/descargar/instalar no hacen nada, como sin iniciar. */
+  try {
+    ({ autoUpdater } = require('electron-updater'));
+  } catch (err) {
+    autoUpdater = null;
+    fijar({ fase: 'error', error: `No se pudo cargar el actualizador: ${mensaje(err)}` });
+    return;
+  }
   autoUpdater.autoDownload = false;
   /* Si nunca hacés click en "reiniciar", la actualización entra igual la próxima
      vez que cerrás Quire. Es la parte que hace que esto sirva de verdad. */
@@ -143,7 +152,14 @@ function iniciar(getWin) {
     progreso: { ...estado.progreso, pct: 1 },
   }));
 
-  autoUpdater.on('error', (err) => fijar({ fase: 'error', error: mensaje(err) }));
+  /* Con la actualización ya bajada, un error posterior (buscar sin internet,
+     por ejemplo) no la puede esconder: instalar() se niega fuera de 'listo', y
+     el cartel se quedaba sin «Reiniciar» hasta cerrar la app (main-13). Lo que
+     ya está en disco sigue sirviendo. */
+  autoUpdater.on('error', (err) => {
+    if (estado.fase === 'listo') return;
+    fijar({ fase: 'error', error: mensaje(err) });
+  });
 }
 
 /* ── Lo que puede pedir el renderer ─────────────────────────────────────── */
@@ -154,12 +170,22 @@ async function buscar({ manual = false } = {}) {
   if (!autoUpdater || estado.fase === 'sin-soporte') return estado;
   // Una búsqueda ya en curso, o una descarga andando, no se pisan.
   if (estado.fase === 'buscando' || estado.fase === 'descargando') return estado;
+  /* Ya bajada, no hay nada que buscar (main-13). checkForUpdates vuelve a
+     emitir update-available aunque esté descargada (electron-updater 6.8,
+     AppUpdater.js), y con autoDownload en false la fase volvía a
+     'disponible': el cartel dejaba de ofrecer «Reiniciar» y pedía «Descargar»
+     otra vez.
+     Pero callarse tampoco: el renderer solo se entera por 'update:cambio'
+     (app.js no mira lo que devuelve esto), y con el cartel de «lista» ya
+     anunciado y cerrado, el botón de Ajustes no hacía nada. Se avisa sin
+     buscar, con `manual`, y el cartel se abre con «Reiniciar». */
+  if (estado.fase === 'listo') return fijar({ manual });
 
   fijar({ manual });
   try {
     await autoUpdater.checkForUpdates();
   } catch (err) {
-    fijar({ fase: 'error', error: mensaje(err) });
+    if (estado.fase !== 'listo') fijar({ fase: 'error', error: mensaje(err) });
   }
   return estado;
 }

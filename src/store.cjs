@@ -238,11 +238,23 @@ async function loadSettings() {
   return withDefaults(migrate(raw));
 }
 
+/* La cola de writeJSON ordena las escrituras, pero no la LECTURA de antes: dos
+   parches con claves distintas que se solapaban leían el mismo archivo viejo,
+   y el segundo pisaba al primero. Pasaba con dos switches de Ajustes seguidos,
+   o al elegir impresora justo cuando una pestaña se abría y la sesión se
+   anotaba sola (main-09). Esta cadena serializa el ciclo entero: cada parche
+   lee lo que dejó el anterior. */
+let colaAjustes = Promise.resolve();
+
 /** Guarda un parche: solo las claves que mandás, el resto queda como estaba. */
-async function saveSettings(patch) {
-  const merged = withDefaults({ ...(await loadSettings()), ...patch });
-  await writeJSON(SETTINGS_FILE, merged);
-  return merged;
+function saveSettings(patch) {
+  const turno = colaAjustes.then(async () => {
+    const merged = withDefaults({ ...(await loadSettings()), ...patch });
+    await writeJSON(SETTINGS_FILE, merged);
+    return merged;
+  });
+  colaAjustes = turno.catch(() => {});
+  return turno;
 }
 
 /* ── Documento suelto ────────────────────────────────────────────────────────

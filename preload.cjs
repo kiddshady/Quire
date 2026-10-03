@@ -68,17 +68,27 @@ contextBridge.exposeInMainWorld('onyx', {
 
   /** PDFs: abrir, leer, guardar. Los bytes van y vuelven como ArrayBuffer. */
   docs: {
-    elegir: () => call('docs:elegir'),
-    elegirVarios: () => call('docs:elegir-varios'),
+    /* Sin opciones, un documento ya leído (o null si se canceló). Con
+       `{ varios: true }`, las RUTAS elegidas ([] si se canceló), para abrirlas
+       de a una con `leer` hasta llenar las pestañas. */
+    elegir: (opciones) => call('docs:elegir', opciones),
+    /* Para Combinar. Sin opciones, la lista de los que se pudieron leer; con
+       `{ conFallidos: true }`, `{ leidos, fallidos: [{ ruta, nombre, error }] }`. */
+    elegirVarios: (opciones) => call('docs:elegir-varios', opciones),
     /* `{ imagenes: true }` acepta además PNG/JPEG/WEBP. Lo pide Combinar, que
-       las vuelve páginas; el lector abre PDFs y nada más. */
+       las vuelve páginas; el lector abre PDFs y nada más. `{ reciente: false }`
+       no lo anota en Recientes. */
     leer: (ruta, opciones) => call('docs:leer', ruta, opciones),
     guardarComo: (bytes, nombre, filtros) => call('docs:guardar-como', bytes, nombre, filtros),
     elegirCarpeta: () => call('docs:elegir-carpeta'),
-    escribir: (carpeta, nombre, bytes) => call('docs:escribir', carpeta, nombre, bytes),
+    /* Devuelve la ruta donde quedó. Con `{ noPisar: true }`, si el nombre ya
+       está numera «nombre (2).ext» como Convertir, en vez de reemplazarlo. */
+    escribir: (carpeta, nombre, bytes, opciones) => call('docs:escribir', carpeta, nombre, bytes, opciones),
     recientes: () => call('docs:recientes'),
     olvidarRecientes: () => call('docs:olvidar-recientes'),
-    /** El PDF con el que te abrieron. null si arrancaste la app a secas. */
+    /** Los PDFs con los que te abrieron, en orden. [] si arrancaste la app a secas. */
+    pendientes: () => call('docs:pendientes'),
+    /** El primero de esos, o null. Es el de antes de que Quire abriera varios. */
     pendiente: () => call('docs:pendiente'),
     /* Con Quire ya abierta, el doble click en otro PDF no levanta una segunda
        ventana: el proceso nuevo le pasa la ruta a este y se muere (main.cjs). */
@@ -118,6 +128,8 @@ contextBridge.exposeInMainWorld('onyx', {
     convertir: (lote) => call('conv:convertir', lote),
     unir: (lote) => call('conv:unir', lote),
     mostrar: (ruta) => call('conv:mostrar', ruta),
+    /** Corta el lote en curso. false si no había nada que cortar. */
+    cancelar: () => call('conv:cancelar'),
     onProgreso: (cb) => {
       const handler = (_e, evento) => cb(evento);
       ipcRenderer.on('conv:progreso', handler);
@@ -127,8 +139,15 @@ contextBridge.exposeInMainWorld('onyx', {
 
   /** Impresión. Lo que se manda ya tiene que estar impuesto. */
   print: {
-    listar: () => call('print:listar'),
+    /* `{ refrescar: true }` vuelve a pedirle las capacidades a Windows antes de
+       cruzarlas con la lista: «Releer impresoras» en un solo clic. */
+    listar: (opts) => call('print:listar', opts),
     capacidades: (opts) => call('print:capacidades', opts),
+    /* `opciones.paginas` (cuántas tiene el PDF) le da al ayudante más tiempo
+       en los trabajos largos; sin eso tiene los 120 s de siempre. */
     imprimir: (bytes, opciones) => call('print:imprimir', bytes, opciones),
+    /** Los papeles que se pueden pedir por nombre. Fuera de esta lista, sale
+        en el papel que tenga puesto el driver. */
+    papelesConNombre: () => call('print:papeles-con-nombre'),
   },
 });

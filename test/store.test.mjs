@@ -73,6 +73,29 @@ await store.writeJSON(store.SETTINGS_FILE, { schema: store.SCHEMA, papelDefecto:
 const completado = await store.loadSettings();
 ok('las claves nuevas se completan solas', 'duplexAsistido' in completado && completado.papelDefecto === 'A5');
 
+/* main-09: dos parches con claves distintas, disparados a la vez. Antes los
+   dos leían el mismo archivo viejo y el segundo pisaba al primero: pasaba con
+   dos switches seguidos, o al elegir impresora justo cuando la sesión se
+   anotaba sola. */
+const [primero, segundo] = await Promise.all([
+  store.saveSettings({ impresora: 'HP LaserJet' }),
+  store.saveSettings({ mostrarNoImprimible: false }),
+]);
+const juntos = JSON.parse(fs.readFileSync(store.SETTINGS_FILE, 'utf8'));
+ok('dos guardados a la vez no se pisan',
+  juntos.impresora === 'HP LaserJet' && juntos.mostrarNoImprimible === false, JSON.stringify(juntos));
+ok('y el segundo devuelve los dos cambios (el renderer se queda con eso)',
+  segundo.impresora === 'HP LaserJet' && segundo.mostrarNoImprimible === false && primero.impresora === 'HP LaserJet');
+const muchos = await Promise.all(Array.from({ length: 12 }, (_, i) => store.saveSettings({ [`prueba${i}`]: i })));
+const final = JSON.parse(fs.readFileSync(store.SETTINGS_FILE, 'utf8'));
+ok('doce a la vez quedan los doce', muchos.length === 12 && Array.from({ length: 12 }, (_, i) => final[`prueba${i}`] === i).every(Boolean),
+  Object.keys(final).filter((k) => k.startsWith('prueba')).join(','));
+ok('un parche que falla no traba a los que siguen', await (async () => {
+  const roto = await store.saveSettings({ ciclo: (() => { const o = {}; o.o = o; return o; })() }).then(() => false, () => true);
+  const despues = await store.saveSettings({ papelDefecto: 'A4' });
+  return roto && despues.papelDefecto === 'A4';
+})());
+
 console.log('\n5. Colección');
 const col = store.collection('tinta');
 const id = await col.nextId('n');
