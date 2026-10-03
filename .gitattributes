@@ -1,0 +1,11 @@
+# Los binarios no pasan por la conversión de fin de línea. Sin esto, un clon
+# en Windows (core.autocrlf=true) le metía CR a cobayo.pdf y le corría los
+# offsets de la tabla xref: 1369 bytes en el repo, 1411 en el clon.
+*.pdf binary
+*.png binary
+*.ico binary
+*.gz binary
+*.exe binary
+*.woff2 binary
+*.ttf binary
+*.traineddata binary
