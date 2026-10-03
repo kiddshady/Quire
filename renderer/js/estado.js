@@ -58,6 +58,17 @@ const CAMPOS = {
      de pestaña: perder la configuración de un folleto por ir a mirar otro
      documento sería hostil. */
   plan: null,
+
+  /* Lo que se está organizando en Páginas y todavía no se guardó:
+     { orden, rotaciones, seleccion, ultima, historial }. Por la misma razón
+     que el plan: era un estado de la vista, uno solo para la app, y un
+     Ctrl+Tab a otro documento tiraba los cambios sin avisar. */
+  organizar: null,
+
+  /* Dónde estabas leyendo, más fino que la página: { pagina, fraccion,
+     scrollLeft }. Con solo la página, volver a la pestaña te dejaba en el
+     encabezado de la hoja y había que buscar el renglón. */
+  lugar: null,
 };
 
 /** Los documentos abiertos, en el orden en que se ven en la franja. */
@@ -71,7 +82,10 @@ export const S = {
   impresora: null,        // el nombre de la elegida
   info: null,
   settings: {},
-  cargando: false,
+  /* Cuántos documentos se están abriendo ahora. Un contador y no un sí o no:
+     con dos aperturas a la vez, la primera que terminaba lo apagaba aunque la
+     otra siguiera cargando. */
+  cargando: 0,
 
   /** Las pestañas abiertas. Solo para leer: se abren y cierran con las funciones de abajo. */
   get pestanas() { return pestanas; },
@@ -172,6 +186,34 @@ export function aplicarPapel(plan, papelId) {
 
 /* ══ Pestañas ════════════════════════════════════════════════════════════════ */
 
+/* Las aperturas en curso, por ruta. abrir() mira si el archivo ya está y si hay
+   lugar ANTES de los await de leerlo, y recién al final lo suma a la lista: dos
+   aperturas que se pisaban (doble click repetido en el Explorador, el mismo PDF
+   soltado dos veces) pasaban las dos y quedaban dos pestañas sobre la misma
+   capa de tinta. La segunda espera a la primera. */
+const enCurso = new Map();
+
+/** ¿Ese archivo ya está abierto (o abriéndose)? */
+export function estaAbierto(ruta) {
+  return !!ruta && (enCurso.has(ruta) || pestanas.some((p) => p.doc?.ruta === ruta));
+}
+
+/** ¿Entra una pestaña más? Cuentan también las que se están abriendo. */
+export function hayLugar() {
+  return pestanas.length + enCurso.size < MAX_PESTANAS;
+}
+
+/* Lo que tiene que pasar antes de cerrar una pestaña: (pestana) => Promise<boolean>.
+   Si alguna dice que no (Páginas con cambios sin guardar, y el usuario se
+   arrepiente), la pestaña no se cierra. */
+const guardias = new Set();
+
+/** Registra una guardia de cierre. Devuelve la función para soltarla. */
+export function alCerrarPestana(fn) {
+  guardias.add(fn);
+  return () => guardias.delete(fn);
+}
+
 /** Una pestaña vacía, con los valores de arranque que digan los ajustes. */
 function nuevaPestana(doc) {
   return {
@@ -190,9 +232,28 @@ function nuevaPestana(doc) {
  * Abre un PDF ya leído del disco ({ruta, nombre, bytes, tamano}) en una
  * pestaña nueva, y la deja activa.
  *
+ * Con `activar: false` la pestaña entra a la franja sin cambiar el documento
+ * que se está mirando (salvo que sea la única): es lo que usa la sesión al
+ * arrancar, que abría las cuatro de a una y el lector pasaba por todas antes
+ * de volver a la primera.
+ *
  * Tirá el error si no hay lugar: quien llama sabe cómo avisarle al usuario.
  */
-export async function abrir(archivo) {
+export async function abrir(archivo, { activar: activarla = true } = {}) {
+  const ruta = archivo.ruta;
+  if (ruta && enCurso.has(ruta)) {
+    const doc = await enCurso.get(ruta);
+    const p = pestanas.find((x) => x.doc === doc);
+    if (p && activarla) activar(p.id);
+    return doc;
+  }
+  if (!ruta) return abrirUna(archivo, activarla);
+  const promesa = abrirUna(archivo, activarla);
+  enCurso.set(ruta, promesa);
+  try { return await promesa; } finally { enCurso.delete(ruta); }
+}
+
+async function abrirUna(archivo, activarla) {
   /* El mismo archivo dos veces es UNA pestaña. Abrirlo de nuevo desde el
      diálogo, o arrastrarlo otra vez, te lleva a la que ya está — y no es solo
      prolijidad: la capa de tinta se identifica por un hash de la ruta, así que
@@ -200,15 +261,17 @@ export async function abrir(archivo) {
      en guardar le pisaría los trazos a la otra. */
   const repetida = pestanas.find((p) => p.doc?.ruta && p.doc.ruta === archivo.ruta);
   if (repetida) {
-    activar(repetida.id);
+    if (activarla) activar(repetida.id);
     return repetida.doc;
   }
 
-  if (pestanas.length >= MAX_PESTANAS) {
+  // Cuentan también las que se están abriendo (esta todavía no entró a
+  // enCurso: esto corre antes del primer await).
+  if (pestanas.length + enCurso.size >= MAX_PESTANAS) {
     throw new Error(`Ya hay ${MAX_PESTANAS} documentos abiertos. Cerrá uno para abrir otro.`);
   }
 
-  S.cargando = true;
+  S.cargando += 1;
   emitir('cargando');
   try {
     const doc = await abrirDocumento(archivo.bytes, {
@@ -234,12 +297,13 @@ export async function abrir(archivo) {
     p.tinta.onCambio = () => emitir('tinta');
 
     pestanas.push(p);
-    activa = pestanas.length - 1;
+    const cambia = activarla || pestanas.length === 1;
+    if (cambia) activa = pestanas.length - 1;
     emitir('pestanas');
-    emitir('documento');
+    if (cambia) emitir('documento');
     return doc;
   } finally {
-    S.cargando = false;
+    S.cargando = Math.max(0, S.cargando - 1);
     emitir('cargando');
   }
 }
@@ -285,16 +349,49 @@ export function mover(id, destino) {
   return true;
 }
 
+/**
+ * Lo que Páginas tiene sin guardar en una pestaña (la activa, si no se dice):
+ * { quitadas, giradas, reordenada } o null si no hay nada pendiente. Vive acá
+ * y no en la vista porque lo leen tres: la barra de Páginas, la guardia que
+ * pregunta antes de cerrar la pestaña y la que pregunta antes de cerrar la app.
+ * Solo cuentan los giros de páginas que SIGUEN: girar una y quitarla no deja
+ * nada pendiente.
+ */
+export function cambiosDePaginas(p = pestanas[activa]) {
+  const o = p?.organizar;
+  const total = p?.doc?.paginas;
+  if (!o || !total || !Array.isArray(o.orden)) return null;
+  const quitadas = total - o.orden.length;
+  const giradas = o.orden.filter((n) => ((o.rotaciones?.[n] || 0) % 360) !== 0).length;
+  const reordenada = o.orden.some((n, i) => i > 0 && n < o.orden[i - 1]);
+  return quitadas || giradas || reordenada ? { quitadas, giradas, reordenada } : null;
+}
+
 /** Cierra una pestaña y activa la que ocupa su lugar. */
 export async function cerrarPestana(id) {
-  const i = pestanas.findIndex((p) => p.id === id);
-  if (i < 0) return false;
-  const p = pestanas[i];
+  const p = pestanas.find((x) => x.id === id);
+  if (!p) return false;
+  /* Una sola vez. El índice se tomaba antes del await de guardar la tinta, y
+     una segunda llamada en el medio (doble click en la cruz, Ctrl+W sostenido)
+     hacía splice con el índice viejo: cerraba la pestaña de al lado, sin
+     guardar su tinta ni soltar su documento. */
+  if (p.cerrando) return false;
+  p.cerrando = true;
+
+  for (const guardia of [...guardias]) {
+    let sigue = true;
+    try { sigue = await guardia(p); } catch (err) { console.error('[estado] guardia de cierre:', err); }
+    if (sigue === false) { p.cerrando = false; return false; }
+  }
 
   /* Lo que quedó sin guardar se escribe ANTES de soltar el documento: la capa
      de tinta guarda con 900 ms de retardo, y cerrar de golpe se comería el
      último trazo. */
   await p.tinta?.guardar().catch(() => {});
+  // Después del await se vuelve a buscar: la lista pudo cambiar en el medio.
+  const i = pestanas.indexOf(p);
+  if (i < 0) return false;
+  const docAntes = pestanas[activa]?.doc ?? null;
   p.doc?.destruir();
   pestanas.splice(i, 1);
 
@@ -307,7 +404,11 @@ export async function cerrarPestana(id) {
   if (activa < 0) activa = 0;
 
   emitir('pestanas');
-  emitir('documento');
+  /* 'documento' solo si de verdad cambió lo que se mira. Cerrar una pestaña
+     de fondo lo emitía igual, y Páginas lo tomaba como otro documento: tiraba
+     los cambios sin guardar; el lector borraba la búsqueda y volvía a pintar
+     todas sus hojas. */
+  if ((pestanas[activa]?.doc ?? null) !== docAntes) emitir('documento');
   return true;
 }
 
@@ -369,8 +470,10 @@ export function posicionActiva() {
 
 /** Carga la lista de impresoras y elige una si todavía no hay. */
 export async function cargarImpresoras({ refrescar = false } = {}) {
-  S.impresoras = await api.print.listar();
-  if (refrescar) await api.print.capacidades({ refrescar: true });
+  /* El refresco va ADENTRO de listar: antes se pedían las capacidades frescas
+     después de listar con las viejas, y el resultado se tiraba. «Releer
+     impresoras» necesitaba dos clics para ver una impresora nueva. */
+  S.impresoras = await api.print.listar({ refrescar });
 
   if (!S.impresora || !S.impresoras.some((p) => p.nombre === S.impresora)) {
     const guardada = S.settings?.impresora;

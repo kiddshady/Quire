@@ -539,6 +539,81 @@ async function correr() {
     }
   }
 
+  /* ── 6-ter. Los avisos y las carreras del estado ────────────────────────────
+     'documento' es el aviso de «llegó otro documento»: con él Páginas y el
+     lector se rehacen. Cerrar una pestaña de fondo lo emitía igual, y Páginas
+     tiraba los cambios sin guardar. Y las carreras: dos cierres de la misma
+     pestaña (doble click en la cruz, Ctrl+W sostenido) se llevaban a la de al
+     lado; dos aperturas del mismo PDF daban dos pestañas sobre la misma capa
+     de tinta; y «cargando» lo apagaba la primera apertura que terminaba. */
+  console.log('\n6-ter. Los avisos y las carreras del estado');
+  notas.push(['estado', await js(`(async () => {
+    const est = await import('./js/estado.js');
+    const { S } = est;
+    const PDFS = ${JSON.stringify(PDFS)};
+    const leer = (r) => window.onyx.docs.leer(r);
+    const avisos = [];
+    const off = est.alCambiar((que) => avisos.push(que));
+    const r = {};
+    try {
+      while (S.pestanas.length > 1) await est.cerrarPestana(S.pestanas[S.pestanas.length - 1].id);
+      const abiertas = new Set(S.pestanas.map((p) => p.doc?.ruta));
+      const libres = PDFS.filter((x) => !abiertas.has(x));
+      const [a, b, c, d] = await Promise.all(libres.slice(0, 4).map(leer));
+
+      // Dos aperturas a la vez: «cargando» cuenta las dos.
+      const pa = est.abrir(a); const pb = est.abrir(b);
+      r.cargandoDurante = S.cargando;
+      await Promise.all([pa, pb]);
+      r.cargandoDespues = S.cargando;
+
+      // Cerrar una de fondo no cambia lo que se mira: no hay 'documento'.
+      est.activar(S.pestanas[0].id);
+      const mirando = S.doc;
+      avisos.length = 0;
+      await est.cerrarPestana(S.pestanas[2].id);
+      r.fondo = { avisos: [...avisos], mismoDoc: S.doc === mirando, quedan: S.pestanas.length };
+
+      // Con activar:false entra a la franja sin cambiar lo que se mira.
+      avisos.length = 0;
+      await est.abrir(c, { activar: false });
+      r.sinActivar = { avisos: [...avisos], mismoDoc: S.doc === mirando, quedan: S.pestanas.length };
+
+      // El mismo archivo dos veces a la vez: UNA pestaña.
+      const antes = S.pestanas.length;
+      await Promise.all([est.abrir(d), est.abrir(d)]);
+      r.mismoArchivo = { antes, despues: S.pestanas.length };
+
+      // Dos cierres de la misma pestaña, con tinta sin guardar (el await que abría la carrera).
+      const victima = S.pestanas[1];
+      const vecina = S.pestanas[2];
+      est.activar(victima.id);
+      S.tinta.agregar(1, { herramienta: 'pluma', color: '#111111', ancho: 2, opacidad: 1, puntos: [{ x: 10, y: 10 }, { x: 60, y: 40 }] });
+      const n0 = S.pestanas.length;
+      await Promise.all([est.cerrarPestana(victima.id), est.cerrarPestana(victima.id)]);
+      r.dobleCierre = { antes: n0, despues: S.pestanas.length, vecinaViva: S.pestanas.includes(vecina), victimaViva: S.pestanas.includes(victima) };
+
+      // Una guardia que dice que no deja la pestaña abierta.
+      const soltar = est.alCerrarPestana?.(async () => false);
+      const n1 = S.pestanas.length;
+      r.guardia = { cerro: await est.cerrarPestana(S.pestanas[0].id), antes: n1, despues: S.pestanas.length };
+      soltar?.();
+    } catch (e) { r.error = e.message; }
+    off();
+    return r;
+  })()`)]);
+
+  {
+    const n = notas.at(-1)[1];
+    ok('el estado no tiró ningún error', !n.error, n.error);
+    ok('«cargando» cuenta las dos aperturas en curso', n.cargandoDurante === 2 && n.cargandoDespues === 0, `${n.cargandoDurante} → ${n.cargandoDespues}`);
+    ok('cerrar una pestaña de fondo no avisa «documento»', n.fondo && !n.fondo.avisos.includes('documento') && n.fondo.mismoDoc, JSON.stringify(n.fondo));
+    ok('abrir con activar:false no cambia lo que se mira', n.sinActivar && !n.sinActivar.avisos.includes('documento') && n.sinActivar.mismoDoc, JSON.stringify(n.sinActivar));
+    ok('el mismo PDF abierto dos veces a la vez da una sola pestaña', n.mismoArchivo && n.mismoArchivo.despues === n.mismoArchivo.antes + 1, JSON.stringify(n.mismoArchivo));
+    ok('dos cierres de la misma pestaña cierran solo esa', n.dobleCierre && n.dobleCierre.despues === n.dobleCierre.antes - 1 && n.dobleCierre.vecinaViva && !n.dobleCierre.victimaViva, JSON.stringify(n.dobleCierre));
+    ok('una guardia que dice que no deja la pestaña abierta', n.guardia && n.guardia.cerro === false && n.guardia.despues === n.guardia.antes, JSON.stringify(n.guardia));
+  }
+
   /* ── 7. Cerrar hasta el final vuelve a la pantalla de inicio ────────────── */
   console.log('\n7. Cerrar todo');
   notas.push(['vaciar', await js(`(async () => {
