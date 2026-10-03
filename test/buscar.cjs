@@ -372,7 +372,7 @@ app.whenReady().then(async () => {
   console.log('\n7. Con la página girada 90°');
 
   /* La capa de texto se arma SIEMPRE en la orientación original y se gira
-     entera por CSS (ver .qr-texto[data-main-rotation] en quire.css). Como las
+     entera por CSS (ver .qr-texto[data-main-rotation] en lector.css). Como las
      marcas se miden con getClientRects() —que ya viene con las transformaciones
      aplicadas— tienen que seguir cayendo sobre las letras sin que el buscador
      sepa nada del giro. Si alguna vez se midieran con offsetLeft/offsetTop, este

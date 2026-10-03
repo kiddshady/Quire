@@ -1,0 +1,141 @@
+/* QUIRE — Herramientas.
+   Era un tramo de quire.css; cada zona tiene su hoja desde octubre de 2026.
+   Se cargan en el orden de index.html, que es el de antes: la cascada no cambia. */
+
+/* ═══ HERRAMIENTAS ═══════════════════════════════════════════════════════════ */
+
+.qr-herr {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.qr-herr__tabs { margin: 0 var(--ox-6); flex: 0 0 auto; }
+
+/* Sin esfumado de ningún lado: arriba está la línea de las tabs y abajo la de
+   la statusbar, y los dos cortes ya están resueltos — un fade encima solo
+   ensucia la línea. El fade es para el borde que recorta al aire, y acá no hay
+   ninguno. (Hasta la 0.9 esfumaba abajo, de cuando la regla no miraba la
+   statusbar.) */
+.qr-herr__cuerpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--ox-4) var(--ox-6) 26px;
+}
+
+/* ── Sobre el `both` en las animaciones de entrada ───────────────────────────
+   Las que revelan contenido van SIN fill-mode. Con `both`, un keyframe que
+   arranca en `opacity: 0` deja el elemento invisible mientras la animación no
+   progrese, y sin fill-mode el estado en reposo es el normal — se ve igual
+   aunque la animación no llegue a correr. Es un seguro barato.
+
+   (Ojo al diagnosticar esto: si medís la app en una BrowserWindow con
+   `show: false`, Chromium le congela las animaciones y TODO lo que entre
+   animado se mide en `opacity: 0`. Eso es el instrumento, no la app. El test
+   de humo muestra la ventana en x:-20000 justamente para no caer en eso.) */
+
+.qr-herr__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ox-4);
+  max-width: 720px;
+  padding-bottom: var(--ox-8);
+  animation: ox-glide-in var(--ox-t-4) var(--ox-ease);
+}
+
+.qr-herr__intro {
+  margin: 0;
+  font-size: var(--ox-fs-12);
+  line-height: 1.65;
+  color: var(--ox-text-3);
+  max-width: 62ch;
+}
+
+.qr-herr__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ox-4);
+}
+
+.qr-herr__acciones {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  padding-top: var(--ox-3);
+  box-shadow: inset 0 1px 0 var(--ox-line);
+}
+
+/* ── Cola de combinación ─────────────────────────────────────────────────── */
+
+.qr-cola__orden {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: var(--ox-r-pill);
+  background: var(--ox-s3);
+  color: var(--ox-text-3);
+  font-size: var(--ox-fs-10);
+}
+
+/* ── Vista previa del corte ──────────────────────────────────────────────── */
+
+.qr-partes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ox-2);
+}
+
+.qr-partes__lista {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ox-1);
+}
+
+/* ── Selector de resolución ──────────────────────────────────────────────── */
+
+.qr-dpis {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--ox-1);
+  max-width: 460px;
+}
+
+.qr-dpi {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: var(--ox-2) 0;
+  background: var(--ox-s2);
+  border: 0;
+  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  cursor: pointer;
+  box-shadow: var(--ox-hairline);
+  transition: var(--tr-color);
+}
+
+.qr-dpi__n {
+  font-size: var(--ox-fs-13);
+  font-weight: var(--ox-w-medium);
+  color: var(--ox-text-2);
+  transition: var(--tr-color);
+}
+
+.qr-dpi:hover { background: var(--ox-wash-1); }
+.qr-dpi.is-active { background: var(--ox-wash-2); box-shadow: inset 0 0 0 1px var(--ox-ring); }
+.qr-dpi.is-active .qr-dpi__n { color: var(--ox-text); }
+
+.qr-progreso {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  flex: 1 1 auto;
+  max-width: 280px;
+}
+
+.qr-progreso .ox-meter { flex: 1 1 auto; }

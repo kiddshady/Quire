@@ -177,9 +177,13 @@ class Documento {
       destino.width = ancho;
       destino.height = alto;
 
-      // El tamaño en CSS va sin dpr: el dpr solo sube la resolución del bitmap.
-      canvas.style.width = `${Math.floor(viewport.width / dpr)}px`;
-      canvas.style.height = `${Math.floor(viewport.height / dpr)}px`;
+      /* El tamaño en pantalla NO lo escribe el render: lo pone la caja de quien
+         lo pide (el pliego del lector y el de Imprimir tienen su tamaño, y el
+         canvas mide el 100 %). Escrito acá en línea, le ganaba al 100 % del CSS:
+         al cambiar el zoom el pliego crecía y el bitmap viejo se quedaba del
+         tamaño viejo hasta que terminaba el render nuevo —recortado al alejar,
+         con blanco al costado al acercar—. Ahora se estira con su caja desde el
+         primer cuadro, que es lo que promete el doble buffer de abajo. */
 
       const ctx = destino.getContext('2d', { alpha: false });
       tarea = page.render({ canvasContext: ctx, viewport, canvas: destino, background: '#ffffff' });
@@ -209,16 +213,14 @@ class Documento {
   /**
    * Render a un canvas nuevo, para miniaturas y exportación.
    *
-   * Devuelve el canvas SIN medidas CSS: render() las escribe inline para que
-   * una página encaje en su hueco del visor, pero acá el tamaño en pantalla lo
-   * decide quien lo recibe. Dejarlas puestas hace que una miniatura se plante
-   * en el ancho que salió del render y deje aire muerto en su contenedor.
+   * Devuelve el canvas SIN medidas CSS (render() no las escribe): el tamaño
+   * en pantalla lo decide quien lo recibe. Con medidas puestas, una miniatura
+   * se plantaba en el ancho que salió del render y dejaba aire muerto en su
+   * contenedor.
    */
   async lienzo(n, { escala = 1, rotacionExtra = 0, dpr = 1 } = {}) {
     const canvas = document.createElement('canvas');
     await this.render(n, { canvas, escala, rotacionExtra, dpr }).promesa;
-    canvas.style.width = '';
-    canvas.style.height = '';
     return canvas;
   }
 
@@ -330,7 +332,7 @@ class Documento {
 
       /* pdf.js escribe el ancho de la capa como
          `round(down, var(--total-scale-factor) * <pt>px, var(--scale-round-x))`.
-         `--total-scale-factor` sale de estas dos (ver .qr-texto en quire.css);
+         `--total-scale-factor` sale de estas dos (ver .qr-texto en lector.css);
          sin ellas la expresión no resuelve y la capa se queda sin tamaño. */
       contenedor.style.setProperty('--scale-factor', escala);
       contenedor.style.setProperty('--user-unit', viewport.userUnit || 1);

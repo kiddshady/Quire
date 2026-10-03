@@ -98,5 +98,49 @@ const files = [path.join(ROOT, 'main.cjs'), path.join(ROOT, 'preload.cjs')];
 const sucios = files.filter((f) => /(--vc-|\.vc-|"vc-|'vc-)/.test(fs.readFileSync(f, 'utf8')));
 ok('sin restos de otro prefijo', sucios.length === 0, sucios.join(', '));
 
+/* Una var() sin declarar no da error: es inválida al computar y la propiedad
+   cae a su valor heredado. La cifra del resumen de Imprimir pedía --ox-fs-22
+   (la escala no tiene 22) y salía a 13 px, desde el primer commit. Toda
+   var(--ox-…) SIN respaldo tiene que estar declarada en algún lado: en una
+   hoja, en una plantilla (style="--ox-pct:…") o con setProperty. */
+console.log('\n5. Ningún token usado sin declarar');
+const leer = (dir, ext) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+  const p = path.join(dir, e.name);
+  if (e.isDirectory()) return e.name === 'vendor' ? [] : leer(p, ext);
+  return ext.test(e.name) ? [p] : [];
+});
+const fuentes = leer(path.join(ROOT, 'renderer'), /\.(css|js|html)$/).map((f) => [f, fs.readFileSync(f, 'utf8')]);
+const declarados = new Set();
+for (const [, txt] of fuentes) {
+  for (const m of txt.matchAll(/(--ox-[a-z0-9-]+)\s*:/g)) declarados.add(m[1]);
+  for (const m of txt.matchAll(/setProperty\(\s*['"`](--ox-[a-z0-9-]+)/g)) declarados.add(m[1]);
+}
+const sinDeclarar = new Set();
+for (const [f, txt] of fuentes) {
+  for (const m of txt.matchAll(/var\(\s*(--ox-[a-z0-9-]+)\s*\)/g)) {
+    if (!declarados.has(m[1])) sinDeclarar.add(`${path.relative(ROOT, f)} → ${m[1]}`);
+  }
+}
+ok('toda var(--ox-…) sin respaldo está declarada', sinDeclarar.size === 0, [...sinDeclarar].join(', '));
+
+/* `animation:` con el nombre de una clase en vez del de un @keyframes no
+   anima nada y no avisa (Finway tenía siete). Se leen las reglas como texto:
+   con un var() en el shorthand, el CSSOM deja animation-name vacío. */
+console.log('\n6. Ninguna animación nombra un @keyframes que no existe');
+const hojas = fuentes.filter(([f]) => f.endsWith('.css'));
+const keyframes = new Set(hojas.flatMap(([, t]) => [...t.matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1])));
+const CLAVES = new Set(['none', 'both', 'forwards', 'backwards', 'infinite', 'alternate', 'reverse',
+  'alternate-reverse', 'normal', 'running', 'paused', 'linear', 'ease', 'ease-in', 'ease-out',
+  'ease-in-out', 'step-start', 'step-end', 'initial', 'inherit', 'unset', 'revert']);
+const huerfanas = [];
+for (const [f, t] of hojas) {
+  for (const m of t.matchAll(/(?<![\w-])animation(?:-name)?\s*:\s*([^;}]+)/g)) {
+    const nombres = m[1].replace(/[\w-]+\([^()]*(\([^()]*\)[^()]*)*\)/g, ' ').split(/[\s,]+/)
+      .filter((x) => /^-?[a-z_][\w-]*$/i.test(x) && !CLAVES.has(x.toLowerCase()));
+    for (const n of nombres) if (!keyframes.has(n)) huerfanas.push(`${path.basename(f)} → ${n}`);
+  }
+}
+ok('cada animation: nombra un @keyframes que existe', huerfanas.length === 0, huerfanas.join(', '));
+
 console.log(`\n═══ ${pass} ok · ${fail} fallas ═══`);
 process.exit(fail ? 1 : 0);

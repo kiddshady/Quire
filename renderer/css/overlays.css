@@ -112,6 +112,20 @@
 .ox-menuitem--danger:hover .ox-icon,
 .ox-menuitem--danger.is-active .ox-icon { color: var(--ox-danger); }
 .ox-menuitem__key { margin-left: auto; font-size: var(--ox-fs-10); color: var(--ox-text-4); }
+/* La aclaración de un ítem (`hint`): atenuada y a la derecha del nombre, que
+   es el que cede si no entra. Con el resaltado sube un escalón, como el ícono.
+   Si además hay atajo, el atajo va pegado a ella (el `gap` los separa). */
+.ox-menuitem__hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: var(--ox-fs-11);
+  color: var(--ox-text-4);
+  white-space: nowrap;
+  transition: color var(--ox-t-1) var(--ox-ease-soft);
+}
+.ox-menuitem:hover .ox-menuitem__hint,
+.ox-menuitem.is-active .ox-menuitem__hint { color: var(--ox-text-3); }
+.ox-menuitem__hint + .ox-menuitem__key { margin-left: 0; }
 .ox-menu__sep { height: 1px; margin: var(--ox-1) var(--ox-2); background: var(--ox-line); }
 .ox-menu__label {
   padding: var(--ox-2) var(--ox-2) var(--ox-1);

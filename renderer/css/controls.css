@@ -93,11 +93,32 @@
 .ox-iconbtn:hover { background: var(--ox-wash-1); color: var(--ox-text); }
 .ox-iconbtn:active { transform: scale(.92); background: var(--ox-wash-2); }
 .ox-iconbtn.is-active { background: var(--ox-wash-2); color: var(--ox-text); }
+/* Apagado: un botón que no hace nada miente si se ve igual y se ilumina al
+   pasarle el mouse (Chromium le aplica :hover a un botón deshabilitado).
+   Pasó en Quire con las flechas de Buscar, el deshacer de la tinta y la barra
+   de Páginas sin nada elegido. Va después de :hover e .is-active para
+   ganarles, y el color ya viaja con --tr-color.
+
+   A diferencia de .ox-btn, SIN pointer-events: none. El nombre de un botón de
+   ícono es su tooltip: con los eventos cortados, uno apagado no decía qué era
+   ni su atajo (Deshacer «Ctrl Z», justo cuando no hay nada que deshacer; la
+   barra de Páginas de Quire, shell-13, se quejaba de eso mismo). Se apaga el
+   hover y el apretón, no el puntero. Un [aria-disabled] sigue recibiendo el
+   click: lo ignora la vista. */
+.ox-iconbtn:disabled,
+.ox-iconbtn[aria-disabled='true'] { color: var(--ox-text-4); }
+.ox-iconbtn:is(:disabled, [aria-disabled='true']):not(.is-active):hover,
+.ox-iconbtn:is(:disabled, [aria-disabled='true']):not(.is-active):active { background: transparent; }
+.ox-iconbtn:is(:disabled, [aria-disabled='true']):active { transform: none; }
 .ox-iconbtn--sm { width: 22px; height: 22px; }
 .ox-iconbtn--sm .ox-icon { width: 13px; height: 13px; }
 
 /* ── Campos ───────────────────────────────────────────────────────────────── */
 .ox-field { display: flex; flex-direction: column; gap: var(--ox-2); }
+/* Una pista que se pliega (.ox-plegable) se come el gap del campo al irse. Va
+   en el hijo y no en el campo: un campo entero que se pliega usa el gap de SU
+   columna, no el de adentro. */
+.ox-field > .ox-plegable { --ox-plegable-gap: var(--ox-2); }
 .ox-field__label {
   font-size: var(--ox-fs-11);
   font-weight: var(--ox-w-medium);
@@ -135,6 +156,17 @@
 .ox-input.is-invalid,
 .ox-textarea.is-invalid { box-shadow: inset 0 0 0 1px var(--ox-danger-ring); }
 .ox-textarea { min-height: 88px; resize: vertical; line-height: var(--ox-lh); }
+/* El agarrador de estirar, dibujado. Con `resize` Chromium pinta el suyo en la
+   esquina —dos rayitas grises de sistema— y era lo único nativo que quedaba a
+   la vista en un campo. Dos trazos en diagonal con el color de los tokens, así
+   se re-tinta con el resto; la esquina sigue estirando igual. */
+.ox-textarea::-webkit-resizer {
+  background:
+    linear-gradient(135deg,
+      transparent 0 44%, var(--ox-text-4) 44% 54%,
+      transparent 54% 72%, var(--ox-text-4) 72% 82%, transparent 82%)
+    no-repeat right 2px bottom 2px / 8px 8px;
+}
 .ox-input--mono, .ox-textarea--mono { font-family: var(--ox-mono); font-size: 12px; }
 
 /* Campo con ícono adelante (búsqueda). */
@@ -186,13 +218,18 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   background: transparent;
   color: var(--ox-text-4);
   cursor: pointer;
-  transition: var(--tr-color);
+  /* La opacidad también: el apagado del tope (.25, abajo) caía de un cuadro
+     al otro al llegar al mínimo o al máximo (Quire, Dividir). */
+  transition: var(--tr-color), opacity var(--ox-t-1) var(--ox-ease-soft);
 }
 
 .ox-stepper__btn:hover:not(:disabled) { color: var(--ox-text); background: var(--ox-s3); }
 .ox-stepper__btn:active:not(:disabled) { color: var(--ox-accent); }
 /* Apagado en el tope: el botón sigue ahí para que el campo no cambie de forma. */
 .ox-stepper__btn:disabled { opacity: .25; cursor: default; }
+/* El primer sync() de bindStepper: la que nace en el tope nace apagada, sin
+   fundirse en cada montaje. */
+.ox-stepper.is-placing .ox-stepper__btn { transition: none; }
 .ox-stepper__btn .ox-icon { width: 10px; height: 10px; }
 
 /* ── Select propio ────────────────────────────────────────────────────────────
@@ -323,6 +360,8 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   transform: translateX(var(--seg-x, 2px));
   transition: transform var(--ox-t-3) var(--ox-ease), width var(--ox-t-3) var(--ox-ease);
 }
+/* Al nacer o al repintarse la cápsula se pone en su lugar sin viajar (colocar() en motion.js). */
+.ox-segmented.is-placing::before { transition: none; }
 .ox-segmented__opt {
   position: relative;
   z-index: 1;

@@ -94,7 +94,11 @@ const P = {
 
   /* ── Seguridad y visibilidad ───────────────────────────────────────────── */
   lock: '<rect x="3" y="7" width="10" height="6.8" rx="2"/><path d="M5.4 7V5.2a2.6 2.6 0 0 1 5.2 0V7"/>',
-  key: '<circle cx="5" cy="8" r="2.7"/><path d="M7.7 8h6.3M12.2 8v2.4M10.1 8v1.8"/>',
+  /* La llave, de contorno continuo (traída de la passKey de Prism): el ojo y
+     el eje con su diente son una sola silueta, sin palitos sueltos. Se dibuja
+     acostada, con el ojo a la derecha y el agujero hacia la punta, y
+     rotate(-45) la pone en diagonal. */
+  key: '<g transform="rotate(-45 8 8)"><path d="M8.31 6.6H1.9V9.4H3.2V11H5.8V9.4H8.31A3.3 3.3 0 1 0 8.31 6.6Z"/><circle cx="12.3" cy="8" r="1" fill="currentColor" stroke="none"/></g>',
   eye: '<path d="M1.4 8S4 3.4 8 3.4 14.6 8 14.6 8 12 12.6 8 12.6 1.4 8 1.4 8z"/><circle cx="8" cy="8" r="2.2"/>',
   eyeOff: '<path d="M6.3 3.7A6.4 6.4 0 0 1 8 3.4c4 0 6.6 4.6 6.6 4.6a12 12 0 0 1-2 2.6M4 4.8A11.7 11.7 0 0 0 1.4 8S4 12.6 8 12.6a6.7 6.7 0 0 0 2.4-.4"/><path d="M6.5 6.5a2.2 2.2 0 0 0 3 3M2.2 2.2l11.6 11.6"/>',
 

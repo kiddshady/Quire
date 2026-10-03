@@ -14,6 +14,12 @@
 <link rel="stylesheet" href="./css/surfaces.css">
 <link rel="stylesheet" href="./css/overlays.css">
 <link rel="stylesheet" href="./css/quire.css">
+<link rel="stylesheet" href="./css/lector.css">
+<link rel="stylesheet" href="./css/imprimir.css">
+<link rel="stylesheet" href="./css/herramientas.css">
+<link rel="stylesheet" href="./css/paginas.css">
+<link rel="stylesheet" href="./css/chrome.css">
+<link rel="stylesheet" href="./css/convertir.css">
 
 <style>
   /* Boot splash: réplica exacta del primer frame. Pinta ANTES de que cargue
@@ -138,18 +144,18 @@
     <div class="ox-statusbar__item" id="stat-doc" data-tip="Documento abierto" data-tip-side="top">
       <i data-icon="file"></i> <span class="ox-statusbar__value" id="stat-doc-name">Ningún documento</span>
     </div>
-    <div class="ox-statusbar__item qr-plegable--ancho" id="stat-pagina" data-tip="Página actual" data-tip-side="top" hidden>
+    <div class="ox-statusbar__item ox-plegable--ancho" id="stat-pagina" data-tip="Página actual" data-tip-side="top" hidden>
       <span class="ox-statusbar__value ox-num" id="stat-pagina-value">—</span>
     </div>
-    <div class="ox-statusbar__item qr-plegable--ancho" id="stat-medida" data-tip="Tamaño real de la página" data-tip-side="top" hidden>
+    <div class="ox-statusbar__item ox-plegable--ancho" id="stat-medida" data-tip="Tamaño real de la página" data-tip-side="top" hidden>
       <span class="ox-statusbar__value ox-num" id="stat-medida-value">—</span>
     </div>
     <div class="ox-spacer"></div>
-    <div class="ox-statusbar__item qr-plegable--ancho" id="stat-impresora" data-tip="Impresora activa" data-tip-side="top" hidden>
+    <div class="ox-statusbar__item ox-plegable--ancho" id="stat-impresora" data-tip="Impresora activa" data-tip-side="top" hidden>
       <i data-icon="printer"></i> <span class="ox-statusbar__value" id="stat-impresora-value">—</span>
     </div>
     <!-- Lo que queda visible cuando cerrás el cartel de actualización. -->
-    <div class="ox-statusbar__item qr-stat-act" id="stat-update" data-tip-side="top" hidden></div>
+    <div class="ox-statusbar__item qr-stat-act ox-plegable--ancho" id="stat-update" data-tip-side="top" hidden></div>
   </footer>
 </div>
 

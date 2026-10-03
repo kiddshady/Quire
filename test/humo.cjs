@@ -152,7 +152,7 @@ app.whenReady().then(async () => {
 
   // ── 4-bis. Las superficies de visualización van SIN esfumado ─────────────
   // Es la excepción declarada de Quire: un degradado sobre el papel se lee
-  // como que la hoja está impresa más clara en el borde. Ver quire.css.
+  // como que la hoja está impresa más clara en el borde. Ver lector.css.
   notas.push(['sin-fade', await js(`(() => {
     const mirar = (sel) => {
       const el = document.querySelector(sel);

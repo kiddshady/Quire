@@ -103,7 +103,7 @@ export function viewConvertir() {
       </button>`,
   }) + `
     <div class="ox-viewbody qr-conv">
-      <div class="ox-viewbody__main">
+      <div class="ox-viewbody__main ox-viewbody__main--bleed">
         <div class="qr-conv__cola ox-scroll" id="cv-cola"></div>
       </div>
 
@@ -114,7 +114,7 @@ export function viewConvertir() {
           <button class="ox-btn ox-btn--primary ox-flashable qr-pie__boton" id="cv-convertir">
             <i data-icon="convertir"></i> Convertir
           </button>
-          <button class="ox-btn ox-btn--ghost ox-btn--sm qr-pie__boton qr-plegable" id="cv-unir" hidden>
+          <button class="ox-btn ox-btn--ghost ox-btn--sm qr-pie__boton ox-plegable" id="cv-unir" hidden>
             <i data-icon="combinar"></i> Unir los textos en un .md
           </button>
         </div>
@@ -176,7 +176,7 @@ function itemHTML(d, i) {
       <div class="ox-listitem__main">
         <span class="ox-listitem__title">${esc(d.nombre)}</span>
         <span class="ox-listitem__sub">${subtituloDe(d, tipo)}</span>
-        <div class="ox-meter qr-conv__meter qr-plegable"${d.estado === 'convirtiendo' ? '' : ' hidden'}>
+        <div class="ox-meter qr-conv__meter ox-plegable"${d.estado === 'convirtiendo' ? '' : ' hidden'}>
           <div class="ox-meter__fill" style="--ox-pct:${(d.progreso * 100).toFixed(1)}%"></div>
         </div>
         ${d.estado === 'listo' && d.salidas.length ? `
@@ -267,7 +267,7 @@ function pintarOpciones() {
   const fila = (id, on, label, meta) => `
     <label class="ox-row qr-conv__fila">
       <button class="ox-switch${on ? ' is-on' : ''}" data-ajuste="${id}"></button>
-      <span class="ox-col" style="gap:2px">
+      <span class="ox-col qr-apilado">
         <span class="ox-label">${label}</span>
         ${meta ? `<span class="ox-meta">${meta}</span>` : ''}
       </span>
@@ -286,7 +286,7 @@ function pintarOpciones() {
             </span>
           </label>`).join('')}
       </div>
-      <div class="qr-op qr-op--par qr-conv__chunks qr-plegable"${a.salidas.chunks ? '' : ' hidden'}>
+      <div class="qr-op qr-op--par qr-conv__chunks ox-plegable"${a.salidas.chunks ? '' : ' hidden'}>
         <div class="ox-field">
           <label class="ox-field__label">Tamaño</label>
           <input class="ox-input ox-num" id="cv-chunk-size" type="number" min="100" step="100" value="${a.chunkSize}">

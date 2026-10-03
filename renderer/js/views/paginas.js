@@ -59,7 +59,10 @@ export function viewPaginas() {
   // Antes del early return: la pantalla vacía tiene que reaccionar cuando
   // aparece un documento (ver la nota en lector.js).
   Router.onLeave(alCambiar((que) => {
-    if (que === 'documento') { reiniciar(); Router.refresh({ animar: true }); }
+    // Sin reiniciar(): la vista ya se reinicia sola cuando de verdad llegó
+    // otro documento (V.docRuta !== S.doc.ruta, abajo). Reiniciar acá tiraba
+    // los cambios sin guardar cuando el aviso no era de otro documento.
+    if (que === 'documento') Router.refresh();
   }));
 
   if (!S.doc) {
@@ -80,7 +83,7 @@ export function viewPaginas() {
     sub: `${esc(S.doc.nombre)} · ${V.orden.length} de ${S.doc.paginas}`,
     crumbs: [{ label: 'Documento', view: 'lector' }, { label: 'Páginas' }],
   }) + `
-    <div class="qr-org">
+    <div class="qr-org ox-bleed">
       <div class="qr-org__barra">
         <button class="ox-btn ox-btn--ghost ox-btn--sm" id="org-todas">Seleccionar todas</button>
         <button class="ox-btn ox-btn--ghost ox-btn--sm" id="org-ninguna">Ninguna</button>

@@ -192,12 +192,12 @@ function viewAjustes() {
     sub: 'Se guardan en settings.json, con escritura atómica',
     actions: '<button class="ox-btn ox-btn--secondary ox-btn--sm ox-flashable" id="set-refrescar"><i data-icon="retry"></i> Releer impresoras</button>',
   }) + `
-    <div class="ox-scroll ox-grow" style="padding-left:24px;padding-right:24px">
+    <div class="ox-scroll ox-grow" id="set-scroll">
       <div style="max-width:640px">
 
         <div class="ox-section">
           <div class="ox-section__head"><span class="ox-section__title">Impresora</span></div>
-          <div class="ox-card"><div class="ox-card__body ox-col" style="gap:18px">
+          <div class="ox-card"><div class="ox-card__body ox-col qr-col-ancha">
             <div class="ox-field">
               <label class="ox-field__label">Predeterminada</label>
               <button class="ox-select" id="set-impresora">
@@ -216,16 +216,16 @@ function viewAjustes() {
               <span class="ox-kv__v ox-num">${imp.maxCopias ?? '—'}</span>
             </div>
             ${areaImprimibleHTML(imp)}` : '<span class="ox-meta">Todavía no se leyeron las capacidades.</span>'}
-            <label class="ox-row" style="gap:12px">
+            <label class="ox-row qr-fila">
               <button class="ox-switch${st.duplexAsistido ? ' is-on' : ''}" id="set-duplex"></button>
-              <span class="ox-col" style="gap:2px">
+              <span class="ox-col qr-apilado">
                 <span class="ox-label">Dúplex asistido</span>
                 <span class="ox-meta">Quire maneja las dos pasadas y te muestra cómo va el fajo de vuelta a la bandeja, en vez de dejárselo al driver.</span>
               </span>
             </label>
-            <label class="ox-row" style="gap:12px">
+            <label class="ox-row qr-fila">
               <button class="ox-switch${st.mostrarNoImprimible ? ' is-on' : ''}" id="set-margen"></button>
-              <span class="ox-col" style="gap:2px">
+              <span class="ox-col qr-apilado">
                 <span class="ox-label">Marcar el área no imprimible</span>
                 <span class="ox-meta">Dibuja en el preview el borde que el tóner no alcanza.</span>
               </span>
@@ -235,17 +235,17 @@ function viewAjustes() {
 
         <div class="ox-section">
           <div class="ox-section__head"><span class="ox-section__title">Lectura</span></div>
-          <div class="ox-card"><div class="ox-card__body ox-col" style="gap:18px">
+          <div class="ox-card"><div class="ox-card__body ox-col qr-col-ancha">
             <div class="ox-field">
               <label class="ox-field__label">Al abrir un documento</label>
-              <div class="ox-segmented" id="set-zoom" style="max-width:320px">
+              <div class="ox-segmented qr-angosto" id="set-zoom">
                 ${[['ancho', 'Ajustar al ancho'], ['pagina', 'Página entera'], ['fijo', '100%']]
     .map(([id, label]) => `<button class="ox-segmented__opt${st.modoZoomInicial === id ? ' is-active' : ''}" data-value="${id}">${label}</button>`).join('')}
               </div>
             </div>
-            <label class="ox-row" style="gap:12px">
+            <label class="ox-row qr-fila">
               <button class="ox-switch${st.reabrirUltimo ? ' is-on' : ''}" id="set-reabrir"></button>
-              <span class="ox-col" style="gap:2px">
+              <span class="ox-col qr-apilado">
                 <span class="ox-label">Reabrir el último documento</span>
                 <span class="ox-meta">Al arrancar, vuelve a cargar el PDF que estabas leyendo.</span>
               </span>
@@ -255,16 +255,16 @@ function viewAjustes() {
 
         <div class="ox-section">
           <div class="ox-section__head"><span class="ox-section__title">Actualizaciones</span></div>
-          <div class="ox-card"><div class="ox-card__body ox-col" style="gap:18px">
-            <div class="ox-row" style="gap:12px">
+          <div class="ox-card"><div class="ox-card__body ox-col qr-col-ancha">
+            <div class="ox-row qr-fila">
               <button class="ox-btn ox-btn--secondary ox-flashable" id="set-buscar-update">
                 <i data-icon="download"></i> Buscar ahora
               </button>
               <span class="ox-meta ox-grow" id="set-update-estado">${esc(resumenActualizacion())}</span>
             </div>
-            <label class="ox-row" style="gap:12px">
+            <label class="ox-row qr-fila">
               <button class="ox-switch${st.avisarActualizaciones !== false ? ' is-on' : ''}" id="set-avisar"></button>
-              <span class="ox-col" style="gap:2px">
+              <span class="ox-col qr-apilado">
                 <span class="ox-label">Avisarme cuando haya una versión nueva</span>
                 <span class="ox-meta">Busca al arrancar y te muestra un cartel solo si hay algo. Nunca baja nada sin que se lo pidas.</span>
               </span>
@@ -285,7 +285,7 @@ function viewAjustes() {
         </div>
 
       </div>
-      <div style="height:32px"></div>
+      <div class="qr-remate"></div>
     </div>`);
 
   cablearAjustes();
@@ -563,7 +563,7 @@ function actualizarChrome() {
      apiladas con el mismo dato se leen como un error de maquetado, no como dos
      datos. Sin texto y sin la línea de arriba (ver quire.css), el rail baja
      entero de un color solo. El div sigue existiendo porque le marca el piso al
-     rail y porque alinea con la barra del preview — ver --ox-pie. */
+     rail y porque alinea con la barra del preview — ver --qr-pie. */
 
   /* El nombre del documento en el titlebar solo mientras NO haya franja. Con
      las pestañas a la vista lo estaría diciendo tres veces en veinte píxeles

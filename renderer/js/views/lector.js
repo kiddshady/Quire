@@ -1306,7 +1306,7 @@ function salirNav() {
    se mueve. Sobre el núcleo y durante el zoom desaparece: el disco ya ilumina
    la zona bajo el puntero, y la flecha del sistema no agrega ubicación y
    encima tapa la lupa, que es lo que dice que ahí se hace zoom. El CSS lo
-   lee de data-cursor (ver .qr-visor.is-navegando en quire.css). */
+   lee de data-cursor (ver .qr-visor.is-navegando en lector.css). */
 function cursorNav() {
   if (!V.visor?.classList.contains('is-navegando')) return;
   const g = V.gesto;
@@ -1393,7 +1393,7 @@ export function viewLector() {
      no repintaba nada —Router.go('lector') es un no-op si ya estás en
      'lector'— y el documento recién se veía al cambiar de vista y volver. */
   Router.onLeave(alCambiar((que) => {
-    if (que === 'documento') { reiniciarBusqueda(); Router.refresh({ animar: true }); }
+    if (que === 'documento') { reiniciarBusqueda(); Router.refresh(); }
     else if (que === 'tinta' && V.tintaActiva) actualizarBarraTinta();
   }));
 
@@ -1408,7 +1408,7 @@ export function viewLector() {
   }
 
   paint(`
-    <div class="qr-lector">
+    <div class="qr-lector ox-bleed">
 
       <div class="qr-barra">
         <button class="ox-iconbtn ox-iconbtn--sm" id="qr-toggle-panel"
@@ -1426,7 +1426,7 @@ export function viewLector() {
         <button class="ox-iconbtn ox-iconbtn--sm" id="qr-next" data-tip="Página siguiente"><i data-icon="chevronDown"></i></button>
 
         <!-- Este divisor no es solo un divisor: el borde derecho del panel
-             lateral cae justo acá. Ver --qr-panel-w en quire.css. -->
+             lateral cae justo acá. Ver --qr-panel-w en lector.css. -->
         <div class="ox-vr" id="qr-vr-zoom"></div>
 
         <button class="ox-iconbtn ox-iconbtn--sm" id="qr-zoom-menos" data-tip="Alejar" data-tip-key="Ctrl −"><i data-icon="zoomOut"></i></button>
@@ -1452,7 +1452,7 @@ export function viewLector() {
         </button>
       </div>
 
-      <div class="qr-tintabarra qr-plegable" id="qr-tintabarra" ${V.tintaActiva ? '' : 'hidden'}></div>
+      <div class="qr-tintabarra ox-plegable" id="qr-tintabarra" ${V.tintaActiva ? '' : 'hidden'}></div>
 
       <div class="qr-lector__cuerpo">
         <aside class="qr-panel${V.panelAbierto ? '' : ' is-collapsed'}" id="qr-panel">
@@ -1468,7 +1468,7 @@ export function viewLector() {
           <div class="qr-pista"></div>
         </div>
         <!-- Donde vive el puck: una capa del tamaño exacto del visor, fuera
-             de él para que el scroll no se la lleve. Ver quire.css. -->
+             de él para que el scroll no se la lleve. Ver lector.css. -->
         <div class="qr-puck-ancla" id="qr-puck-ancla"></div>
       </div>
     </div>`);
@@ -1477,7 +1477,7 @@ export function viewLector() {
   V.visor.addEventListener('scroll', alScrollear, { passive: true });
   /* Ojo: acá NO va scrollFade(). Las superficies de visualización de Quire son
      la excepción declarada a la regla del esfumado — el porqué está en
-     quire.css, arriba de .qr-visor. */
+     lector.css, arriba de .qr-visor. */
 
   construirPaginas();
   cambiarPanel(V.panel);
@@ -1498,7 +1498,7 @@ export function viewLector() {
      vista se veía bien igual, pero el error estaba. Diferido, además, dos
      avisos seguidos se vuelven un solo reescalado.
 
-     La barra de tinta se pliega (.qr-plegable): el alto del visor cambia en
+     La barra de tinta se pliega (.ox-plegable): el alto del visor cambia en
      cada cuadro durante la transición. Reescalar es caro —cancela renders,
      rehace la capa de texto y los editores y vuelve al principio de la
      página—, así que no se hace si la escala sale igual (en modo ancho, un

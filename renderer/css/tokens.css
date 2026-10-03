@@ -64,7 +64,7 @@
   --ox-s1:     oklch(17.2% calc(.0070 * var(--ox-tint)) var(--ox-hue));  /* rail, statusbar */
   --ox-s2:     oklch(20.3% calc(.0093 * var(--ox-tint)) var(--ox-hue));  /* card, panel, fila elevada */
   --ox-s3:     oklch(23.4% calc(.0106 * var(--ox-tint)) var(--ox-hue));  /* menú, modal, popover */
-  --ox-s4:     oklch(27.1% calc(.0126 * var(--ox-tint)) var(--ox-hue));  /* tooltip, lo más alto */
+  --ox-s4:     oklch(27.1% calc(.0126 * var(--ox-tint)) var(--ox-hue));  /* tooltip, lo más alto: lo que flota sobre todo */
 
   /* El backgroundColor de la BrowserWindow tiene que coincidir con --ox-bg.
      Electron no entiende oklch, así que main.cjs lleva el hex equivalente y el
@@ -95,21 +95,6 @@
   --ox-wash-3:     rgb(var(--ox-accent-rgb) / .15);   /* activo / presionado */
   --ox-ring:       rgb(var(--ox-accent-rgb) / .55);   /* focus del teclado */
   --ox-select:     rgb(var(--ox-accent-rgb) / .16);   /* ::selection */
-
-  /* La selección sobre una superficie CLARA — en Quire, el papel del PDF.
-
-     Es el MISMO gesto que el de arriba, sobre el sustrato opuesto. Sobre el
-     fondo oscuro, seleccionar ACLARA: se tiende el acento, que en una paleta
-     acromática es el blanco. Sobre papel blanco eso no existe —blanco al 16%
-     sobre blanco deja el papel en 253 de 255, medido: se despega 1,02:1, o sea
-     nada—, así que del otro lado seleccionar OSCURECE, y lo que se tiende es el
-     fondo de la app en vez del acento. Mismo alfa, color invertido.
-
-     Se escribe con color-mix y no repitiendo los tres números de --ox-bg a
-     propósito: duplicados, cambiar el fondo de la app desincronizaría la
-     selección sin que nada avise. Es la única función de color del archivo, y
-     está acá porque es el único token que necesita OTRO token con alfa. */
-  --ox-select-claro: color-mix(in oklab, var(--ox-bg) 16%, transparent);
 
   /* Con un acento oscuro o muy saturado, la tinta encima tiene que ser clara.
      Descomentá esto si tu acento no es luz:
@@ -211,24 +196,6 @@
   --ox-statusbar: 26px;
   --ox-rail:     224px;
   --ox-inspector: 320px;
-
-  /* La columna donde arrancan los VALORES de la statusbar: el padding de la
-     barra, más el del ítem, más el ícono y su gap. Está acá y no sumado a mano
-     en cada regla porque no es solo un dato de la barra — lo que se apile
-     encima tiene que caer en la misma columna, y si los dos lados hacen la
-     cuenta por su cuenta, tarde o temprano una de las dos se mueve sola. */
-  --ox-statusbar-icono: 12px;
-  --ox-statusbar-texto: calc(var(--ox-4) + var(--ox-1) + var(--ox-statusbar-icono) + var(--ox-2));
-
-  /* La franja que va pegada ARRIBA de la statusbar: el pie del rail y la barra
-     de la vista que esté abierta. Son componentes distintos —uno del shell,
-     otro de cada vista— pero quedan uno al lado del otro y sus líneas de arriba
-     se leen como UNA sola línea cruzando la ventana. Si no miden lo mismo se ve
-     el escalón, y se ve mucho: son dos líneas paralelas a pocos píxeles.
-
-     El número lo manda el contenido más alto, que son los botones redondos de
-     la navegación del preview (28 px + 12 de aire arriba y abajo). */
-  --ox-pie: 52px;
 
   /* Tamaño del esfumado donde el scroll recorta. El contenedor lleva padding
      ≥ este valor en el eje del scroll para que en reposo no coma ningún ítem. */

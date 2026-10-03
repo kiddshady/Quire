@@ -10,7 +10,7 @@
    la app se degrada sola después de un rato de uso.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-import { exit } from './motion.js';
+import { calcar, recienCalcado } from './motion.js';
 
 const routes = new Map();
 const listeners = new Set();
@@ -55,50 +55,6 @@ function release() {
   }
 }
 
-/**
- * La vista que se va no desaparece de un cuadro al otro: su contenido pasa a
- * un calco con la misma clase de `.ox-main`, en la misma celda de la grilla, y
- * se esfuma encima mientras la nueva entra. Sin esto, la vieja se iba de golpe
- * y la nueva arrancaba desde transparente: un cuadro vacío en cada navegación.
- *
- * El calco va sin ids (nadie tiene que encontrar un #campo que se está yendo),
- * inerte, y conserva su scroll. Si la vista vieja todavía estaba entrando, el
- * calco arranca desde la opacidad y el corrimiento en que la agarró.
- */
-function retirarVista() {
-  if (!host || !host.firstChild || !host.parentElement) return null;
-  const cs = getComputedStyle(host);
-  const calco = document.createElement(host.tagName);
-  calco.className = host.className;
-  calco.classList.remove('ox-view', 'is-settled');
-  calco.classList.add('ox-main--saliente');
-  calco.setAttribute('aria-hidden', 'true');
-  calco.inert = true;
-  calco.style.opacity = cs.opacity;
-  if (cs.transform !== 'none') calco.style.transform = cs.transform;
-
-  const scrolls = [...host.querySelectorAll('*')]
-    .filter((el) => el.scrollTop || el.scrollLeft)
-    .map((el) => [el, el.scrollTop, el.scrollLeft]);
-  calco.append(...host.childNodes);
-  for (const el of calco.querySelectorAll('[id]')) el.removeAttribute('id');
-  host.after(calco);
-  for (const [el, top, left] of scrolls) { el.scrollTop = top; el.scrollLeft = left; }
-
-  // Mover un nodo en el DOM le REINICIA las animaciones CSS. Lo que tenía su
-  // propia entrada volvía a entrar desde cero adentro del calco que se está
-  // yendo: las miniaturas del lector caían a opacidad 0 y reaparecían
-  // (0 → 63 → 86 %) mientras la vista se esfumaba, y lo mismo los paneles de
-  // Herramientas. Se dan por terminadas; lo que gira para siempre (un spinner)
-  // sigue girando. Traído de Onyx.
-  for (const a of calco.getAnimations({ subtree: true })) {
-    if (a.effect?.getTiming().iterations !== Infinity) a.finish();
-  }
-
-  exit(calco, { fallback: 260 });
-  return calco;
-}
-
 /** Navega. Repetir la vista+parámetro actual no hace nada (evita repintados). */
 export function go(name, param = null) {
   const route = routes.get(name);
@@ -118,65 +74,65 @@ export function go(name, param = null) {
   document.querySelectorAll('.ox-navitem').forEach((b) =>
     b.classList.toggle('is-active', b.dataset.view === navKey));
 
-  const saliente = retirarVista();
+  // La vista que se va pasa a un calco que se esfuma encima (calcar, en
+  // motion.js): sin esto se iba de golpe y la nueva arrancaba desde
+  // transparente, un cuadro vacío en cada navegación.
+  //
+  // Salvo que el host se haya calcado hace un instante: un refresh() y un
+  // go() en la misma tarea (en Quire, abrir o cerrar un documento desde otra
+  // vista: el aviso repinta la vista actual y enseguida se navega). Lo que
+  // hay en el host es un estado intermedio que el calco del refresh —casi
+  // opaco todavía— no dejó ver. Calcarlo otra vez dejaba DOS calcos
+  // fundiéndose juntos, y el intermedio (Páginas con las hojas en blanco)
+  // asomaba hasta un 25 % a mitad de camino (shell-29). Se descarta, y lo
+  // nuevo va directo debajo del calco que ya está: el criterio de repintar().
+  //
+  // `__pinta` dice que en el host vive otra vista: lo que el repintado de
+  // recién dejó pendiente para el final de la tarea (devolver el scroll y el
+  // foco, asentar en motion.js) ya no es para ella.
+  if (host) host.__pinta = (host.__pinta ?? 0) + 1;
+  const intermedio = !!host && recienCalcado(host);
+  if (intermedio) host.replaceChildren();
+  const saliente = intermedio || calcar(host);
   route.view(param);
-  animarEntrada(saliente);
+
+  // Si hay una vista yéndose, la nueva no anima nada: ya está entera y quieta
+  // debajo del calco, que es opaco, y el relevo lo hace el calco al
+  // esfumarse. Antes la nueva esperaba 90 ms invisible y entraba corrida
+  // 10 px: la pantalla se destapaba hasta la mitad y volvía (con contenido
+  // claro, un parpadeo) y lo que las dos vistas tienen en el mismo lugar —el
+  // título, las barras— temblaba. Medido en Quire (0.9.5).
+  //
+  // Sin vista yéndose (el arranque) entra sobre el eje del flujo. La
+  // transición se reinicia a mano: sin el reflow intermedio el navegador no
+  // vuelve a disparar la animación al re-agregar la clase.
+  if (host) host.classList.remove('ox-view', 'is-settled');
+  if (host && !saliente) {
+    void host.offsetWidth;
+    host.classList.add('ox-view');
+    // Terminada la entrada, se apaga con una clase: una animación con fill
+    // `both` deja su último cuadro aplicado para siempre, y una opacidad
+    // retenida vuelve a la vista frontera de backdrop para lo que tenga adentro.
+    const settle = (ev) => {
+      if (ev.target !== host || ev.animationName !== 'ox-glide-in') return;
+      host.removeEventListener('animationend', settle);
+      host.classList.add('is-settled');
+    };
+    host.addEventListener('animationend', settle);
+  }
 
   listeners.forEach((fn) => fn({ ...current }, from));
   return true;
 }
 
-/**
- * Si hay una vista yéndose, la nueva no anima nada: ya está entera y quieta
- * debajo del calco, que es opaco, y el relevo lo hace el calco al esfumarse.
- * Antes la nueva esperaba 90 ms invisible y entraba corrida 10 px: la
- * pantalla se destapaba hasta la mitad y volvía (con las hojas blancas de un
- * PDF, un parpadeo) y lo que las dos vistas tienen en el mismo lugar —el
- * título, las barras— temblaba.
- *
- * Sin vista yéndose (el arranque) entra sobre el eje del flujo. La transición
- * se reinicia a mano: sin el reflow intermedio el navegador no vuelve a
- * disparar la animación al re-agregar la clase.
- */
-function animarEntrada(saliente) {
-  if (!host) return;
-  host.classList.remove('ox-view', 'is-settled');
-  if (saliente) return;
-  void host.offsetWidth;
-  host.classList.add('ox-view');
-  // Terminada la entrada, se apaga con una clase: una animación con fill
-  // `both` deja su último cuadro aplicado para siempre, y una opacidad
-  // retenida vuelve a la vista frontera de backdrop para lo que tenga adentro.
-  const settle = (ev) => {
-    if (ev.target !== host || ev.animationName !== 'ox-glide-in') return;
-    host.removeEventListener('animationend', settle);
-    host.classList.add('is-settled');
-  };
-  host.addEventListener('animationend', settle);
-}
-
-/**
- * Vuelve a montar la vista actual (después de un cambio de datos de fondo).
- *
- * `animar` distingue los dos usos que tiene esto, que se ven iguales y no lo
- * son. Refrescar porque cambió un dato de la vista —elegiste otra impresora,
- * reiniciaste el orden de las páginas— es una actualización EN EL LUGAR, y
- * deslizar la pantalla entera por eso sobreactúa. Refrescar porque cambió el
- * documento es otra cosa: llegó contenido nuevo, igual que al navegar, y sin
- * la animación la vista salta de golpe.
- *
- * Por defecto NO anima, que es como se comportaba antes de que existiera el
- * parámetro: así ningún llamador viejo cambia de conducta sin que se lo pidan.
- * Cuando anima, es un relevo como al navegar: el documento de antes se
- * esfuma mientras entra el nuevo, en vez de irse de un cuadro al otro.
- */
-export function refresh({ animar = false } = {}) {
+/** Vuelve a montar la vista actual (después de un cambio de datos de fondo).
+ *  Es un fundido que no pierde el lugar —scroll, foco, revelados, cápsulas—
+ *  y no vuelve a hacer entrar nada: lo hace paint() (repintar, en motion.js). */
+export function refresh() {
   const route = routes.get(current.name);
   if (!route) return;
   release();
-  const saliente = animar ? retirarVista() : null;
   route.view(current.param);
-  if (animar) animarEntrada(saliente);
 }
 
 /** Se avisa después de cada navegación: (a, desde) => {} */

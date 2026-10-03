@@ -218,6 +218,10 @@
   transition: var(--tr-color), transform var(--ox-t-1) var(--ox-ease-soft);
 }
 .ox-listitem:hover { background: var(--ox-wash-1); }
+/* El anillo va hacia adentro: una lista suele ir de borde a borde de su
+   columna, y la columna es un .ox-scroll que recorta. El de base.css sale
+   3.5px por fuera y se cortaba contra ese borde (salió en Idiolect, sep 2026). */
+.ox-listitem:focus-visible { box-shadow: inset 0 0 0 1.5px var(--ox-ring); }
 .ox-listitem.is-selected { background: var(--ox-wash-2); }
 .ox-listitem.is-selected::before {
   content: '';
@@ -346,6 +350,7 @@
   transform: translateX(var(--tab-x, 0px));
   transition: transform var(--ox-t-3) var(--ox-ease), width var(--ox-t-3) var(--ox-ease);
 }
+.ox-tabs.is-placing::after { transition: none; }
 .ox-tab {
   display: flex;
   align-items: center;

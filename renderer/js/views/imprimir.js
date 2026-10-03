@@ -369,7 +369,7 @@ function pintarOpciones() {
         </button>
       </div>
       ${p.escala.tipo === 'custom' ? `
-        <div class="ox-row" style="gap:10px;align-items:center">
+        <div class="ox-row qr-deslizador">
           <input class="ox-slider ox-grow" id="op-escala-valor" type="range" min="10" max="400" step="1"
                  value="${p.escala.valor}" style="--ox-pct:${((p.escala.valor - 10) / 390 * 100).toFixed(1)}%">
           <span class="ox-chip ox-chip--mono" id="op-escala-eco">${p.escala.valor}%</span>
@@ -395,9 +395,9 @@ function pintarOpciones() {
     </div>
 
     <div class="qr-op">
-      <label class="ox-row" style="gap:12px;align-items:flex-start">
+      <label class="ox-row qr-fila qr-fila--arriba">
         <button class="ox-switch${p.respetarNoImprimible ? ' is-on' : ''}" id="op-margen"></button>
-        <span class="ox-col" style="gap:2px">
+        <span class="ox-col qr-apilado">
           <span class="ox-label">Respetar el área imprimible</span>
           <span class="ox-meta">Ajusta el contenido a donde el tóner llega de verdad${
   p.imprimible ? ` (${aMM(mm(p.imprimible.ancho)).toFixed(0)} × ${aMM(mm(p.imprimible.alto)).toFixed(0)} mm)` : ''}.</span>
@@ -431,7 +431,7 @@ function opcionesDelModo(p) {
           <i data-icon="chevronDown"></i>
         </button>
       </div>
-      <label class="ox-row" style="gap:12px">
+      <label class="ox-row qr-fila">
         <button class="ox-switch${p.nup.borde ? ' is-on' : ''}" id="op-nup-borde"></button>
         <span class="ox-label">Dibujar el borde de cada página</span>
       </label>`;
@@ -460,7 +460,7 @@ function opcionesDelModo(p) {
     return `
       <div class="ox-field">
         <label class="ox-field__label">Agrandar a</label>
-        <div class="ox-row" style="gap:10px;align-items:center">
+        <div class="ox-row qr-deslizador">
           <input class="ox-slider ox-grow" id="op-poster-escala" type="range" min="100" max="1000" step="10"
                  value="${p.poster.escala}" style="--ox-pct:${((p.poster.escala - 100) / 900 * 100).toFixed(1)}%">
           <span class="ox-chip ox-chip--mono" id="op-poster-eco">${p.poster.escala}%</span>
@@ -468,14 +468,14 @@ function opcionesDelModo(p) {
       </div>
       <div class="ox-field">
         <label class="ox-field__label">Solape entre hojas</label>
-        <div class="ox-row" style="gap:10px;align-items:center">
+        <div class="ox-row qr-deslizador">
           <input class="ox-slider ox-grow" id="op-poster-solape" type="range" min="0" max="30" step="1"
                  value="${p.poster.solape}" style="--ox-pct:${(p.poster.solape / 30 * 100).toFixed(1)}%">
           <span class="ox-chip ox-chip--mono" id="op-poster-solape-eco">${p.poster.solape} mm</span>
         </div>
         <span class="ox-field__hint">Material repetido para pegar sin que quede una línea blanca.</span>
       </div>
-      <label class="ox-row" style="gap:12px">
+      <label class="ox-row qr-fila">
         <button class="ox-switch${p.poster.marcas ? ' is-on' : ''}" id="op-poster-marcas"></button>
         <span class="ox-label">Marcas de corte en las esquinas</span>
       </label>`;
@@ -853,7 +853,7 @@ function diagramaVuelta(duplex) {
 export function viewImprimir() {
   // Antes del early return: la pantalla vacía tiene que reaccionar cuando
   // aparece un documento (ver la nota en lector.js).
-  Router.onLeave(alCambiar((que) => { if (que === 'documento') Router.refresh({ animar: true }); }));
+  Router.onLeave(alCambiar((que) => { if (que === 'documento') Router.refresh(); }));
 
   if (!S.doc) {
     paint(head({ title: 'Imprimir' }) + empty({
@@ -871,7 +871,7 @@ export function viewImprimir() {
     crumbs: [{ label: 'Documento', view: 'lector' }, { label: 'Imprimir' }],
   }) + `
     <div class="ox-viewbody">
-      <div class="ox-viewbody__main">
+      <div class="ox-viewbody__main ox-viewbody__main--bleed">
         <div class="qr-preview" id="qr-preview">
           <div class="qr-preview__cuerpo" id="qr-preview-cuerpo"></div>
           <div class="qr-preview__nav" id="qr-preview-nav"></div>

@@ -7,7 +7,7 @@
 
 import { Icons } from './icons.js';
 import { Toast } from './overlays.js';
-import { initScrollFades } from './motion.js';
+import { initScrollFades, repintar } from './motion.js';
 
 /** El contenedor de la vista activa. Lazy: no asume cuándo corre este módulo. */
 let _view = null;
@@ -80,7 +80,7 @@ export function colorToken(nombre) {
    justamente el punto: el rojo queda libre para significar "se rompió". */
 
 /** Formas disponibles. Sumá las tuyas mapeando tipo → forma. */
-export const SHAPES = ['circle', 'square', 'diamond', 'hex'];
+export const SHAPES = ['circle', 'square'];
 
 export const STATE_LABEL = {
   idle: 'Sin usar',
@@ -107,23 +107,58 @@ export function status(state, { shape = 'circle', label } = {}) {
     ${mark(state, shape)}<span>${esc(label ?? STATE_LABEL[state] ?? state)}</span></span>`;
 }
 
+/**
+ * Una ruta que, cuando no entra, se recorta por el medio.
+ *
+ * Acá solo se parte en dos: la cabeza —que es la que cede— y los últimos
+ * `colas` segmentos, que son los que identifican la carpeta y quedan a salvo.
+ * El recorte de verdad lo hace `.ox-path` en CSS, porque cuánto entra depende
+ * del ancho de la ventana y eso desde JS habría que volver a medirlo en cada
+ * resize.
+ *
+ * El texto sigue completo en el DOM: recortar es visual, y arrastrar sobre la
+ * ruta la copia entera, con el pedazo escondido incluido.
+ */
+export function path(ruta, { colas = 2 } = {}) {
+  const s = String(ruta ?? '');
+  // El separador viaja con el segmento que abre, así ninguno de los dos pedazos
+  // empieza ni termina con una barra suelta al volver a unirlos.
+  const partes = s.split(/(?=[\\/])/);
+  const corte = Math.max(0, partes.length - colas);
+  return `<span class="ox-path">`
+    + `<span class="ox-path__head">${esc(partes.slice(0, corte).join(''))}</span>`
+    + `<span class="ox-path__tail">${esc(partes.slice(corte).join(''))}</span></span>`;
+}
+
 /* ── Pintar ──────────────────────────────────────────────────────────────── */
 
 /**
  * Reemplaza la vista. Monta los íconos declarativos y cablea los esfumados de
  * scroll: si pintás sin pasar por acá, los <i data-icon> quedan vacíos y los
  * bordes del scroll se cortan duro.
+ *
+ * Repintar la MISMA vista (Router.refresh(), o la vista que se vuelve a pintar
+ * con el dato nuevo) es un fundido que no pierde el lugar ni vuelve a hacer
+ * entrar nada: ver repintar() en motion.js. Al navegar, el router ya se llevó
+ * la vista vieja y esto solo pinta.
  */
 export function paint(html) {
   const el = viewEl();
-  el.innerHTML = html;
-  Icons.mount(el);
+  repintar(el, () => {
+    el.innerHTML = html;
+    Icons.mount(el);
+  });
   initScrollFades(el);
   return el;
 }
 
-/** Encabezado de vista: migas, título, subtítulo y acciones a la derecha. */
-export function head({ title, sub, crumbs, actions = '' } = {}) {
+/**
+ * Encabezado de vista: migas, título, subtítulo y acciones a la derecha.
+ * `linea: true` lo cierra con su hairline en vez de cortar al aire — y el shell
+ * le apaga solo el esfumado de arriba al scroll de esa vista. Con inspector no
+ * hace falta pedirla: el shell la pone solo.
+ */
+export function head({ title, sub, crumbs, actions = '', linea = false } = {}) {
   const crumbHTML = crumbs
     ? `<nav class="ox-crumbs">${crumbs
         .map((c, i) => (i ? '<i data-icon="chevronRight"></i>' : '')
@@ -132,7 +167,7 @@ export function head({ title, sub, crumbs, actions = '' } = {}) {
         .join('')}</nav>`
     : '';
   return `
-    <div class="ox-viewhead">
+    <div class="ox-viewhead${linea ? ' ox-viewhead--line' : ''}">
       <div class="ox-viewhead__text ox-grow">
         ${crumbHTML}
         <div class="ox-viewhead__title">${esc(title)}</div>

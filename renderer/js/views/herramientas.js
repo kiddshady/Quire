@@ -50,7 +50,7 @@ export function viewHerramientas() {
     title: 'Herramientas',
     sub: S.doc ? esc(S.doc.nombre) : 'Combinar, dividir y exportar',
   }) + `
-    <div class="qr-herr">
+    <div class="qr-herr ox-bleed">
       <div class="ox-tabs qr-herr__tabs" id="herr-tabs">
         ${SECCIONES.map((s) => `
           <button class="ox-tab${V.seccion === s.id ? ' is-active' : ''}" data-value="${s.id}">
@@ -63,7 +63,7 @@ export function viewHerramientas() {
   bindSwitcher(document.getElementById('herr-tabs'), (v) => { V.seccion = v; pintarSeccion(); });
   pintarSeccion();
 
-  const off = alCambiar((que) => { if (que === 'documento') Router.refresh({ animar: true }); });
+  const off = alCambiar((que) => { if (que === 'documento') Router.refresh(); });
   Router.onLeave(off);
 }
 
@@ -283,7 +283,7 @@ function htmlDividir() {
         re-renderizar. El original no se toca.
       </p>
 
-      <div class="ox-segmented" id="qr-div-tipo" style="max-width:320px">
+      <div class="ox-segmented qr-angosto" id="qr-div-tipo">
         <button class="ox-segmented__opt${c.tipo === 'cada' ? ' is-active' : ''}" data-value="cada">Cada N páginas</button>
         <button class="ox-segmented__opt${c.tipo === 'rangos' ? ' is-active' : ''}" data-value="rangos">Por rangos</button>
       </div>
@@ -456,7 +456,7 @@ function htmlExportar() {
       ${fmt.calidad ? `
         <div class="ox-field" style="max-width:340px">
           <label class="ox-field__label">Calidad</label>
-          <div class="ox-row" style="gap:10px;align-items:center">
+          <div class="ox-row qr-deslizador">
             <input class="ox-slider ox-grow" id="qr-exp-calidad" type="range" min="40" max="100" step="1"
                    value="${Math.round(e.calidad * 100)}" style="--ox-pct:${((e.calidad * 100 - 40) / 60 * 100).toFixed(1)}%">
             <span class="ox-chip ox-chip--mono" id="qr-exp-calidad-eco">${Math.round(e.calidad * 100)}%</span>
@@ -464,16 +464,16 @@ function htmlExportar() {
         </div>` : ''}
 
       ${tinta ? `
-        <label class="ox-row" style="gap:12px">
+        <label class="ox-row qr-fila">
           <button class="ox-switch${e.conTinta ? ' is-on' : ''}" id="qr-exp-tinta"></button>
-          <span class="ox-col" style="gap:2px">
+          <span class="ox-col qr-apilado">
             <span class="ox-label">Incluir lo anotado</span>
             <span class="ox-meta">${plural(tinta, 'trazo', 'trazos')} en el documento.</span>
           </span>
         </label>` : ''}
 
       <div class="qr-herr__acciones">
-        <div class="qr-progreso qr-plegable" id="qr-exp-progreso" hidden>
+        <div class="qr-progreso ox-plegable" id="qr-exp-progreso" hidden>
           <div class="ox-meter"><div class="ox-meter__fill" style="--ox-pct:0%"></div></div>
           <span class="ox-meta" id="qr-exp-progreso-txt"></span>
         </div>

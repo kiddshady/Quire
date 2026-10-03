@@ -56,6 +56,9 @@
   color: var(--ox-text-3);
   pointer-events: none;
 }
+/* Está centrado por su propio ancho: en un relevo de swap(), el nombre viejo
+   se centra también, o saltaría hacia un costado mientras se esfuma. */
+.ox-titlebar__context > .ox-swap-out--over { justify-content: center; }
 
 /* Controles de ventana: propios, no los de Windows. El botón ocupa todo el
    alto (maximizada, tirar el mouse a la esquina tiene que acertar la cruz),
@@ -186,27 +189,9 @@
 .ox-navitem:hover .ox-navitem__count,
 .ox-navitem.is-active .ox-navitem__count { color: var(--ox-text-2); }
 
-/* Pie del rail: salud de proveedores.
-
-   La sangría de la izquierda NO es la del rail: es la columna de los valores
-   de la statusbar, que va pegada justo abajo. Las dos filas suelen decir lo
-   mismo —en Quire, el nombre del documento abierto— y apiladas con dos
-   arranques distintos se lee como un error de maquetado antes que como dos
-   datos. Ver --ox-statusbar-texto.
-
-   El flex no es decorativo: `overflow` no le aplica a un elemento inline, así
-   que un .ox-truncate suelto acá adentro no truncaba nada — un nombre largo se
-   salía del rail y lo tapaba el fondo del área principal. Se veía cortado al
-   ras y sin puntos suspensivos, que es la manera de cortar que no avisa que
-   cortó. Como ítem flex el span sí es un bloque y el ellipsis aparece. */
+/* Pie del rail: salud de proveedores. */
 .ox-rail__foot {
-  display: flex;
-  align-items: center;
-  /* El alto NO sale del padding: sale del token, porque tiene que ser el mismo
-     que el de la barra de la vista de al lado. Ver --ox-pie. */
-  min-height: var(--ox-pie);
-  min-width: 0;
-  padding: 0 var(--ox-3) 0 var(--ox-statusbar-texto);
+  padding: var(--ox-3);
   box-shadow: inset 0 1px 0 var(--ox-line);
 }
 
@@ -242,7 +227,7 @@
 
 /* El encabezado cerrado con su propia línea, en vez de cortar al aire. Lo piden
    dos casos:
-   — una vista simple que lo dice: la clase `.ox-viewhead--line`;
+   — una vista simple que lo dice: `head({ linea: true })`;
    — y toda vista con inspector, sola. El panel es de otro plano y arranca con
      un borde duro justo debajo del encabezado; si la columna principal se
      esfuma arriba, el encabezado se ve derretido de un lado y sólido del otro.
@@ -265,6 +250,39 @@
 .ox-crumbs__item:last-child { color: var(--ox-text-2); }
 .ox-crumbs .ox-icon { width: 12px; height: 12px; color: var(--ox-text-4); }
 
+/* ── La sangría lateral del contenido ────────────────────────────────────────
+   El contenido de una vista tiene que arrancar EN LA MISMA columna que su
+   propio título. El `viewhead` ya trae su `--ox-6`; esta regla se lo da a todo
+   lo demás, en los dos layouts de vista que existen:
+
+     .ox-main > .ox-scroll                    (vista simple)
+     .ox-main > .ox-viewbody > __main         (vista con inspector)
+
+   Antes no estaba en ningún lado y cada vista lo compensaba con un
+   `style="padding-left:24px;padding-right:24px"` inline — el mismo número
+   mágico repetido cinco veces en la plantilla. Lo que hacía era peor que feo:
+   una vista nueva, escrita sin copiar una vieja, nacía con todo pegado al riel
+   y corrido respecto de su encabezado, y el síntoma no señalaba la causa.
+
+   `.ox-viewbody` queda AFUERA a propósito: el inspector tiene fondo y hairline
+   propios y tiene que llegar al borde de la ventana. La sangría se la pone su
+   `__main`, que es el que lleva contenido.
+
+   Es `padding-inline` y no el atajo `padding`: `.ox-scroll` usa el
+   `padding-top`/`bottom` para su esfumado y pisárselos le rompe la máscara.
+
+   Para lo que va de borde a borde —un lienzo, un mapa, una tabla ancha— está
+   `.ox-bleed` (y `.ox-viewbody__main--bleed` en una vista con inspector). Van
+   EXCLUIDOS en el selector y no con una regla que pise el padding después: la
+   de acá pesa (0,3,0) y un `.ox-bleed { padding-inline: 0 }` (0,1,0) no le
+   ganaba nunca. Salió en Quire, donde el lector quedaba con 24 px de más a
+   cada lado. Excluir también deja intacto el padding propio de lo que va de
+   borde a borde. */
+.ox-main > :not(.ox-viewhead, .ox-viewbody, .ox-bleed),
+.ox-viewbody__main:not(.ox-viewbody__main--bleed) {
+  padding-inline: var(--ox-6);
+}
+
 .ox-viewbody { flex: 1 1 auto; min-height: 0; display: flex; }
 /* position:relative para anclar los controles flotantes del lienzo: si viven
    DENTRO del contenedor que scrollea, se van de pantalla con el contenido. */
@@ -275,6 +293,25 @@
   display: flex;
   flex-direction: column;
   position: relative;
+}
+
+/* La barra del panel nace en el BORDE, no 24px adentro.
+
+   La sangría de acá arriba la lleva el padre, así que la caja que scrollea
+   termina antes del borde y la barra se dibujaba ahí, flotando separada del
+   inspector: se leía como un elemento suelto en vez de como el borde de algo.
+   En la vista simple no pasa —ahí la sangría la lleva el propio `.ox-scroll`,
+   con lo cual su caja ya llega al borde de la ventana.
+
+   Se estira la caja hasta el borde y se le devuelve la sangría como padding
+   propio. El contenido NO se mueve: termina exactamente donde terminaba —la
+   barra ocupa el mismo ancho de un lado o del otro— y lo único que cambia es
+   dónde nace. */
+/* Solo donde __main lleva la sangría: en uno de borde a borde no hay qué
+   devolver, y estirarlo lo sacaba 24 px por fuera del inspector. */
+.ox-viewbody__main:not(.ox-viewbody__main--bleed) > .ox-scroll {
+  margin-right: calc(var(--ox-6) * -1);
+  padding-right: var(--ox-6);
 }
 
 /* Arriba la vista corta al aire —el viewhead no lleva línea, salvo que la traiga—
@@ -340,6 +377,7 @@
   display: flex;
   align-items: center;
   gap: var(--ox-4);
+  --ox-plegable-gap: var(--ox-4);   /* el mismo gap, para .ox-plegable--ancho */
   padding: 0 var(--ox-4);
   background: var(--ox-s1);
   box-shadow: inset 0 1px 0 var(--ox-line);
@@ -354,9 +392,10 @@
   height: 100%;
   transition: var(--tr-color);
 }
+/* El ítem es flex, y una regla de clase le gana al `hidden` del navegador: sin
+   esto, un dato escondido con `el.hidden` seguía en la barra. En Quire, sin
+   documento abierto se leía «— — [impresora] —». */
+.ox-statusbar__item[hidden] { display: none; }
 .ox-statusbar__item:hover { color: var(--ox-text-2); }
-/* Estos cuatro valores —padding de la barra, padding del ítem, gap y este
-   ancho— son los sumandos de --ox-statusbar-texto. Si tocás uno, tocá el
-   token: hay cosas apoyadas en esa columna. */
-.ox-statusbar__item .ox-icon { width: var(--ox-statusbar-icono); height: var(--ox-statusbar-icono); }
+.ox-statusbar__item .ox-icon { width: 12px; height: 12px; }
 .ox-statusbar__value { color: var(--ox-text-2); font-variant-numeric: tabular-nums; }

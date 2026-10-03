@@ -10,7 +10,7 @@
    arreglo que hardcodeara la coma pasaría todo lo de arriba y fallaría ahí.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-import { locale, fmtBytes, fmtNum, fmtDur, fmtMoney } from '../renderer/js/format.js';
+import { locale, fmtBytes, fmtNum, fmtDur, fmtMoney, fmtDec } from '../renderer/js/format.js';
 
 let pass = 0; let fail = 0;
 const ok = (n, c, x = '') => { if (c) { pass++; console.log(`  ok   ${n}`); } else { fail++; console.log(`  FALLA ${n} ${x}`); } };
@@ -65,6 +65,13 @@ try {
 /* Y volver atrás tiene que funcionar: el caché de formateadores se indexa por
    locale, así que un caché mal armado dejaría la app pegada al idioma anterior. */
 es('vuelve a es-AR', fmtBytes(2202009), '2,1 MB');
+
+console.log('\nMedidas con decimales (fmtDec)');
+es('grosor de la tinta', fmtDec(1.8), '1,8');
+es('entero, sin ceros de relleno', fmtDec(14), '14');
+es('el ancho de una Carta', fmtDec(215.9), '215,9');
+es('redondea al tope de decimales', fmtDec(209.93), '209,9');
+es('con dos decimales', fmtDec(0.25, 2), '0,25');
 
 console.log(`\n═══ ${pass} ok · ${fail} fallas ═══\n`);
 process.exit(fail ? 1 : 0);

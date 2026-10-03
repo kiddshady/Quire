@@ -10,8 +10,8 @@
 
 import { Icons } from './icons.js';
 import { Toast, Menu, Modal } from './overlays.js';
-import { bindSwitcher, bindStepper } from './motion.js';
-import { mark, status, copy, colorToken } from './ui.js';
+import { bindSwitcher, bindStepper, swap } from './motion.js';
+import { mark, status, copy, colorToken, path, esc } from './ui.js';
 
 /* ── Las tres perillas ───────────────────────────────────────────────────────
    Los presets del acento. El nombre importa: son las cinco temperaturas que
@@ -32,6 +32,9 @@ const swatch = (name, varName) => `
     <span class="ox-mono ox-dim2" style="font-size:10px">${varName}</span>
   </div>`;
 
+const fadeDemoRows = Array.from({ length: 14 }, (_, i) =>
+  `<div style="padding:7px 0;font-size:12px;color:var(--ox-text-2);box-shadow:inset 0 -1px 0 var(--ox-line)">Elemento de lista ${i + 1}</div>`).join('');
+
 const section = (title, note, body) => `
   <section style="margin-bottom:40px">
     <div class="ox-row" style="margin-bottom:4px"><span class="ox-eyebrow">${title}</span></div>
@@ -41,7 +44,7 @@ const section = (title, note, body) => `
 
 export function designHTML() {
   return `
-    <div class="ox-scroll ox-grow" id="design-scroll" style="padding-left:24px;padding-right:24px">
+    <div class="ox-scroll ox-grow" id="design-scroll">
     <div id="design-body" style="max-width:920px">
 
       ${section('Las perillas', 'Todo el sistema deriva de estas cuatro variables. Movelas: la app entera se re-tinta en vivo, incluido el color con el que el compositor de Windows pinta el frame de restaurar. Esto es literalmente lo que hacés al empezar una app nueva — salvo que ahí lo hacés con <span class="ox-mono">node tools/retint.mjs</span>, que además mantiene en sincronía las dos copias en hex del color base.', `
@@ -94,8 +97,7 @@ export function designHTML() {
 
              El cuerpo llevaba padding-top en cero para no repetir el aire que
              el encabezado ya pone. Con encabezado se veía perfecto; SIN él, el
-             contenido quedaba pegado al borde de arriba: 0 px contra 16 abajo,
-             que es como estaban las cuatro tarjetas de Ajustes.
+             contenido quedaba pegado al borde de arriba: 0 px contra 16 abajo.
 
              Sobrevivió porque acá se mostraba UNA tarjeta y con padding inline,
              salteándose el componente. La vitrina existe para ver las piezas y
@@ -135,17 +137,30 @@ export function designHTML() {
           <div class="ox-mono">n-0007 · 42.3k · 1m 12s · C:\\tools\\Onyx</div>
         </div>`)}
 
+      ${section('Texto que no entra', 'Recortar tiene dos formas y no son intercambiables. Un <b>nombre</b> se corta por la cola, que es donde deja de importar. Una <b>ruta</b> se corta por el medio: el principio lo comparten todas y el final es lo único que la identifica, así que <span class="ox-mono">.ox-truncate</span> sobre una ruta deja justo la mitad que no informa. Y ojo con <span class="ox-mono">.ox-truncate</span> sobre un <span class="ox-mono">&lt;span&gt;</span> suelto: en un elemento <i>inline</i> <span class="ox-mono">overflow</span> no aplica, la clase no hace nada y el texto se corta al aire — por eso la clase trae <span class="ox-mono">display:block</span>.', `
+        <div class="ox-card" style="max-width:320px"><div class="ox-card__body ox-col" style="gap:16px">
+          <div class="ox-col" style="gap:6px">
+            <span class="ox-eyebrow">.ox-truncate · por la cola</span>
+            <div class="ox-truncate">Configuración de despliegue del entorno de staging</div>
+            <div class="ox-truncate ox-mono ox-dim">C:\\Users\\fulano\\AppData\\Roaming\\Onyx\\data</div>
+          </div>
+          <div class="ox-col" style="gap:6px">
+            <span class="ox-eyebrow">.ox-path · por el medio</span>
+            <div class="ox-mono ox-dim">${path('C:\\Users\\fulano\\AppData\\Roaming\\Onyx\\data')}</div>
+          </div>
+        </div></div>`)}
+
       ${section('Estado', 'La pieza central. La <b>forma</b> dice qué es la cosa, la <b>luminancia</b> si está viva, y el <b>movimiento</b> es exclusivo de lo que corre ahora mismo. Con eso se lee una pantalla entera sin un solo color — que es el punto: así el rojo queda libre para significar «se rompió».', `
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:20px 12px">
           ${['idle', 'queued', 'running', 'waiting', 'done', 'skipped', 'failed'].map((s) => `
             <div class="ox-col" style="gap:8px">${status(s)}
               <div class="ox-row" style="gap:10px;padding-left:2px">
-                ${mark(s, 'circle')}${mark(s, 'square')}${mark(s, 'diamond')}${mark(s, 'hex')}
+                ${mark(s, 'circle')}${mark(s, 'square')}
               </div>
             </div>`).join('')}
         </div>
         <div class="ox-row ox-meta ox-dim2" style="gap:20px;margin-top:22px;flex-wrap:wrap">
-          ${[['circle', 'círculo'], ['square', 'cuadrado'], ['diamond', 'rombo'], ['hex', 'hexágono']]
+          ${[['circle', 'círculo'], ['square', 'cuadrado']]
             .map(([k, label]) => `<span class="ox-row" style="gap:7px">${mark('done', k)}${label}</span>`).join('')}
         </div>`)}
 
@@ -158,6 +173,7 @@ export function designHTML() {
           <button class="ox-btn ox-btn--danger-solid ox-flashable">Borrar todo</button>
           <button class="ox-btn ox-btn--secondary" disabled>Deshabilitado</button>
           <button class="ox-iconbtn" data-tip="Botón de ícono"><i data-icon="settings"></i></button>
+          <button class="ox-iconbtn" disabled><i data-icon="trash"></i></button>
           <button class="ox-btn ox-btn--sm ox-btn--secondary">Chico</button>
           <button class="ox-btn ox-btn--lg ox-btn--secondary">Grande</button>
         </div>`)}
@@ -215,6 +231,10 @@ export function designHTML() {
               <button class="ox-tab" data-value="2">Detalle <span class="ox-tab__count">12</span></button>
               <button class="ox-tab" data-value="3">Historial</button>
             </div>
+            <div class="ox-row" style="gap:6px">
+              <span class="ox-kbd">Ctrl</span><span class="ox-kbd">S</span>
+              <span class="ox-meta">una tecla, dibujada</span>
+            </div>
           </div>
         </div>`)}
 
@@ -226,6 +246,37 @@ export function designHTML() {
           <button class="ox-btn ox-btn--secondary ox-flashable" id="demo-confirm">Confirmación destructiva</button>
           <button class="ox-btn ox-btn--secondary ox-flashable" id="demo-toast">Toast</button>
           <button class="ox-btn ox-btn--secondary ox-flashable" id="demo-toast-err">Toast de error</button>
+        </div>`)}
+
+      ${section('Reescribir un bloque', 'Un <span class="ox-mono">innerHTML</span> a secas es un corte: lo viejo se va en el mismo cuadro en que llega lo nuevo. <span class="ox-mono">swap(el, html, { relevo })</span> distingue los casos: lo que <b>aparece</b> se funde, lo que <b>se va</b> termina de irse, un estado que <b>reemplaza</b> a otro hace relevo en el mismo lugar, y un cambio de <b>valores</b> se escribe en el lugar sin volver a animar. Tocá los estados en cualquier orden, rápido también.', `
+        <div class="ox-row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap" id="demo-swap-btns">
+          <button class="ox-btn ox-btn--ghost ox-btn--sm" data-swap="pista">Pista</button>
+          <button class="ox-btn ox-btn--ghost ox-btn--sm" data-swap="cargando">Cargando</button>
+          <button class="ox-btn ox-btn--ghost ox-btn--sm" data-swap="resultado">Resultado</button>
+          <button class="ox-btn ox-btn--ghost ox-btn--sm" data-swap="vacio">Vaciar</button>
+        </div>
+        <div class="ox-card" style="max-width:420px">
+          <div class="ox-card__body">
+            <div id="demo-swap" style="display:flex;align-items:center;gap:10px;min-height:40px"></div>
+          </div>
+        </div>`)}
+
+      ${section('Mostrar y esconder', 'Lo que se prende con <span class="ox-mono">el.hidden</span> no aparece de golpe: con <span class="ox-mono">.ox-plegable</span> el alto se pliega mientras se desvanece, y lo de abajo se corre de a poco en vez de saltar. <span class="ox-mono">.ox-plegable--ancho</span> hace lo mismo en una fila, con los de al lado. El JS no cambia: sigue siendo <span class="ox-mono">hidden</span>. Si manejás una clase y tenés un envoltorio, <span class="ox-mono">.ox-reveal</span>.', `
+        <div class="ox-row" style="gap:8px;margin-bottom:12px">
+          <button class="ox-btn ox-btn--ghost ox-btn--sm" id="demo-plegar">Opciones avanzadas</button>
+          <button class="ox-btn ox-btn--ghost ox-btn--sm" id="demo-plegar-ancho">Dato del medio</button>
+        </div>
+        <div class="ox-card" style="max-width:420px">
+          <div class="ox-card__body">
+            <div class="ox-plegable" id="demo-plegable" hidden>
+              <div class="ox-meta" style="padding-bottom:12px">Lo que estaba escondido. Todo lo de abajo se corre con él.</div>
+            </div>
+            <div class="ox-row" id="demo-plegable-fila" style="gap:8px;--ox-plegable-gap:8px">
+              <span class="ox-chip">primero</span>
+              <span class="ox-chip ox-plegable--ancho" id="demo-plegable-ancho">el del medio</span>
+              <span class="ox-chip">último</span>
+            </div>
+          </div>
         </div>`)}
 
       ${section('Métricas y medidores', '', `
@@ -282,10 +333,24 @@ export function designHTML() {
           </table>
         </div>`)}
 
-      ${section('Esfumado del scroll', 'Donde el scroll recorta, el contenido se desvanece. Un corte duro se lee como un bug; el fade dice «hay más, seguí». El contenedor lleva padding ≥ el tamaño del fade, para que en reposo la banda esfumada no coma el primer ni el último ítem.', `
-        <div class="ox-sunken" style="max-width:420px;height:180px;overflow:hidden">
-          <div class="ox-scroll" style="height:100%;padding-left:14px;padding-right:14px">
-            ${Array.from({ length: 14 }, (_, i) => `<div style="padding:7px 0;font-size:12px;color:var(--ox-text-2);box-shadow:inset 0 -1px 0 var(--ox-line)">Elemento de lista ${i + 1}</div>`).join('')}
+      ${section('Esfumado del scroll', 'Donde el scroll recorta <b>al aire</b>, el contenido se desvanece: un corte al aire se lee como un bug, y el fade dice «hay más, seguí». Pero el fade no va en todo corte — va donde nada más explica el límite. Si de ese lado hay una línea, la línea YA es el límite: el esfumado encima la ensucia y además miente, porque el contenido no se pierde en la nada sino que muere contra un borde. Ese lado se apaga con <span class="ox-mono">.ox-scroll--line-top</span> / <span class="ox-mono">--line-bottom</span>. Los dos casos, con la misma lista:', `
+        <div class="ox-row" style="gap:20px;align-items:flex-start;flex-wrap:wrap">
+          <div class="ox-col" style="gap:8px">
+            <span class="ox-meta">Sin borde — se esfuma de los dos lados</span>
+            <div style="width:296px;height:180px">
+              <div class="ox-scroll" style="height:100%;--ox-fade:20px">
+                ${fadeDemoRows}
+              </div>
+            </div>
+          </div>
+          <div class="ox-col" style="gap:8px">
+            <span class="ox-meta">Con borde — corta limpio contra él</span>
+            <div class="ox-sunken" style="width:296px;height:180px;overflow:hidden">
+              <div class="ox-scroll ox-scroll--line-top ox-scroll--line-bottom"
+                   style="height:100%;padding-left:14px;padding-right:14px;--ox-fade:20px">
+                ${fadeDemoRows}
+              </div>
+            </div>
           </div>
         </div>`)}
 
@@ -372,12 +437,28 @@ export function wireDesign(rootEl) {
       .map((p) => p.replace('--ox-mono-', '')),
   )].sort() : [];
 
+  /* Los botones se arman una vez y después solo cambian de variante. Antes se
+     rehacían con innerHTML en cada click: el elegido pasaba a primario de un
+     cuadro al otro (era un nodo nuevo, sin de dónde transicionar) y el
+     destello del click se iba con el nodo viejo. La vitrina es lo que se
+     copia: tiene que mostrar el patrón bueno. */
   const pintarMono = () => {
     if (!monoHost) return;
-    const hoy = getComputedStyle(root).getPropertyValue('--ox-mono').trim();
-    monoHost.innerHTML = monoIds.map((id) => `
-      <button class="ox-btn ox-btn--${hoy.includes(`--ox-mono-${id}`) ? 'primary' : 'secondary'} ox-flashable"
-              data-mono="${id}" style="font-family:var(--ox-mono-${id})">${id}</button>`).join('');
+    if (!monoHost.children.length) {
+      monoHost.innerHTML = monoIds.map((id) => `
+        <button class="ox-btn ox-flashable" data-mono="${id}" style="font-family:var(--ox-mono-${id})">${id}</button>`).join('');
+    }
+    /* getComputedStyle RESUELVE el var() de una propiedad propia: devuelve la
+       familia, no `var(--ox-mono-roboto)`. Se compara la familia de cada
+       token con la que quedó. Antes se buscaba el nombre del token adentro
+       del valor, no aparecía nunca, y ningún botón salía elegido. */
+    const cs = getComputedStyle(root);
+    const hoy = cs.getPropertyValue('--ox-mono').trim();
+    for (const b of monoHost.querySelectorAll('[data-mono]')) {
+      const es = cs.getPropertyValue(`--ox-mono-${b.dataset.mono}`).trim() === hoy;
+      b.classList.toggle('ox-btn--primary', es);
+      b.classList.toggle('ox-btn--secondary', !es);
+    }
   };
   pintarMono();
 
@@ -425,9 +506,6 @@ export function wireDesign(rootEl) {
   const tabs = rootEl.querySelector('#demo-tabs');
   if (tabs) bindSwitcher(tabs, () => {});
 
-  const stepper = rootEl.querySelector('#demo-stepper');
-  if (stepper) bindStepper(stepper);
-
   const slider = rootEl.querySelector('#demo-slider');
   if (slider) {
     const sync = () => syncSlider(slider);
@@ -435,13 +513,29 @@ export function wireDesign(rootEl) {
     slider.addEventListener('input', sync);
   }
 
+  const stepper = rootEl.querySelector('#demo-stepper');
+  if (stepper) bindStepper(stepper);
+
+  let modelo = rootEl.querySelector('#demo-select .ox-select__value')?.textContent.trim();
   rootEl.querySelector('#demo-select')?.addEventListener('click', (e) => {
     const btn = e.currentTarget;
     const val = btn.querySelector('.ox-select__value');
-    Menu.show(btn, ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4.5', 'minimax-m3', 'qwen3.5-9b'].map((m) => ({
+    Menu.show(btn, ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4.5', 'minimax-m3', 'qwen3.5-9b'].map((m, i) => ({
       label: m,
-      selected: val.textContent === m,
-      onSelect: () => { val.textContent = m; },
+      // La aclaración atenuada: como «del sistema» en una impresora.
+      hint: i === 0 ? 'por defecto' : '',
+      selected: modelo === m,
+      /* Un valor por otro: relevo en el mismo lugar, no un textContent que
+         cambia de un cuadro al otro. Se recuerda en `modelo` porque durante
+         el relevo el textContent junta lo que se va con lo que llega. Elegir
+         el que ya estaba no hace nada: swap() recuerda recién después de su
+         primer uso (el valor de arranque lo escribió el HTML), y la primera
+         vez relevaba la misma palabra por sí misma. */
+      onSelect: () => {
+        if (m === modelo) return;
+        modelo = m;
+        swap(val, esc(m), { relevo: true });
+      },
     })));
   });
 
@@ -454,7 +548,7 @@ export function wireDesign(rootEl) {
   rootEl.querySelector('#demo-modal')?.addEventListener('click', () => {
     Modal.show({
       title: 'Nuevo elemento',
-      sub: 'El modal atrapa el foco, cierra con Escape y devuelve una promesa con el valor del botón que apretaste.',
+      sub: 'Arranca en el primer campo, Enter en un renglón aplica, atrapa el foco, cierra con Escape y devuelve una promesa con el valor del botón que apretaste.',
       body: `
         <div class="ox-col" style="gap:16px">
           <div class="ox-field">
@@ -468,7 +562,7 @@ export function wireDesign(rootEl) {
         </div>`,
       actions: [
         { label: 'Cancelar', value: null },
-        { label: 'Crear', value: true, variant: 'primary', autofocus: true },
+        { label: 'Crear', value: true, variant: 'primary' },
       ],
     }).then((v) => v && Toast.show({ title: 'Devolvió true', text: 'Esto es la vitrina: no se creó nada.', icon: 'info' }));
   });
@@ -487,6 +581,27 @@ export function wireDesign(rootEl) {
 
   rootEl.querySelector('#demo-toast-err')?.addEventListener('click', () =>
     Toast.error('No se pudo guardar', 'EPERM: el archivo está tomado por otro proceso. Se reintentó 5 veces.'));
+
+  /* swap(): los cuatro estados del bloque de demo. Vaciar no lleva relevo —se
+     va—; los otros tres se reemplazan entre sí. */
+  const SWAP = {
+    pista: '<span class="ox-meta">Escribí algo para empezar.</span>',
+    cargando: `${Icons.spinner()}<span class="ox-meta">Buscando…</span>`,
+    resultado: `${Icons.svg('check')}<span>Tres coincidencias</span><span class="ox-chip">n-0042</span>`,
+    vacio: '',
+  };
+  const swapBox = rootEl.querySelector('#demo-swap');
+  swap(swapBox, SWAP.pista);
+  rootEl.querySelector('#demo-swap-btns')?.addEventListener('click', (e) => {
+    const k = e.target.closest('[data-swap]')?.dataset.swap;
+    if (k) swap(swapBox, SWAP[k], { relevo: k !== 'vacio' });
+  });
+
+  /* Mostrar y esconder: el JS solo cambia `hidden`, el CSS pliega. */
+  const plegable = rootEl.querySelector('#demo-plegable');
+  rootEl.querySelector('#demo-plegar')?.addEventListener('click', () => { plegable.hidden = !plegable.hidden; });
+  const ancho = rootEl.querySelector('#demo-plegable-ancho');
+  rootEl.querySelector('#demo-plegar-ancho')?.addEventListener('click', () => { ancho.hidden = !ancho.hidden; });
 
   /* Íconos: click = copiar la etiqueta lista para pegar. */
   rootEl.querySelector('#icon-grid')?.addEventListener('click', (e) => {

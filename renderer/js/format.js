@@ -40,6 +40,11 @@ function nf(min, max = min) {
 /** Un número con exactamente `d` decimales. Es el reemplazo de toFixed(d). */
 const dec = (n, d) => nf(d).format(n);
 
+/** Hasta `d` decimales y sin ceros de relleno: 1,8 · 4,5 · 14 · 215,9. Para
+    medidas y grosores que van al lado de su unidad («1,8 pt», «215,9 ×
+    279,4 mm»): escritos crudos salían con punto. Salió de Quire. */
+export const fmtDec = (n, d = 1) => nf(0, d).format(n);
+
 /** Duración legible: 840ms · 2,4s · 3m 07s · 1h 12m */
 export function fmtDur(ms) {
   if (ms == null) return '—';

@@ -279,6 +279,25 @@ app.whenReady().then(async () => {
     const cortes = await js(AUDITAR_ANILLOS);
     ok(`${v}: ningún anillo de foco se corta ni roza un canto`, cortes.length === 0, '\n      ' + cortes.join('\n      '));
   }
+
+  /* Con un documento abierto. Sin él, el lector pinta su estado vacío y sale:
+     el visor, la barra del lector, el panel, la barra de tinta y el preview de
+     Imprimir no existían cuando se auditaba (el commit 3a682ac arregló el
+     anillo del visor y este smoke nunca lo había medido). */
+  await js(`(async () => {
+    const archivo = await window.onyx.docs.leer(${JSON.stringify(path.join(ROOT, 'renderer', 'vendor', 'cobayo.pdf'))});
+    await (await import('./js/estado.js')).abrir(archivo);
+  })()`);
+  await click('[data-view="lector"]');
+  await sleep(1500);
+  const conDoc = [['lector', null], ['lector con la tinta prendida', '#qr-tinta-toggle'], ['imprimir', null], ['paginas', null], ['herramientas', null]];
+  for (const [nombre, boton] of conDoc) {
+    if (boton) await click(boton);
+    else await click(`[data-view="${nombre}"]`);
+    await sleep(nombre === 'imprimir' ? 2200 : 1200);
+    const cortes = await js(AUDITAR_ANILLOS);
+    ok(`${nombre}, con documento: ningún anillo de foco se corta`, cortes.length === 0, '\n      ' + cortes.join('\n      '));
+  }
   await js(`document.getElementById('aud-notr')?.remove()`);
 
   /* ── 9-ter. El relevo de vistas ────────────────────────────────────────────
@@ -291,9 +310,10 @@ app.whenReady().then(async () => {
      todo lo que las dos vistas tienen en el mismo lugar (títulos, barras).
      Ahora es un fundido: la nueva ya está entera y quieta DEBAJO del calco,
      que es opaco, y lo único que se mueve es la opacidad del calco. La
-     pantalla está tapada en todo momento. Lo mismo al cambiar de documento,
-     que es un refresh({ animar: true }). Se muestrea cada 40 ms y se mide la
-     curva, no se mira. */
+     pantalla está tapada en todo momento. Lo mismo al cambiar de documento
+     o al repintar la vista: desde que Quire trae el router y el paint() de
+     Onyx (octubre 2026), todo Router.refresh() es ese mismo fundido. Se
+     muestrea cada 40 ms y se mide la curva, no se mira. */
   console.log('\n9-ter. El relevo de vistas');
   const MEDIR_RELEVO = (disparar) => `(async () => {
     const view = document.getElementById('view');
@@ -337,15 +357,55 @@ app.whenReady().then(async () => {
   await click('[data-view="ajustes"]');
   await sleep(800);
   revisarRelevo('navegar', await js(MEDIR_RELEVO(`document.querySelector('.ox-navitem[data-view="piezas"]').click()`)));
-  revisarRelevo('cambiar de documento', await js(MEDIR_RELEVO(`await import('./js/router.js').then((m) => m.refresh({ animar: true }))`)));
-  const enElLugar = await js(`(async () => {
+  revisarRelevo('repintar la vista', await js(MEDIR_RELEVO(`await import('./js/router.js').then((m) => m.refresh())`)));
+
+  /* ── 9-quater. Repintar no pierde el lugar ─────────────────────────────────
+     Ajustes se repinta al elegir impresora o al releerlas. Antes era un
+     innerHTML en seco: lo viejo se cortaba, el scroll volvía arriba y el foco
+     se perdía. Ahora lo de antes se esfuma en un calco y lo nuevo queda
+     asentado debajo, en el mismo scroll y con el foco donde estaba. */
+  console.log('\n9-quater. Repintar no pierde el lugar');
+  await click('[data-view="ajustes"]');
+  await sleep(800);
+  const lugar = await js(`(async () => {
     const m = await import('./js/router.js');
+    const sc = document.querySelector('#view > .ox-scroll');
+    const holgura = sc.scrollHeight - sc.clientHeight;
+    sc.scrollTop = Math.min(120, holgura);
+    // Sin preventScroll, enfocar corría el scroll antes de repintar.
+    document.getElementById('set-impresora')?.focus({ preventScroll: true });
+    const antes = sc.scrollTop;
+    const conFoco = document.activeElement?.id;
     m.refresh();
-    const hay = !!document.querySelector('.ox-main--saliente');
-    await new Promise((r) => setTimeout(r, 300));
-    return hay;
+    const calco = !!document.querySelector('.ox-main--saliente');
+    await new Promise((r) => setTimeout(r, 0));
+    const corriendo = document.getElementById('view').getAnimations({ subtree: true })
+      .filter((a) => !(a instanceof CSSTransition) && a.playState === 'running' && a.effect?.getTiming().iterations !== Infinity)
+      .map((a) => a.animationName || a.effect?.target?.className || '?');
+    const r = { holgura, antes, despues: document.querySelector('#view > .ox-scroll')?.scrollTop, conFoco,
+      foco: document.activeElement?.id, calco, corriendo };
+    await new Promise((ok) => setTimeout(ok, 400));
+    return r;
   })()`);
-  ok('refrescar sin animar sigue siendo en el lugar: sin calco', enElLugar === false);
+  ok('repintar Ajustes es un fundido (lo de antes en un calco)', lugar.calco, JSON.stringify(lugar));
+  ok('y lo nuevo queda en el mismo scroll', lugar.antes > 0 && lugar.despues === lugar.antes, JSON.stringify(lugar));
+  ok('con el foco donde estaba', lugar.conFoco === 'set-impresora' && lugar.foco === 'set-impresora', JSON.stringify(lugar));
+  ok('y sin nada que vuelva a entrar', lugar.corriendo.length === 0, JSON.stringify(lugar));
+
+  /* La cápsula del segmentado y el subrayado de los tabs se medían en raf2:
+     nacían en ancho 0 contra la izquierda y crecían en cada montaje. Se miden
+     en el mismo tick en que se navega. */
+  const capsulas = await js(`(async () => {
+    const r = {};
+    for (const [v, sel, pseudo] of [['convertir', '#cv-destino', '::before'], ['herramientas', '#herr-tabs', '::after'], ['piezas', '#view .ox-segmented', '::before']]) {
+      document.querySelector('.ox-navitem[data-view="' + v + '"]').click();
+      const el = document.querySelector(sel);
+      r[v] = el ? Math.round(parseFloat(getComputedStyle(el, pseudo).width)) : null;
+      await new Promise((ok) => setTimeout(ok, 700));
+    }
+    return r;
+  })()`);
+  ok('la cápsula y el subrayado nacen en su lugar, no en ancho 0', Object.values(capsulas).every((w) => w > 0), JSON.stringify(capsulas));
 
   /* No hay limpieza que hacer: este archivo ya no escribe nada en disco. La
      que había borraba el ítem que creaba la app demo y reponía el ajuste

@@ -1,0 +1,113 @@
+/* QUIRE — Organizar páginas.
+   Era un tramo de quire.css; cada zona tiene su hoja desde octubre de 2026.
+   Se cargan en el orden de index.html, que es el de antes: la cascada no cambia. */
+
+/* ═══ ORGANIZAR PÁGINAS ══════════════════════════════════════════════════════ */
+
+.qr-org {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.qr-org__barra,
+.qr-org__pie {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  padding: var(--ox-2) var(--ox-6);
+  flex: 0 0 auto;
+  user-select: none;
+}
+
+.qr-org__barra { box-shadow: inset 0 -1px 0 var(--ox-line); }
+/* Mismo alto que el pie del rail, que le queda pegado a la izquierda: las dos
+   líneas de arriba se leen como una sola. Ver --qr-pie. */
+.qr-org__pie {
+  box-shadow: inset 0 1px 0 var(--ox-line);
+  gap: var(--ox-3);
+  min-height: var(--qr-pie);
+}
+
+/* Sin esfumado en ningún lado: los dos bordes ya están cerrados por una línea
+   —la barra arriba, el pie abajo—, así que los dos cortes son limpios. */
+.qr-org__grilla {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: var(--ox-4);
+  align-content: start;
+  padding: var(--ox-4) var(--ox-6);
+  background: var(--ox-sunken);
+}
+
+.qr-org__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ox-2);
+  padding: var(--ox-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  cursor: pointer;
+  transition: var(--tr-color), transform var(--ox-t-2) var(--ox-ease-soft);
+}
+
+.qr-org__item:hover { background: var(--ox-wash-1); }
+.qr-org__item.is-sel { background: var(--ox-wash-2); }
+
+.qr-org__hoja {
+  display: block;
+  width: 100%;
+  background: #fff;
+  border-radius: 1px;
+  overflow: hidden;
+  box-shadow: var(--ox-e1);
+  /* El giro se ve en la miniatura antes de escribir nada: el ángulo se aplica
+     acá y la rotación real recién va al PDF cuando se guarda. */
+  transition: box-shadow var(--ox-t-2) var(--ox-ease-soft);
+}
+
+.qr-org__item.is-sel .qr-org__hoja {
+  box-shadow: var(--ox-e2), 0 0 0 2px var(--ox-accent);
+}
+
+.qr-org__lienzo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  animation: qr-aparecer var(--ox-t-3) var(--ox-ease) forwards;
+}
+
+/* La miniatura de una página girada se muestra girada: su contenedor ya tiene
+   el aspect-ratio invertido, así que el lienzo rota adentro. */
+.qr-org__hoja[data-rot="90"] .qr-org__lienzo,
+.qr-org__hoja[data-rot="270"] .qr-org__lienzo {
+  width: 100%;
+  height: 100%;
+}
+
+.qr-org__hoja[data-rot="90"] { transform: none; }
+
+.qr-org__pie2 {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-1);
+  font-size: var(--ox-fs-10);
+  color: var(--ox-text-4);
+}
+
+.qr-org__item.is-sel .qr-org__pie2 { color: var(--ox-text-2); }
+
+.qr-iconbtn-danger:not(:disabled):hover {
+  color: var(--ox-danger);
+  background: var(--ox-danger-wash);
+}
+
+#org-cuenta.is-vacia { color: var(--ox-text-4); }
