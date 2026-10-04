@@ -11,14 +11,17 @@ import './iconos.js';                    // registra los íconos del dominio
 import { Icons } from './icons.js';
 import { Tooltip, Toast, Menu, Modal } from './overlays.js';
 import Router from './router.js';
-import { initClickFlash, initScrollFades, raf2 } from './motion.js';
+import {
+  initClickFlash, initScrollFades, raf2, swap, frase, tick, deslizarAncho, bindSwitcher, exit,
+} from './motion.js';
 import { paint, head, empty, esc, attempt, copy, colorToken } from './ui.js';
-import { fmtBytes, relTime } from './format.js';
+import { fmtBytes, fmtDec, plural, relTime } from './format.js';
 import { designHTML, wireDesign } from './design-view.js';
 import * as Actualizar from './actualizar.js';
 import {
   S, abrir, cerrar, activar, activarRelativa, mover, rutasAbiertas, posicionActiva,
   guardarTodo, cargarImpresoras, emitir, alCambiar, impresoraActual, MAX_PESTANAS,
+  estaAbierto, hayLugar, cambiosDePaginas, papelesDisponibles,
 } from './estado.js';
 import * as Pestanas from './pestanas.js';
 import { viewLector, atajosLector } from './views/lector.js';
@@ -31,27 +34,142 @@ const api = window.onyx;
 
 /* ══ Abrir documentos ════════════════════════════════════════════════════════ */
 
+const LLENO = `Ya hay ${MAX_PESTANAS} documentos abiertos. Cerrá uno para abrir otro.`;
+
 async function abrirConDialogo() {
-  const archivo = await attempt(() => api.docs.elegir(), { errorTitle: 'No se pudo abrir el archivo' });
-  if (!archivo) return;                  // el usuario canceló
-  await cargar(archivo);
+  /* Con las cuatro pestañas ocupadas el diálogo no se abre: dejaba buscar y
+     elegir un archivo, lo leía entero y recién ahí decía que no había lugar
+     (shell-40, ux-24). Reabrir uno que ya está sigue siendo posible: por el
+     arrastre o el doble click, que pasan por abrirVarias. */
+  if (!hayLugar()) { Toast.error('No entra otro documento', LLENO); return; }
+  /* Varios a la vez, con Ctrl o Shift en el diálogo: con pestañas para cuatro,
+     elegir de a uno era la única forma (ux-12). Vuelven las rutas, y cada una
+     se lee recién cuando le toca. */
+  const rutas = await attempt(() => api.docs.elegir({ varios: true }), { errorTitle: 'No se pudo abrir el archivo' });
+  if (rutas?.length) await abrirVarias(rutas);
 }
 
-async function abrirRuta(ruta) {
-  const archivo = await attempt(() => api.docs.leer(ruta), { errorTitle: 'No se pudo abrir el archivo' });
-  if (archivo) await cargar(archivo);
+/* ── Las aperturas, en fila ──────────────────────────────────────────────────
+   Toda apertura por ruta (el diálogo, lo que soltás, el doble click en el
+   Explorador, la sesión del arranque) pasa por UNA fila: cada tanda espera a
+   la anterior. Corrían en paralelo, y hayLugar() no las frenaba —cuenta lo
+   que está en enCurso, que se llena recién adentro de abrir(), después de
+   leer el archivo—: con dos lugares y tres PDF elegidos en el Explorador se
+   leían los tres del disco, el tercero terminaba en «No se pudo abrir el
+   PDF» en vez de «Uno quedó afuera», la franja salía en el orden en que
+   terminaron las lecturas y cada uno pasaba por el lector al abrirse
+   (auditoría 2F).
+
+   `enFila` cuenta las tandas encoladas o corriendo, y es lo que sostiene el
+   «Abriendo…» (ver seguirCargando): sube ANTES de leer, que es lo que más
+   tarda, y no baja entre dos documentos de la misma tanda ni entre dos
+   tandas seguidas. */
+let fila = Promise.resolve();
+let enFila = 0;
+
+function encolar(tarea) {
+  enFila += 1;
+  seguirCargando();
+  const turno = fila.then(tarea).finally(() => { enFila -= 1; seguirCargando(); });
+  fila = turno.catch(() => {});
+  return turno;
 }
 
-async function cargar(archivo) {
-  await attempt(async () => {
-    await abrir(archivo);
+const abrirVarias = (lista) => encolar(() => abrirTanda(lista));
+
+/* Windows lanza un proceso por archivo al elegir varios PDF y apretar Enter, y
+   a esta ventana le llega un 'docs:abrir' por cada uno, casi juntos. Los que
+   llegan dentro de RAFAGA_MS desde el primero van en UNA tanda: un solo aviso
+   de abiertos (o de los que quedaron afuera) y solo el primero queda a la
+   vista. De a uno, cada uno se activaba al abrirse y el lector hacía un
+   fundido por documento. La ventana arranca con el primero y no se estira:
+   un goteo largo no posterga la tanda para siempre, y lo que llegue tarde va
+   en la tanda siguiente, que igual espera su turno en la fila. */
+const RAFAGA_MS = 100;
+let rafaga = [];
+let relojRafaga = 0;
+
+function abrirRuta(ruta) {
+  rafaga.push(ruta);
+  if (relojRafaga) return;
+  relojRafaga = setTimeout(() => {
+    const lista = rafaga;
+    rafaga = [];
+    relojRafaga = 0;
+    abrirVarias(lista);
+  }, RAFAGA_MS);
+}
+
+/**
+ * Abre una tanda de PDFs por ruta: los del diálogo, los que soltaste, los del
+ * doble click en el Explorador. En orden y de a uno, como la sesión: el
+ * primero queda a la vista mientras los demás siguen cargando, y la franja
+ * los muestra en el orden en que llegaron. Corre siempre en su turno de la
+ * fila (abrirVarias), nunca suelta.
+ *
+ * · Uno que ya está abierto no se vuelve a leer del disco: te lleva a su
+ *   pestaña y lo dice («Ya estaba abierto»), en vez del aviso de abierto con
+ *   páginas y tamaño como si fuera nuevo (shell-40).
+ * · Hasta llenar las pestañas. Los que sobran no desaparecen en silencio: un
+ *   aviso dice cuántos quedaron afuera y por qué (shell-28, ux-12).
+ */
+async function abrirTanda(lista) {
+  const rutas = [...new Set((lista || []).filter(Boolean))];
+  const abiertos = [];
+  const sobran = [];
+  let primera = null;          // la pestaña que queda a la vista
+  let yaEstaba = null;
+
+  for (const ruta of rutas) {
+    if (estaAbierto(ruta)) {
+      let p = S.pestanas.find((x) => x.doc?.ruta === ruta);
+      /* Abriéndose por otro lado (todavía en enCurso, sin pestaña): se espera a
+         que entre. Se salteaba sin decir nada, porque estaAbierto() daba que
+         sí y en la franja todavía no estaba. abrir() con una ruta en curso no
+         lee nada: espera esa misma apertura. */
+      if (!p) {
+        const doc = await abrir({ ruta }, { activar: false }).catch(() => null);
+        p = doc ? S.pestanas.find((x) => x.doc === doc) : null;
+      }
+      if (p && !primera) {
+        primera = p;
+        yaEstaba = p;
+        activar(p.id);
+        Router.go('lector');
+      }
+      continue;
+    }
+    if (!hayLugar()) { sobran.push(ruta); continue; }
+
+    const archivo = await attempt(() => api.docs.leer(ruta), { errorTitle: 'No se pudo abrir el archivo' });
+    if (!archivo) continue;
+    // Leer tarda: lo que se abrió por fuera de la fila mientras tanto también cuenta.
+    if (!hayLugar()) { sobran.push(ruta); continue; }
+    const doc = await attempt(() => abrir(archivo, { activar: !primera }), { errorTitle: 'No se pudo abrir el PDF' });
+    if (!doc) continue;
+    abiertos.push({ doc, tamano: archivo.tamano });
+    if (!primera) {
+      primera = S.pestanas.find((x) => x.doc === doc) || null;
+      Router.go('lector');
+    }
+  }
+
+  if (abiertos.length === 1) {
+    const { doc, tamano } = abiertos[0];
+    Toast.show({ title: doc.nombre, text: `${plural(doc.paginas, 'página', 'páginas')} · ${fmtBytes(tamano)}`, icon: 'quire' });
+  } else if (abiertos.length > 1) {
+    Toast.show({ title: `${abiertos.length} documentos abiertos`, text: abiertos.map((a) => a.doc.nombre).join(' · '), icon: 'quire' });
+  } else if (yaEstaba) {
+    Toast.show({ title: yaEstaba.doc.nombre, text: 'Ya estaba abierto: es la pestaña que tenés adelante.', icon: 'quire' });
+  }
+  if (sobran.length) {
     Toast.show({
-      title: archivo.nombre,
-      text: `${S.doc.paginas} ${S.doc.paginas === 1 ? 'página' : 'páginas'} · ${fmtBytes(archivo.tamano)}`,
-      icon: 'quire',
+      title: sobran.length === 1 ? 'Uno quedó afuera' : `${sobran.length} quedaron afuera`,
+      text: `Entran ${MAX_PESTANAS} documentos a la vez. Cerrá alguno para abrir el resto.`,
+      icon: 'info',
+      duration: 7000,
     });
-    Router.go('lector');
-  }, { errorTitle: 'No se pudo abrir el PDF' });
+  }
 }
 
 /* Qué documentos quedan abiertos, para rearmar la sesión al arrancar. Se
@@ -69,31 +187,44 @@ const recordarSesion = () =>
  * otras siguen cargando. En paralelo llegarían desordenadas y la franja
  * quedaría barajada respecto de cómo la dejaste.
  *
+ * Las demás entran SIN activarse y directo en su lugar de la franja. Antes
+ * cada una quedaba activa al abrirse: el lector hacía un fundido a cada
+ * documento y al final volvía al primero, y la franja se reordenaba a la
+ * vista con el mover() del final (shell-04, lector-20).
+ *
  * Un archivo que ya no está se saltea sin decir nada: que Quire arranque con
  * un cartel de error porque moviste un PDF la semana pasada es peor que
  * arrancar con una pestaña menos. Al terminar, lo que se pudo abrir se vuelve
  * a guardar, así la lista se limpia sola.
+ *
+ * Corre en la fila de aperturas (encolar), como abrirVarias: un PDF que llega
+ * por doble click mientras se rearma la sesión espera a que termine, en vez
+ * de meterse en el medio de la franja.
  */
 async function restaurarSesion() {
-  const rutas = (S.settings.ultimosDocumentos || []).slice(0, MAX_PESTANAS);
+  const rutas = [...new Set(S.settings.ultimosDocumentos || [])].slice(0, MAX_PESTANAS);
   if (!rutas.length) return;
 
+  /* El orden final de la franja: las demás en su orden, y la que estabas
+     leyendo en el lugar donde la habías dejado. Se abrió primera para verla
+     enseguida, no porque fuera la primera. */
+  const final = rutas.slice(1);
+  final.splice(Math.max(0, Math.min(final.length, S.settings.posicionActiva || 0)), 0, rutas[0]);
+
+  // Cada una entra delante de las ya abiertas que en la franja final van
+  // después que ella: cuenta solo las que se pudieron abrir.
+  const lugares = [];
   for (const ruta of rutas) {
+    const lugar = final.indexOf(ruta);
     try {
-      await abrir(await api.docs.leer(ruta));
+      await abrir(await api.docs.leer(ruta), {
+        activar: ruta === rutas[0],
+        posicion: lugares.filter((l) => l < lugar).length,
+      });
+      lugares.push(lugar);
     } catch (err) {
       console.warn('[sesión] no se pudo reabrir', ruta, err.message);
     }
-  }
-
-  /* La activa quedó siendo la ÚLTIMA que se abrió, y tiene que ser la primera
-     de la lista: es la que estabas leyendo. Y después vuelve al lugar de la
-     franja donde la habías dejado: se abrió primera para verla enseguida, no
-     porque fuera la primera. */
-  const primera = S.pestanas[0];
-  if (primera) {
-    activar(primera.id);
-    mover(primera.id, S.settings.posicionActiva || 0);
   }
 }
 
@@ -137,8 +268,8 @@ function cablearArrastre() {
       return;
     }
 
-    const pdf = archivos.find((f) => /\.pdf$/i.test(f.name));
-    if (!pdf) {
+    const pdfs = archivos.filter((f) => /\.pdf$/i.test(f.name));
+    if (!pdfs.length) {
       const otros = convertibles.filter((r) => !/\.pdf$/i.test(r));
       if (otros.length) {
         const n = await encolarConvertibles(otros);
@@ -149,14 +280,16 @@ function cablearArrastre() {
          app SÍ sabe qué hacer con una imagen, así que el aviso dice dónde en
          vez de terminar en "no". */
       if (archivos.some((f) => /\.(png|jpe?g|webp)$/i.test(f.name))) {
-        Toast.error('Acá se abren PDFs', 'Para volver imágenes un PDF, andá a Herramientas → Combinar.');
+        Toast.error('Acá se abren PDFs', 'Para volver imágenes un PDF, andá a Herramientas, sección Combinar.');
       } else if (archivos.length) {
         Toast.error('Eso no es un PDF', archivos[0].name);
       }
       return;
     }
-    const ruta = api.docs.rutaDe(pdf);
-    if (ruta) await abrirRuta(ruta);
+    /* Todos los PDF que soltaste, en orden, hasta llenar las pestañas: se
+       abría solo el primero y los demás se ignoraban sin aviso (shell-28). */
+    const rutasPdf = pdfs.map((f) => api.docs.rutaDe(f)).filter(Boolean);
+    if (rutasPdf.length) await abrirVarias(rutasPdf);
     else Toast.error('No se pudo ubicar el archivo', 'Probá abrirlo desde el botón Abrir.');
   });
 
@@ -173,11 +306,17 @@ function viewPiezas() {
   }) + designHTML());
 
   wireDesign(document.getElementById('view'));
+  /* Con la API y sin `fill`: el style.animation con `both` de antes retenía
+     el último cuadro para siempre (transform y opacidad en línea), y eso
+     volvía al cuerpo de la vitrina bloque contenedor y frontera de backdrop
+     (shell-35). Duración y curva, de los tokens. */
   document.getElementById('replay')?.addEventListener('click', () => {
     const body = document.getElementById('design-body');
-    body.style.animation = 'none';
-    void body.offsetWidth;
-    body.style.animation = 'ox-glide-in 420ms var(--ox-ease) both';
+    const raiz = getComputedStyle(document.documentElement);
+    body?.animate([{ opacity: 0, transform: 'translateX(-10px)' }, { opacity: 1, transform: 'none' }], {
+      duration: parseFloat(raiz.getPropertyValue('--ox-t-4')) || 420,
+      easing: raiz.getPropertyValue('--ox-ease').trim() || 'ease-out',
+    });
   });
 }
 
@@ -189,11 +328,11 @@ function viewAjustes() {
 
   paint(head({
     title: 'Ajustes',
-    sub: 'Se guardan en settings.json, con escritura atómica',
+    sub: 'Se guardan solos',
     actions: '<button class="ox-btn ox-btn--secondary ox-btn--sm ox-flashable" id="set-refrescar"><i data-icon="retry"></i> Releer impresoras</button>',
   }) + `
     <div class="ox-scroll ox-grow" id="set-scroll">
-      <div style="max-width:640px">
+      <div class="qr-ajustes">
 
         <div class="ox-section">
           <div class="ox-section__head"><span class="ox-section__title">Impresora</span></div>
@@ -204,10 +343,17 @@ function viewAjustes() {
                 <span>${esc(S.impresora || 'Ninguna')}</span><i data-icon="chevronDown"></i>
               </button>
             </div>
+            <div class="ox-field">
+              <label class="ox-field__label">Papel por defecto</label>
+              <button class="ox-select" id="set-papel">
+                <span class="ox-select__value" id="set-papel-valor">${esc(papelPorDefecto())}</span><i data-icon="chevronDown"></i>
+              </button>
+              <span class="ox-field__hint">El que arranca elegido en Imprimir con cada documento nuevo.</span>
+            </div>
             ${imp ? `
             <div class="ox-kv">
               <span class="ox-kv__k">Ambas caras</span>
-              <span class="ox-kv__v">${imp.soportaDuplex ? 'Sí, el driver lo declara' : 'No'}</span>
+              <span class="ox-kv__v">${imp.soportaDuplex ? 'Sí, la impresora lo informa' : 'No'}</span>
               <span class="ox-kv__k">Color</span>
               <span class="ox-kv__v">${imp.soloMonocromo ? 'Solo blanco y negro' : 'Color'}</span>
               <span class="ox-kv__k">Tamaños</span>
@@ -240,14 +386,14 @@ function viewAjustes() {
               <label class="ox-field__label">Al abrir un documento</label>
               <div class="ox-segmented qr-angosto" id="set-zoom">
                 ${[['ancho', 'Ajustar al ancho'], ['pagina', 'Página entera'], ['fijo', '100%']]
-    .map(([id, label]) => `<button class="ox-segmented__opt${st.modoZoomInicial === id ? ' is-active' : ''}" data-value="${id}">${label}</button>`).join('')}
+    .map(([id, label]) => `<button class="ox-segmented__opt${(st.modoZoomInicial || 'ancho') === id ? ' is-active' : ''}" data-value="${id}">${label}</button>`).join('')}
               </div>
             </div>
             <label class="ox-row qr-fila">
               <button class="ox-switch${st.reabrirUltimo ? ' is-on' : ''}" id="set-reabrir"></button>
               <span class="ox-col qr-apilado">
-                <span class="ox-label">Reabrir el último documento</span>
-                <span class="ox-meta">Al arrancar, vuelve a cargar el PDF que estabas leyendo.</span>
+                <span class="ox-label">Reabrir los documentos que dejaste abiertos</span>
+                <span class="ox-meta">Al arrancar, vuelven las pestañas como las dejaste, con la que estabas leyendo al frente.</span>
               </span>
             </label>
           </div></div>
@@ -260,7 +406,7 @@ function viewAjustes() {
               <button class="ox-btn ox-btn--secondary ox-flashable" id="set-buscar-update">
                 <i data-icon="download"></i> Buscar ahora
               </button>
-              <span class="ox-meta ox-grow" id="set-update-estado">${esc(resumenActualizacion())}</span>
+              <span class="ox-meta ox-grow" id="set-update-estado" data-fase="${esc(Actualizar.leer().fase || '')}">${resumenActualizacion()}</span>
             </div>
             <label class="ox-row qr-fila">
               <button class="ox-switch${st.avisarActualizaciones !== false ? ' is-on' : ''}" id="set-avisar"></button>
@@ -291,19 +437,34 @@ function viewAjustes() {
   cablearAjustes();
 }
 
-/** En qué anda el actualizador, en una línea. */
+/** En qué anda el actualizador, en una línea (HTML ya escapado). Bajando, el
+    porcentaje va en un span propio: cambia veinte veces por segundo y se
+    escribe en el lugar, sin relevar la frase (ver cablearAjustes). */
 function resumenActualizacion() {
   const e = Actualizar.leer();
   switch (e.fase) {
     case 'buscando': return 'Buscando…';
     case 'al-dia': return 'Estás en la última versión.';
-    case 'disponible': return `Hay una versión nueva: ${e.version}.`;
-    case 'descargando': return `Bajando ${e.version}… ${Math.round((e.progreso?.pct || 0) * 100)}%`;
-    case 'listo': return `${e.version} lista: reiniciá para instalarla.`;
-    case 'error': return e.error || 'La última búsqueda falló.';
-    case 'sin-soporte': return e.motivo || 'Esta copia no se actualiza sola.';
+    case 'disponible': return `Hay una versión nueva: ${esc(e.version)}.`;
+    case 'descargando': return `Bajando ${esc(e.version)}… <span class="ox-num qr-pct">${pctActualizacion(e)}%</span>`;
+    case 'listo': return `${esc(e.version)} lista: reiniciá para instalarla.`;
+    case 'error': return esc(e.error || 'La última búsqueda falló.');
+    case 'sin-soporte': return esc(e.motivo || 'Esta copia no se actualiza sola.');
     default: return 'Todavía no se buscó.';
   }
+}
+
+const pctActualizacion = (e) => Math.round((e.progreso?.pct || 0) * 100);
+
+/** El papel que arranca elegido en Imprimir, como lo nombra la lista. Es el
+    que Imprimir va a usar DE VERDAD (planInicial: el guardado si la impresora
+    lo tiene, si no el primero de su lista), no el nombre guardado a secas: con
+    una impresora que no tiene ese tamaño el rótulo decía uno y se imprimía en
+    otro (auditoría 2F). */
+function papelPorDefecto() {
+  const pedido = S.settings?.papelDefecto || 'A4';
+  const papeles = papelesDisponibles();
+  return (papeles.find((p) => p.nombre === pedido) || papeles[0])?.nombre || pedido;
 }
 
 /** El borde muerto de la impresora, en los dos tamaños que más se usan. */
@@ -322,7 +483,7 @@ function areaImprimibleHTML(imp) {
     });
 
   if (!filas.length) return '';
-  return `<div class="ox-col" style="gap:6px">
+  return `<div class="ox-col qr-col-chica">
       <span class="ox-eyebrow">Área imprimible real</span>
       <div class="ox-kv">${filas.join('')}</div>
       <span class="ox-meta">Lo que queda afuera de ese rectángulo no lo alcanza el tóner, por más que el PDF lo tenga.</span>
@@ -332,10 +493,14 @@ function areaImprimibleHTML(imp) {
 function cablearAjustes() {
   const $ = (id) => document.getElementById(id);
 
+  /* El switch se mueve en el acto, y si guardar falla vuelve atrás (con su
+     misma transición): quedaba prendido aunque settings.json no hubiera
+     cambiado, y al volver a Ajustes aparecía apagado (shell-19, ux-35). */
   const toggle = (id, clave) => $(id)?.addEventListener('click', async (e) => {
-    const on = !e.currentTarget.classList.contains('is-on');
-    e.currentTarget.classList.toggle('is-on', on);
-    await guardar({ [clave]: on });
+    const sw = e.currentTarget;
+    const on = !sw.classList.contains('is-on');
+    sw.classList.toggle('is-on', on);
+    if (!(await guardar({ [clave]: on }))) sw.classList.toggle('is-on', !on);
   });
 
   toggle('set-duplex', 'duplexAsistido');
@@ -350,21 +515,56 @@ function cablearAjustes() {
   });
   /* La baja va por onLeave: sin eso, cada visita a Ajustes deja un oyente más
      apuntando a un nodo que ya no está en el DOM. */
-  Router.onLeave(Actualizar.alCambiar(() => {
+  /* La línea del estado no se reescribe con textContent: cambiaba de golpe
+     («Buscando…» → «Estás en la última versión.») (shell-18). Cada fase nueva
+     es un relevo (frase); bajando, solo cambia el número en su span, en el
+     lugar y sin destello: frase() destellaría veinte veces por segundo y la
+     línea quedaría teñida de acento toda la descarga. */
+  Router.onLeave(Actualizar.alCambiar((e) => {
     const el = $('set-update-estado');
-    if (el) el.textContent = resumenActualizacion();
+    if (!el) return;
+    if (e.fase === 'descargando' && el.dataset.fase === 'descargando') {
+      const n = el.querySelector(':scope > .qr-pct');
+      if (n) { n.textContent = `${pctActualizacion(e)}%`; return; }
+    }
+    el.dataset.fase = e.fase || '';
+    frase(el, resumenActualizacion());
   }));
 
-  $('set-zoom')?.querySelectorAll('.ox-segmented__opt').forEach((b) => {
-    b.addEventListener('click', async () => {
-      $('set-zoom').querySelectorAll('.ox-segmented__opt').forEach((x) => x.classList.remove('is-active'));
-      b.classList.add('is-active');
-      await guardar({ modoZoomInicial: b.dataset.value });
+  /* Con bindSwitcher, como los demás segmentados: cableado a mano, la cápsula
+     (que mide ::before con --seg-w) nunca se medía y quedaba en ancho 0, y la
+     opción elegida solo se notaba por el color del texto (shell-16, fw-05). Si
+     guardar falla, la elección vuelve a la de antes, como los switches. */
+  const zoom = $('set-zoom');
+  if (zoom) {
+    let previo = S.settings.modoZoomInicial || 'ancho';
+    const recolocar = bindSwitcher(zoom, async (v) => {
+      if (await guardar({ modoZoomInicial: v })) { previo = v; return; }
+      zoom.querySelectorAll('.ox-segmented__opt').forEach((o) => o.classList.toggle('is-active', o.dataset.value === previo));
+      recolocar();
     });
+  }
+
+  /* Papel por defecto (ux-38): store.cjs lo declaraba y Imprimir lo usaba para
+     arrancar cada plan, pero no había dónde cambiarlo. Los papeles son los de
+     la impresora elegida, con la lista estándar si no contestó. */
+  $('set-papel')?.addEventListener('click', (e) => {
+    const actual = papelPorDefecto();
+    Menu.show(e.currentTarget, papelesDisponibles().map((p) => ({
+      label: p.nombre,
+      icon: 'file',
+      selected: p.nombre === actual,
+      hint: `${fmtDec(p.ancho)} × ${fmtDec(p.alto)} mm`,
+      onSelect: async () => {
+        if (await guardar({ papelDefecto: p.nombre })) frase($('set-papel-valor'), esc(p.nombre));
+      },
+    })), { align: 'start' });
   });
 
   $('set-impresora')?.addEventListener('click', (e) => {
-    if (!S.impresoras.length) return Toast.error('No hay impresoras', 'Windows no reporta ninguna cola de impresión.');
+    /* El mismo texto que Imprimir (ux-20): qué hacer, no solo qué falta. */
+    // Ya estás en Ajustes: el botón está arriba, a la derecha.
+    if (!S.impresoras.length) return Toast.error('No hay impresoras', 'Instalá una impresora en Windows y tocá Releer impresoras.');
     Menu.show(e.currentTarget, S.impresoras.map((p) => ({
       label: p.etiqueta,
       icon: 'printer',
@@ -379,18 +579,42 @@ function cablearAjustes() {
     })), { align: 'start' });
   });
 
-  $('set-refrescar')?.addEventListener('click', async () => {
-    await attempt(async () => {
-      await cargarImpresoras({ refrescar: true });
-      Toast.show({ title: 'Impresoras releídas', text: `${S.impresoras.length} encontradas`, icon: 'printer' });
-      Router.refresh();
-    }, { errorTitle: 'No se pudieron leer las impresoras' });
+  /* Releer tarda más de un segundo (las capacidades las pide el subsistema de
+     Windows) y el botón no daba ninguna señal: se apretaba de nuevo, y cada
+     click lanzaba otra lectura (shell-21). Mientras lee queda ocupado, con un
+     relevo a «Leyendo…»; al terminar, la vista se repinta con lo leído (el
+     botón vuelve nuevo) o, si falló, vuelve a lo de antes. */
+  /* El html de reposo se toma UNA vez, al cablear. Tomado en cada click, si
+     la lectura anterior había fallado enseguida y su relevo de vuelta todavía
+     tenía el calco adentro, se llevaba el .ox-swap-out con él, y al volver
+     swap lo reinsertaba como un nodo nuevo que ningún exit() iba a sacar
+     (auditoría 2F). */
+  const reposo = $('set-refrescar')?.innerHTML || '';
+  $('set-refrescar')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget;
+    if (b.disabled) return;
+    b.disabled = true;
+    swap(b, `${Icons.spinner()}<span>Leyendo…</span>`, { relevo: true });
+    const leidas = await attempt(() => cargarImpresoras({ refrescar: true }), { errorTitle: 'No se pudieron leer las impresoras' });
+    if (leidas) {
+      Toast.show({
+        title: 'Impresoras releídas',
+        text: plural(leidas.length, 'impresora encontrada', 'impresoras encontradas'),
+        icon: 'printer',
+      });
+    }
+    // Si mientras leía te fuiste a otra vista, no se repinta la que estés mirando.
+    if (leidas && Router.name === 'ajustes') { Router.refresh(); return; }
+    if (b.isConnected) { b.disabled = false; swap(b, reposo, { relevo: true }); }
   });
 }
 
+/** Guarda un parche de ajustes. Devuelve lo guardado, o null si falló: quien
+    llamó vuelve atrás lo que ya había movido en pantalla. */
 async function guardar(patch) {
   const saved = await attempt(() => api.settings.save(patch), { errorTitle: 'No se pudieron guardar los ajustes' });
   if (saved) S.settings = saved;
+  return saved;
 }
 
 /* ══ Router ══════════════════════════════════════════════════════════════════ */
@@ -413,8 +637,9 @@ function cablearShell() {
   document.getElementById('win-close')?.addEventListener('click', () => w?.close());
   const maxBtn = document.getElementById('win-max');
   maxBtn?.addEventListener('click', () => w?.toggleMaximize());
+  // El ícono se releva: con innerHTML pasaba de un cuadrado a dos de golpe (shell-41).
   w?.onMaximized((isMax) => {
-    maxBtn.innerHTML = Icons.svg(isMax ? 'winRestore' : 'winMax');
+    swap(maxBtn, Icons.svg(isMax ? 'winRestore' : 'winMax'), { relevo: true });
     maxBtn.setAttribute('aria-label', isMax ? 'Restaurar' : 'Maximizar');
   });
 
@@ -447,14 +672,42 @@ function cablearShell() {
   });
 
   document.addEventListener('keydown', (e) => {
+    /* Con un diálogo a la vista los atajos del shell no andan detrás del velo
+       (auditoría 2F). Ctrl+W cerraba en silencio la pestaña cuyos cambios la
+       pregunta de cierre estaba diciendo que se pierden, y Ctrl+O, Ctrl+Tab o
+       Ctrl+1..4 cambiaban lo de atrás. Peor: el cierre de una pestaña con
+       cambios abre su propio Modal, y un Modal nuevo pisa al que está abierto
+       sin contestarle (ver confirmarCierreConCambios). Los del lector se
+       cuidan solos (miran Modal.isOpen). */
+    const velo = Modal.isOpen;
+
+    /* Ctrl+W cierra UNA, la que estabas mirando (shell-02). La tecla sostenida
+       manda repeticiones, y ninguna hace nada; pero se comen igual
+       (preventDefault): cerrada la última pestaña, la repetición que sigue ya
+       no tiene documento, y sin preventDefault le llegaba al Ctrl+W del menú
+       por defecto de Electron (main.cjs no define menú), que cierra la
+       VENTANA. Con un diálogo abierto, lo mismo. Un Ctrl+W suelto sin ningún
+       documento sigue cerrando la ventana, como en cualquier navegador. */
+    if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'w') {
+      if (e.repeat || velo) { e.preventDefault(); return; }
+      if (S.doc) { e.preventDefault(); cerrarDocumento(); }
+      return;
+    }
+
     /* Las pestañas van ANTES que atajosLector: Ctrl+Tab tiene que cambiar de
        documento aunque el foco esté en el visor. */
-    if (atajosPestanas(e)) return;
+    if (!velo && atajosPestanas(e)) return;
     if (atajosLector(e)) return;
+    if (velo) return;
     const enCampo = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
     if (e.ctrlKey && e.key.toLowerCase() === 'o' && !enCampo) { e.preventDefault(); abrirConDialogo(); }
     if (e.ctrlKey && e.key.toLowerCase() === 'p' && !enCampo && S.doc) { e.preventDefault(); Router.go('imprimir'); }
-    if (e.ctrlKey && e.key.toLowerCase() === 'w' && S.doc) { e.preventDefault(); cerrarDocumento(); }
+    /* Ctrl+Enter (imprimir estando en Imprimir, decisión de Fran: ux-31 e
+       imprimir-31) NO va acá: lo atiende la vista Imprimir (imprimir.js),
+       que primero confirma lo tipeado en Copias —el 'change' de un campo
+       llega recién al salir— y mira Menu y Modal. Con los dos oyentes, este
+       corría primero (se registra en el arranque) e imprimía con las copias
+       viejas. */
   });
 
   Pestanas.cablear({ alAbrir: abrirConDialogo });
@@ -462,20 +715,155 @@ function cablearShell() {
   /* La ventana ya canceló su cierre y está esperando. Se guarda la tinta de
      todas las pestañas y la sesión, y recién ahí se contesta.
 
+     Antes, si Páginas tiene cambios sin guardar en alguna pestaña, se
+     pregunta (ux-03, decisión de Fran): cerrar la app los tiraba sin avisar.
+     Mientras se pregunta, el main no corre su reloj de 3 s (se lo dice
+     preguntandoAntesDeCerrar); si se arrepiente, cancelarCierre() y la
+     ventana sigue; si confirma, cierreDecidido() —el main vuelve a armar sus
+     3 s: si guardar se cuelga, la ventana se cierra igual, como cuando no se
+     pregunta nada— y se guarda y se cierra sin volver a preguntar.
+     Si el usuario vuelve a apretar la cruz con la pregunta abierta, el main
+     pregunta otra vez: se le contesta que seguimos preguntando, y la pregunta
+     que ya está a la vista sigue siendo la única. Con la decisión tomada y
+     guardando (cerrandoApp), otro aviso no hace nada: el guardado en curso
+     contesta por los dos. Sin eso, la cruz apretada durante el guardado veía
+     los mismos cambios y volvía a mostrar la pregunta encima de un cierre que
+     terminaba enseguida.
+
      El `finally` es lo importante: si guardar explota, hay que contestar
      IGUAL. Callarse dejaría la ventana esperando hasta el timeout del main —
      tres segundos de app trabada al cerrar, por un error que ya está perdido. */
+  let preguntandoCierre = false;
+  let cerrandoApp = false;
   api?.win?.onAntesDeCerrar(async () => {
+    if (cerrandoApp) return;
+    if (preguntandoCierre) { api.win.preguntandoAntesDeCerrar?.(); return; }
+    const pendientes = cambiosPendientes();
+    // Ya se preguntó al pedir instalar la actualización (ver abajo).
+    const yaDecidido = Date.now() < instalarDecididoHasta;
+    if (pendientes.length && !yaDecidido && api.win.preguntandoAntesDeCerrar) {
+      api.win.preguntandoAntesDeCerrar();
+      preguntandoCierre = true;
+      let seguir = false;
+      try {
+        seguir = await confirmarCierreConCambios(pendientes);
+      } catch (err) {
+        console.error('[cerrar] no se pudo preguntar:', err);
+        seguir = true;               // ante la duda se cierra: no poder irse es peor
+      } finally {
+        preguntandoCierre = false;
+      }
+      if (!seguir) { api.win.cancelarCierre(); return; }
+      api.win.cierreDecidido?.();
+    }
+    cerrandoApp = true;
     try {
       await Promise.all([guardarTodo(), recordarSesion()]);
     } catch (err) {
       console.error('[cerrar] no se pudo guardar todo:', err);
     } finally {
       api.win.listoParaCerrar();
+      cerrandoApp = false;
     }
   });
 
+  /* «Reiniciar e instalar» también cierra la app, y por un camino que el
+     veto de arriba no frena bien: quitAndInstall (electron-updater) lanza el
+     instalador ANTES de pedir el cierre, así que contestar Cancelar al cierre
+     dejaba el instalador corriendo con Quire abierta, o la actualización
+     colgada para el próximo cierre sin que nadie lo dijera (auditoría 2F).
+     Por eso se pregunta acá, antes de llamar a instalar: si te arrepentís, no
+     se lanza nada. Si confirmás, el cierre que llega enseguida no vuelve a
+     preguntar. La decisión vence sola: si por algo la app no se cerró, el
+     próximo cierre pregunta de nuevo. */
+  let instalarDecididoHasta = 0;
+  Actualizar.antesDeInstalar(async () => {
+    const pendientes = cambiosPendientes();
+    if (!pendientes.length) return true;
+    const seguir = await confirmarCierreConCambios(pendientes, { instalar: true });
+    if (seguir) instalarDecididoHasta = Date.now() + 15000;
+    return seguir;
+  });
+
   cablearArrastre();
+}
+
+/** «2 páginas quitadas, 1 girada y el orden cambiado». */
+function describirCambios(c) {
+  const partes = [];
+  if (c.quitadas) partes.push(plural(c.quitadas, 'página quitada', 'páginas quitadas'));
+  if (c.giradas) {
+    partes.push(c.quitadas
+      ? plural(c.giradas, 'girada', 'giradas')
+      : plural(c.giradas, 'página girada', 'páginas giradas'));
+  }
+  if (c.reordenada) partes.push('el orden cambiado');
+  return partes.length > 1 ? `${partes.slice(0, -1).join(', ')} y ${partes.at(-1)}` : (partes[0] || '');
+}
+
+/** Las pestañas con cambios de Páginas sin guardar, con lo que tiene cada una. */
+const cambiosPendientes = () => S.pestanas.map((p) => ({ p, c: cambiosDePaginas(p) })).filter((x) => x.c);
+
+/**
+ * Pregunta antes de cerrar la app con cambios de Páginas sin guardar: en qué
+ * documento y cuántas páginas se quitaron o giraron. El foco arranca en
+ * Cancelar, como en toda confirmación destructiva: un Enter por reflejo no
+ * tira el trabajo. Resuelve true si hay que cerrar igual. Con `instalar`, lo
+ * que cierra es «Reiniciar e instalar», y la pregunta lo dice.
+ *
+ * Si otro Modal ocupa el lugar mientras se pregunta (un Modal.show que llega
+ * por su cuenta: el «volvé a cargar el fajo» del dúplex asistido, la guardia
+ * de una pestaña), cuenta como Cancelar. Modal.show pisa al que está abierto
+ * sin contestarle: esta promesa no resolvía nunca, su velo quedaba en el DOM
+ * tapando la app, preguntandoCierre quedaba prendido para siempre y cada
+ * cruz contestaba «sigo preguntando», que para el reloj del main: una ventana
+ * que no se podía cerrar (auditoría 2F). Se vigila la capa de overlays, y el
+ * velo y la caja huérfanos se van con su salida. Cuando Onyx conteste con
+ * null al que pisa (anotado para el framework), esto resuelve por el camino
+ * normal y da lo mismo.
+ */
+async function confirmarCierreConCambios(lista, { instalar = false } = {}) {
+  // Un diálogo abierto (un rango a medio escribir) se cierra: cerrar la app es
+  // lo que se pidió, y dos modales apilados no tienen salida.
+  if (Modal.isOpen) Modal.close(null);
+  const nombre = (p) => p.doc?.nombre || 'documento.pdf';
+  const uno = lista.length === 1;
+  const porQue = instalar ? 'Para instalar la actualización Quire se cierra, y' : 'Si cerrás Quire,';
+  const respuesta = Modal.show({
+    title: 'Hay cambios sin guardar en Páginas',
+    sub: uno
+      ? `${nombre(lista[0].p)}: ${describirCambios(lista[0].c)}. ${porQue} se pierden.`
+      : `${porQue} se pierden los de estos documentos:`,
+    body: uno ? '' : `<ul class="qr-cierre-lista">${lista.map(({ p, c }) => `
+      <li><span class="ox-label">${esc(nombre(p))}</span><span class="ox-meta">${esc(describirCambios(c))}</span></li>`).join('')}
+    </ul>`,
+    actions: [
+      { label: 'Cancelar', value: false, autofocus: true },
+      { label: instalar ? 'Instalar sin guardar' : 'Cerrar sin guardar', value: true, variant: 'danger-solid' },
+    ],
+  });
+
+  /* Lo que Modal.show acaba de poner, en la misma tarea: el velo y la caja son
+     los dos últimos hijos de la capa. */
+  const capa = document.getElementById('ox-layer');
+  const propios = capa ? [capa.lastElementChild?.previousElementSibling, capa.lastElementChild] : [];
+  let vigia = null;
+  const pisado = new Promise((resolver) => {
+    if (!capa) return;
+    vigia = new MutationObserver(() => {
+      const otro = [...capa.children].some((n) => n.classList.contains('ox-modal__anim')
+        && !propios.includes(n) && n.dataset.state !== 'closing');
+      if (otro) resolver('pisado');
+    });
+    vigia.observe(capa, { childList: true });
+  });
+  const r = await Promise.race([respuesta, pisado]);
+  vigia?.disconnect();
+  if (r === 'pisado') {
+    for (const n of propios) if (n?.isConnected) exit(n, { fallback: 300 });
+    return false;
+  }
+  return r === true;
 }
 
 /**
@@ -530,32 +918,79 @@ async function cerrarDocumento() {
   if (!S.doc) Router.go('lector');
 }
 
+/* Un contador del rail (las páginas del documento, lo que falta convertir).
+   Nace vacío en el HTML y vacío quiere decir que no hay nada que contar.
+   Se escribía con textContent: saltaba de 4 a 12 al cambiar de pestaña y
+   entraba o se iba en un cuadro (shell-25, herr-30). Ahora:
+   · aparece (vacío → n) o se va (n → vacío) con swap(): se funde;
+   · cambia (n → m) en su lugar, con destello.
+   No se mezclan swap() y numero() sobre el nodo: cada uno lleva su memoria,
+   y numero() compara contra el textContent —que durante una salida todavía
+   tiene el número que se va— (corrección 8 del plan). La memoria es una sola,
+   la de acá (`__cuenta`), y el número que cambia se escribe en el span vivo
+   que dejó swap(), no en el nodo entero: así no corta una salida en curso. */
+function contador(el, n) {
+  if (!el) return;
+  const v = n ? String(n) : '';
+  const antes = el.__cuenta ?? el.textContent.trim();
+  if (v === antes) return;
+  el.__cuenta = v;
+  if (!v || !antes) { swap(el, v); return; }
+  const vivo = el.querySelector(':scope > :not(.ox-swap-out)');
+  if (vivo) vivo.textContent = v; else el.textContent = v;
+  tick(el);
+}
+
+/* Una frase de la statusbar que cambia (el nombre del documento, la
+   impresora): relevo adentro (frase) y el ancho del ítem viajando, así lo que
+   tiene a la derecha no salta (shell-23). Si el ítem está escondido no se ve:
+   se escribe en el lugar y el plegable lo despliega ya con lo nuevo. Con la
+   misma frase no hace nada, ni mide. */
+function fraseEnFila(item, el, html) {
+  if (!el || el.__frase === html) return;
+  if (item && !item.hidden) deslizarAncho(item, () => frase(el, html));
+  else frase(el, html);
+}
+
 /** Todo lo que vive fuera de la vista: statusbar, contadores del rail, contexto. */
 function actualizarChrome() {
-  const nombre = document.getElementById('stat-doc-name');
-  if (nombre) nombre.textContent = S.doc ? S.doc.nombre : 'Ningún documento';
+  const $ = (id) => document.getElementById(id);
+
+  fraseEnFila($('stat-doc'), $('stat-doc-name'), esc(S.doc ? S.doc.nombre : 'Ningún documento'));
 
   /* La ruta completa se veía al pasar por el pie del rail, que ya no dice nada.
      Se muda acá, que es donde quedó el nombre del documento. */
-  const statDoc = document.getElementById('stat-doc');
+  const statDoc = $('stat-doc');
   if (statDoc) statDoc.dataset.tip = S.doc ? (S.doc.ruta || S.doc.nombre) : 'Documento abierto';
 
-  const cuenta = document.getElementById('nav-paginas-count');
-  if (cuenta) cuenta.textContent = S.doc ? S.doc.paginas : '';
+  contador($('nav-paginas-count'), S.doc ? S.doc.paginas : 0);
+  contador($('nav-convertir-count'), convertiblesPendientes());
 
-  const porConvertir = document.getElementById('nav-convertir-count');
-  if (porConvertir) porConvertir.textContent = convertiblesPendientes() || '';
-
+  /* La página y la medida las escribe el lector mientras scrolleás. Fuera del
+     lector nadie las ponía al día: con Ctrl+Tab en Imprimir la statusbar
+     seguía diciendo la página y el tamaño del otro documento (shell-24). Se
+     escriben desde S, que es por pestaña, con las mismas piezas que el
+     lector: la página en el lugar y sin destello (cambia en cada hoja), la
+     medida con frase(). Es lo mismo que escribe él, así que dos escrituras no
+     hacen nada. Adentro del lector es SUYA: escribir acá también desfasaría
+     la memoria de frase() mientras él escribe por su cuenta. */
+  if (S.doc && Router.name !== 'lector') {
+    swap($('stat-pagina-value'), `${S.pagina} / ${S.doc.paginas}`);
+    const g = S.geometrias[S.pagina - 1];
+    if (g) fraseEnFila($('stat-medida'), $('stat-medida-value'), esc(g.etiqueta));
+  }
   for (const id of ['stat-pagina', 'stat-medida']) {
-    const el = document.getElementById(id);
+    const el = $(id);
     if (el) el.hidden = !S.doc;
   }
 
-  const imp = document.getElementById('stat-impresora');
-  const impVal = document.getElementById('stat-impresora-value');
-  if (imp && impVal) {
+  /* Sin impresora el ítem se esconde y no se escribe nada: un «—» como valor
+     de relleno haría que el primer nombre real cuente como un cambio
+     (shell-39, css-27). */
+  const imp = $('stat-impresora');
+  if (imp) {
+    if (S.impresora) fraseEnFila(imp, $('stat-impresora-value'), esc(S.impresora));
     imp.hidden = !S.impresora;
-    impVal.textContent = S.impresora || '—';
   }
 
   /* El pie del rail queda vacío A PROPÓSITO: decía el nombre del documento, que
@@ -569,13 +1004,66 @@ function actualizarChrome() {
      las pestañas a la vista lo estaría diciendo tres veces en veinte píxeles
      —pestaña, titlebar, statusbar— y eso ya no se lee como tres datos sino
      como un error de maquetado. Es la misma razón por la que el pie del rail
-     quedó vacío. */
-  const ctx = document.getElementById('titlebar-context');
-  if (ctx) {
-    ctx.innerHTML = S.doc && S.pestanas.length < 2
-      ? `${Icons.svg('quire', 'ox-icon--sm')}<span>${esc(S.doc.nombre)}</span>`
-      : '';
+     quedó vacío.
+
+     Con swap() y relevo (shell-26, fw-09): aparece, se va (al abrir el
+     segundo, mientras la franja se despliega) o cambia de nombre fundiéndose.
+     Era un innerHTML en cada aviso —también en cada trazo de tinta— que
+     reemplazaba los nodos aunque dijeran lo mismo; con el mismo html, swap()
+     no toca nada. */
+  swap($('titlebar-context'), S.doc && S.pestanas.length < 2
+    ? `${Icons.svg('quire', 'ox-icon--sm')}<span>${esc(S.doc.nombre)}</span>`
+    : '', { relevo: true });
+}
+
+/* ── «Abriendo…» ─────────────────────────────────────────────────────────────
+   Abrir un PDF pesado (leerlo, geometrías, esquema, tinta) puede tardar
+   segundos, y nada lo decía: el botón no cambiaba y la app parecía no haber
+   hecho nada (shell-05, ux-10). Mientras haya algo abriéndose, el botón Abrir
+   y el «+» de la franja hacen un relevo a un spinner. Recién pasados 150 ms:
+   un PDF chico abre en menos y el botón parpadearía «Abriendo…» por nada.
+
+   «Abriéndose» es la suma de dos cosas: S.cargando (estado.js, lo que va de
+   abrir() para adentro) y enFila (las tandas de acá, que cuentan desde ANTES
+   de leer el archivo). Solo con S.cargando, la lectura —traer el archivo
+   entero por IPC, que suele ser lo más lento— no contaba: una tanda de tres
+   con 450 ms de lectura cada uno decía «Abrir» todo el tiempo; y si lo que
+   tardaba era parsear, el botón iba y venía entre un documento y el otro.
+   Con enFila hay un relevo de ida y uno de vuelta por tanda.
+
+   El reloj de los 150 ms no se reinicia con cada aviso: en una tanda de PDF
+   chicos los avisos llegan más seguido que eso y el botón no cambiaría
+   nunca, por más que la tanda entera tarde segundos. */
+const ESPERA_OCUPADO = 150;
+let ocupado = false;
+let relojOcupado = 0;
+let abrirNormal = '';
+let masNormal = '';
+
+const abriendose = () => S.cargando > 0 || enFila > 0;
+
+function seguirCargando() {
+  if (abriendose()) {
+    if (!ocupado && !relojOcupado) {
+      relojOcupado = setTimeout(() => { relojOcupado = 0; ponerOcupado(true); }, ESPERA_OCUPADO);
+    }
+    return;
   }
+  clearTimeout(relojOcupado);
+  relojOcupado = 0;
+  if (ocupado) ponerOcupado(false);
+}
+
+function ponerOcupado(on) {
+  if (on && !abriendose()) return;
+  ocupado = on;
+  const btn = document.getElementById('btn-abrir');
+  const mas = document.getElementById('qr-tab-mas');
+  if (btn) {
+    swap(btn, on ? `${Icons.spinner()}<span>Abriendo…</span>` : abrirNormal, { relevo: true });
+    btn.setAttribute('aria-busy', String(on));
+  }
+  if (mas) swap(mas, on ? Icons.spinner() : masNormal, { relevo: true });
 }
 
 /* ══ Color de la ventana ═════════════════════════════════════════════════════
@@ -614,8 +1102,20 @@ async function boot() {
     return;
   }
 
+  /* Piezas es la vitrina del framework, no una función de Quire: en el rail
+     solo con --dev o QUIRE_DEV (ux-39, decisión de Fran). La ruta sigue
+     existiendo. Se decide antes de que se vaya el splash: no hay un cuadro
+     con el ítem y otro sin él. */
+  const piezas = document.getElementById('nav-piezas');
+  if (piezas) piezas.hidden = !S.info?.dev;
+
+  /* Cómo están los botones de abrir cuando no están ocupados, para volver. */
+  abrirNormal = document.getElementById('btn-abrir')?.innerHTML || '';
+  masNormal = Icons.svg('plus');
+
   actualizarChrome();
   alCambiar(actualizarChrome);
+  alCambiar((que) => { if (que === 'cargando') seguirCargando(); });
   Router.onChange(actualizarChrome);
 
   /* Todo lo que depende de QUÉ hay abierto cuelga de un solo aviso, y por eso
@@ -641,13 +1141,15 @@ async function boot() {
      las impresoras tarda ~1s porque las pide el subsistema de Windows. */
   cargarImpresoras().catch((err) => console.error('[impresoras]', err.message));
 
-  /* Qué documento se carga al arrancar. El del doble click GANA: si abriste un
-     PDF desde el explorador querés ese, no el de ayer — y encima el de ayer
-     tardaría lo mismo en cargar para después ser reemplazado. */
-  const pedido = await api.docs.pendiente().catch(() => null);
+  /* Qué documentos se cargan al arrancar. Los del doble click GANAN: si
+     abriste PDFs desde el explorador querés esos, no los de ayer — y encima
+     los de ayer tardarían lo mismo en cargar para después quedar de fondo.
+     Son TODOS, en orden: con varios elegidos y Enter, Windows lanza un
+     proceso por archivo y se abría solo el último que llegaba (main-02). */
+  const pedidos = await api.docs.pendientes().catch(() => []);
 
-  if (pedido) abrirRuta(pedido);
-  else if (S.settings.reabrirUltimo) restaurarSesion();
+  if (pedidos?.length) abrirVarias(pedidos);
+  else if (S.settings.reabrirUltimo) encolar(restaurarSesion);   // en la fila: un doble click que llegue mientras tanto espera su turno
 
   /* Con Quire ya abierta, otro doble click no levanta una segunda ventana: el
      proceso nuevo le pasa la ruta a este y se muere (ver main.cjs). */

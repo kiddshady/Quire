@@ -203,8 +203,25 @@ function createWindow(state) {
      El timeout NO es opcional. Sin él, un renderer colgado —o que murió y no
      va a contestar nunca— deja una ventana que no se puede cerrar, y la única
      salida es el administrador de tareas. Ante la duda se cierra: perder el
-     último trazo es malo, no poder cerrar la app es peor. */
+     último trazo es malo, no poder cerrar la app es peor.
+
+     El renderer también puede VETAR el cierre (ux-03, decisión de Fran): con
+     cambios sin guardar en Páginas pregunta antes. Para eso contesta enseguida
+     'app:cierre-preguntando' —está vivo, hay un diálogo a la vista— y el reloj
+     se para: el usuario puede tardar lo que quiera en decidir. Después llega
+     'app:cierre-cancelado' (la ventana sigue) o 'app:cierre-decidido' (se
+     cierra: el renderer guarda y contesta 'app:guardado' sin volver a
+     preguntar). Con la decisión tomada el reloj vuelve a correr: si guardar
+     se cuelga, la ventana se cierra sola a los 3 s, como cuando no se
+     pregunta nada, y otra cruz en el medio no vuelve a preguntar.
+     Si se aprieta la cruz otra vez con la pregunta abierta, se le vuelve a
+     pedir y el reloj vuelve a correr: un renderer vivo contesta que sigue
+     preguntando; uno que se colgó después de preguntar no contesta, y a los
+     3 s se cierra igual, como siempre. */
   let guardando = false;
+  /* El renderer avisó que está preguntando: el reloj no corre. */
+  let preguntando = false;
+  let reloj = null;
   /* Mientras no hay renderer —se cayó y todavía no terminó de recargar— no
      hay nadie que guarde ni que conteste: el cierre pasa derecho, sin esperar
      los 3 s (main-12). */
@@ -213,32 +230,62 @@ function createWindow(state) {
      no va a llegar: esto suelta la espera en el acto. */
   let soltarCierre = null;
 
-  win.on('close', (e) => {
-    if (puedeCerrar || sinRenderer || !win || win.isDestroyed() || win.webContents.isDestroyed()) return;
-    e.preventDefault();
-    if (guardando) return;            // ya se lo pedimos; que termine
-    guardando = true;
-
-    /* Los dos caminos —el aviso del renderer y el timeout— pasan por acá, y
-       los dos SUELTAN el listener. Dejarlo colgado si cerramos por timeout
-       significa que la próxima ventana arranca con un oyente de la anterior
-       esperando un mensaje que ya no es para él. */
-    const listo = () => {
-      clearTimeout(reloj);
-      ipcMain.off('app:guardado', listo);
-      soltarCierre = null;
-      if (puedeCerrar) return;
-      puedeCerrar = true;
-      if (win && !win.isDestroyed()) win.close();
-    };
-
-    const reloj = setTimeout(() => {
+  /* Todos los caminos —el aviso del renderer, el timeout, la cancelación—
+     pasan por acá, y todos SUELTAN los listeners. Dejarlos colgados si
+     cerramos por timeout significa que la próxima ventana arranca con un
+     oyente de la anterior esperando un mensaje que ya no es para él. */
+  const soltarEspera = () => {
+    clearTimeout(reloj);
+    reloj = null;
+    ipcMain.off('app:guardado', listo);
+    ipcMain.off('app:cierre-preguntando', alPreguntar);
+    ipcMain.off('app:cierre-cancelado', alCancelar);
+    ipcMain.off('app:cierre-decidido', alDecidir);
+    soltarCierre = null;
+    guardando = false;
+    preguntando = false;
+  };
+  function listo() {
+    soltarEspera();
+    if (puedeCerrar) return;
+    puedeCerrar = true;
+    if (win && !win.isDestroyed()) win.close();
+  }
+  function alPreguntar() {
+    preguntando = true;
+    clearTimeout(reloj);
+    reloj = null;
+  }
+  function alCancelar() { soltarEspera(); }
+  function alDecidir() {
+    preguntando = false;
+    armarReloj();
+  }
+  function armarReloj() {
+    clearTimeout(reloj);
+    reloj = setTimeout(() => {
       console.error('[cerrar] el renderer no contestó en 3 s: se cierra igual');
       listo();
     }, 3000);
+  }
 
-    soltarCierre = listo;
-    ipcMain.on('app:guardado', listo);
+  win.on('close', (e) => {
+    if (puedeCerrar || sinRenderer || !win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+    e.preventDefault();
+    if (guardando && !preguntando) return;     // ya se lo pedimos; que termine
+
+    if (!guardando) {
+      guardando = true;
+      soltarCierre = listo;
+      ipcMain.on('app:guardado', listo);
+      ipcMain.on('app:cierre-preguntando', alPreguntar);
+      ipcMain.on('app:cierre-cancelado', alCancelar);
+      ipcMain.on('app:cierre-decidido', alDecidir);
+    }
+    // Primera vez, o la cruz de nuevo con la pregunta abierta: el reloj corre
+    // hasta que conteste.
+    preguntando = false;
+    armarReloj();
     win.webContents.send('app:antes-de-cerrar');
   });
 

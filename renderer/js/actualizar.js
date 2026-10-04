@@ -15,13 +15,14 @@
    · **Cerrarlo no cancela nada.** La descarga sigue, y la statusbar la muestra.
 
    El cross-fade entre pasos se apoya en que los dos pasos comparten la misma
-   celda de un grid: se superponen mientras uno se va y el otro entra, así que
-   la caja no salta aunque el contenido cambie de alto.
+   celda de un grid: se superponen mientras uno se va y el otro entra. Si el
+   nuevo es más alto (o más bajo), el alto de la caja viaja en vez de saltar,
+   y el que se va queda clavado en su lugar mientras tanto.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 import { Icons } from './icons.js';
 import { Toast } from './overlays.js';
-import { exit } from './motion.js';
+import { exit, swap, deslizarAlto, deslizarAncho } from './motion.js';
 import { esc } from './ui.js';
 import { fmtBytes } from './format.js';
 
@@ -121,6 +122,35 @@ function avance(p) {
   const partes = [`${Math.round((p.pct || 0) * 100)}%`, `${fmtBytes(p.transferido)} de ${fmtBytes(p.total)}`];
   if (p.bps > 0) partes.push(`${fmtBytes(p.bps)}/s`);
   return partes.join(' · ');
+}
+
+/* ── Números que corren ──────────────────────────────────────────────────────
+   El porcentaje de la descarga llega veinte veces por segundo y cambiaba con
+   textContent: en la statusbar pasaba de 10 a 20 a 30 de golpe (tests-16).
+   Ahora corre desde lo que se ve AHORA hasta el último dato, y cada dato nuevo
+   retoma la carrera donde iba en vez de volver a arrancar: es el roll() de
+   Prism (recetas de motion-timing, §8). No es countTo() de motion.js a
+   propósito: ese no se puede retomar, y dos carreras solapadas se pelearían
+   el mismo texto. Puede correr varios números juntos (un objeto). */
+function correr(el, a, pintar, { duracion = 420 } = {}) {
+  const obj = typeof a === 'object' && a !== null;
+  const st = el.__correr;
+  if (!st) { el.__correr = { cur: a, a, raf: 0 }; pintar(a); return; }   // la primera vez, escribe
+  if (JSON.stringify(st.a) === JSON.stringify(a)) return;
+  cancelAnimationFrame(st.raf);
+  st.a = a;
+  const desde = st.cur;
+  const t0 = performance.now();
+  const ease = (t) => 1 - (1 - t) ** 3;
+  const lerp = (x, y, k) => (Number.isFinite(x) && Number.isFinite(y) ? x + (y - x) * k : y);
+  const cuadro = (ahora) => {
+    if (!el.isConnected) return;
+    const k = ease(Math.min(1, (ahora - t0) / duracion));
+    st.cur = obj ? Object.fromEntries(Object.keys(a).map((c) => [c, lerp(desde?.[c], a[c], k)])) : lerp(desde, a, k);
+    pintar(st.cur);
+    if (k < 1) st.raf = requestAnimationFrame(cuadro);
+  };
+  st.raf = requestAnimationFrame(cuadro);
 }
 
 /* ── El paso, ya en DOM ─────────────────────────────────────────────────── */
@@ -241,10 +271,11 @@ function repintar() {
 
   if (viejo?.dataset.fase === (estado.fase || 'inactivo') && estado.fase === 'descargando') {
     // Mismo paso, solo avanzó la descarga: mover la barra, no rehacer el paso.
+    // La barra viaja con su transición de transform; el texto corre (correr).
     const fill = viejo.querySelector('.qr-prog__fill');
     if (fill) fill.style.setProperty('--qr-pct', (estado.progreso?.pct || 0).toFixed(4));
     const sub = viejo.querySelector('.qr-act__sub');
-    if (sub) sub.textContent = avance(estado.progreso);
+    if (sub) correrAvance(sub, estado.progreso);
     return;
   }
 
@@ -253,39 +284,84 @@ function repintar() {
 
   const el = paso(estado);
   el.dataset.firma = nueva;
+  if (estado.fase === 'descargando') correrAvance(el.querySelector('.qr-act__sub'), estado.progreso);
 
-  if (viejo && viejo.dataset.asoma && performance.now() < +viejo.dataset.asoma) {
-    /* El que está llegando todavía espera su turno y no se vio nunca: se lo
-       cambia por el nuevo en el mismo lugar, sin cruce. Si no, dos estados a
-       60 ms apilaban tres y cuatro pasos a medio desvanecer. */
-    viejo.replaceWith(el);
-    el.classList.add('is-after');
-    el.dataset.asoma = viejo.dataset.asoma;
-    el.style.animationDelay = `${Math.max(0, +viejo.dataset.asoma - performance.now())}ms`;
-  } else {
-    if (viejo) salirDesdeDondeEsta(viejo);
-    // Solo espera si hay a quién relevar: sin nadie saliendo, esperar es lentitud.
-    if (viejo) {
+  /* El alto viaja (shell-30). Los pasos comparten celda, así que la caja mide
+     lo que mida el más alto: cuando el nuevo era más alto que el min-height,
+     la caja crecía en un cuadro y el modal, centrado, se recentraba de golpe.
+     El que se va queda clavado en su caja (salirDesdeDondeEsta) y ya no
+     cuenta para el alto: el nuevo lo define solo, y deslizarAlto lleva la
+     caja del alto de antes al de ahora. */
+  deslizarAlto(cuerpo, () => {
+    if (viejo && viejo.dataset.asoma && performance.now() < +viejo.dataset.asoma) {
+      /* El que está llegando todavía espera su turno y no se vio nunca: se lo
+         cambia por el nuevo en el mismo lugar, sin cruce. Si no, dos estados a
+         60 ms apilaban tres y cuatro pasos a medio desvanecer. */
+      viejo.replaceWith(el);
       el.classList.add('is-after');
-      el.dataset.asoma = String(performance.now() + ESPERA_RELEVO);
+      el.dataset.asoma = viejo.dataset.asoma;
+      el.style.animationDelay = `${Math.max(0, +viejo.dataset.asoma - performance.now())}ms`;
+    } else {
+      if (viejo) salirDesdeDondeEsta(viejo, cuerpo);
+      // Solo espera si hay a quién relevar: sin nadie saliendo, esperar es lentitud.
+      if (viejo) {
+        el.classList.add('is-after');
+        el.dataset.asoma = String(performance.now() + ESPERA_RELEVO);
+      }
+      cuerpo.appendChild(el);
     }
-    cuerpo.appendChild(el);
-  }
+  });
   setTimeout(() => overlay?.cuerpo.querySelector('.qr-act__paso:not([data-state="closing"]) .ox-btn--primary')?.focus(), 80);
+}
+
+/** El sub de la descarga, con sus números corriendo y la velocidad tal cual. */
+function correrAvance(sub, p) {
+  if (!sub) return;
+  if (!p || !p.total) { sub.textContent = avance(p); return; }
+  correr(sub, { pct: p.pct || 0, transferido: p.transferido || 0 },
+    (v) => { sub.textContent = avance({ ...p, pct: v.pct, transferido: v.transferido }); });
 }
 
 /* Un paso que se va a mitad de su entrada tiene que irse desde la opacidad que
    tenía, no desde 1: la animación de salida reemplaza a la de entrada, y su
    punto de partida implícito es el estilo de base. Sin esto saltaba de 63 % a
    100 % y recién ahí se desvanecía. Se congela lo que se ve como estilo en
-   línea y la salida (que no declara `from`) arranca de ahí. */
-function salirDesdeDondeEsta(el) {
+   línea y la salida (que no declara `from`) arranca de ahí.
+
+   Y se clava en su caja, absoluto, donde estaba (shell-30): así no cuenta
+   para el alto de la celda y, como se centra en vertical, tampoco se corre
+   mientras la caja cambia de alto. La posición se mide sin el transform de su
+   entrada (que se le congela aparte) y con decimales: con el ancho redondeado
+   para abajo, un renglón centrado se partía en dos mientras se iba. Lleva
+   `grid-area: auto` porque un hijo absoluto de una grilla CON área se ubica
+   contra el área y no contra la caja. */
+function salirDesdeDondeEsta(el, cuerpo) {
   const cs = getComputedStyle(el);
-  el.style.opacity = cs.opacity;
-  el.style.transform = cs.transform === 'none' ? '' : cs.transform;
-  el.style.animationDelay = '';
+  const r = el.getBoundingClientRect();
+  const base = cuerpo.getBoundingClientRect();
+  const m = cs.transform === 'none' ? { e: 0, f: 0 } : new DOMMatrixReadOnly(cs.transform);
+  const bcs = getComputedStyle(cuerpo);
+  Object.assign(el.style, {
+    position: 'absolute',
+    gridArea: 'auto',
+    margin: '0',
+    boxSizing: 'border-box',
+    left: `${r.left - m.e - base.left - (parseFloat(bcs.borderLeftWidth) || 0)}px`,
+    top: `${r.top - m.f - base.top - (parseFloat(bcs.borderTopWidth) || 0)}px`,
+    width: `${r.width}px`,
+    height: `${r.height}px`,
+    opacity: cs.opacity,
+    transform: cs.transform === 'none' ? '' : cs.transform,
+    animationDelay: '',
+  });
   exit(el, { fallback: 240 });
 }
+
+/* Lo que se confirma antes de instalar, que cierra la app. Lo registra
+   app.js (los cambios de Páginas sin guardar): este módulo no sabe de
+   pestañas. Devuelve false si el usuario se arrepintió. */
+let antesDeInstalarFn = null;
+export function antesDeInstalar(fn) { antesDeInstalarFn = fn; }
 
 async function accion(id) {
   switch (id) {
@@ -295,6 +371,8 @@ async function accion(id) {
     case 'descargar': await api.update.descargar(); break;
     case 'instalar':
       cerrar();
+      // Con cambios de Páginas sin guardar, primero se pregunta (app.js).
+      if (antesDeInstalarFn && !(await antesDeInstalarFn())) break;
       await api.update.instalar();
       break;
     default: break;
@@ -305,30 +383,68 @@ async function accion(id) {
    Lo que queda visible cuando cerrás el cartel: sin esto, una descarga de 90 MB
    pasa a ser invisible y el "listo para instalar" se pierde. */
 
-/* Nada aparece ni se va de golpe, tampoco acá. Tres casos:
-   · mismo aviso, solo avanzó la descarga → cambia el número en su lugar;
-   · aparece de la nada → entra con fade;
-   · cambia de aviso o se va → primero se desvanece el que está, y recién
-     después entra el otro (o se esconde). Un `hidden` + innerHTML directos
-     lo hacían saltar, y en 'disponible → descargando → lista' se veía el
-     texto cambiar de un cuadro al otro. */
+/* Nada aparece ni se va de golpe, tampoco acá. Cuatro casos:
+   · mismo aviso, solo avanzó la descarga → el número corre en su lugar
+     (correr), en el MISMO nodo;
+   · aparece de la nada → el ítem es ox-plegable--ancho: al sacarle el
+     `hidden` se despliega a lo ancho mientras se funde, y la impresora de al
+     lado se corre de a poco en vez de saltar (shell-22, css-17);
+   · se va → `hidden`: se desvanece y se pliega, primero lo de adentro y
+     después la caja;
+   · cambia de aviso (disponible → descargando → lista) → relevo del
+     contenido en el lugar (swap con relevo) y el ancho del ítem viajando
+     (deslizarAncho). Antes era un fundido de salida del ítem entero, otro de
+     entrada, y el ancho cambiando de golpe en el medio.
+   El contenido se escribe siempre con swap(): lleva su memoria del último
+   html, y escribirlo por otro lado la desfasaría (corrección 8 del plan). Lo
+   único que se escribe aparte es el número que corre, adentro de su span. */
 const STAT_AVISOS = ['disponible', 'descargando', 'listo'];
 let statAviso = null;
-let statTurno = 0;
 
-const tok = (n) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(n)) || 0;
+const pctDe = () => Math.round((estado.progreso?.pct || 0) * 100);
 
-function contenidoStat(el, aviso) {
+function contenidoStat(aviso) {
   if (aviso === 'descargando') {
-    el.dataset.tip = 'Bajando la actualización';
-    el.innerHTML = `${Icons.svg('download', 'ox-icon--sm')}<span class="ox-statusbar__value ox-num">${Math.round((estado.progreso?.pct || 0) * 100)}%</span>`;
-  } else if (aviso === 'listo') {
-    el.dataset.tip = 'Reiniciá para instalarla';
-    el.innerHTML = `${Icons.svg('zap', 'ox-icon--sm')}<span class="ox-statusbar__value">Quire ${esc(estado.version || '')} lista</span>`;
-  } else {
-    el.dataset.tip = 'Hay una versión nueva';
-    el.innerHTML = `${Icons.svg('download', 'ox-icon--sm')}<span class="ox-statusbar__value">${esc(estado.version || '')}</span>`;
+    return {
+      tip: 'Bajando la actualización',
+      html: `${Icons.svg('download', 'ox-icon--sm')}<span class="ox-statusbar__value ox-num qr-stat-pct">${pctDe()}%</span>`,
+    };
   }
+  if (aviso === 'listo') {
+    return {
+      tip: 'Reiniciá para instalarla',
+      html: `${Icons.svg('zap', 'ox-icon--sm')}<span class="ox-statusbar__value">Quire ${esc(estado.version || '')} lista</span>`,
+    };
+  }
+  return {
+    tip: 'Hay una versión nueva',
+    html: `${Icons.svg('download', 'ox-icon--sm')}<span class="ox-statusbar__value">${esc(estado.version || '')}</span>`,
+  };
+}
+
+function ponerStat(el, aviso, opciones) {
+  const { tip, html } = contenidoStat(aviso);
+  el.dataset.tip = tip;
+  swap(el, html, opciones);
+}
+
+/* El número que corre arranca de lo que dice el span recién puesto: sin ese
+   punto de partida, el primer avance después de pintar saltaba.
+
+   Y el span dice el número de AHORA. swap() recuerda el html con el % del
+   momento en que se puso, y correr() después escribe el span por su cuenta:
+   bajando al 10 % (swap recuerda «10%»), corre hasta 60, llega un error y se
+   reintenta desde 10. swap ve el mismo html y no hace nada, y el ítem se
+   desplegaba diciendo «60%» (auditoría 2F). Por eso se escribe acá, con
+   pctDe(), y se corta la carrera vieja: si todavía tenía cuadros, seguiría
+   pintando sus números encima. */
+function arrancarPct(el) {
+  const v = el.querySelector(':scope > .qr-stat-pct');
+  if (!v) return;
+  cancelAnimationFrame(v.__correr?.raf);
+  const txt = `${pctDe()}%`;
+  if (v.textContent !== txt) v.textContent = txt;
+  v.__correr = { cur: pctDe(), a: pctDe(), raf: 0 };
 }
 
 function pintarStatus() {
@@ -338,33 +454,34 @@ function pintarStatus() {
 
   if (aviso === statAviso) {
     if (aviso === 'descargando') {
-      const v = el.querySelector('.ox-statusbar__value');
-      if (v) v.textContent = `${Math.round((estado.progreso?.pct || 0) * 100)}%`;
-    } else if (aviso) contenidoStat(el, aviso);
+      // Lo vivo, no lo que se está yendo en el calco de un relevo.
+      const v = el.querySelector(':scope > .qr-stat-pct');
+      if (v) correr(v, pctDe(), (n) => { v.textContent = `${Math.round(n)}%`; });
+    } else if (aviso) {
+      // El mismo aviso con otra versión: swap no hace nada si el html es igual.
+      deslizarAncho(el, () => ponerStat(el, aviso, { relevo: true }));
+    }
     return;
   }
 
   statAviso = aviso;
-  const turno = ++statTurno;        // si llega otro cambio en el medio, gana el último
-  const entrar = () => {
-    if (turno !== statTurno) return;
-    if (!aviso) { el.hidden = true; el.innerHTML = ''; return; }
-    contenidoStat(el, aviso);
+  if (!aviso) { el.hidden = true; return; }
+  /* Con `hidden` todavía se ve mientras se pliega (allow-discrete): un aviso
+     que llega en ese rato no se puede escribir en el lugar, se vería
+     cambiar de golpe. Vuelve a desplegarse desde donde iba (la transición
+     del plegable se da vuelta sola) y el contenido hace su relevo. */
+  const plegandose = el.hidden && el.getAnimations().some((a) => a.playState === 'running');
+  if (el.hidden && !plegandose) {
+    // Escondido no se ve: el contenido va en el lugar, y el ítem se despliega.
+    ponerStat(el, aviso);
     el.hidden = false;
-    el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: tok('--ox-t-2'), easing: 'cubic-bezier(.33, 1, .68, 1)' });
-  };
-
-  if (el.hidden) { entrar(); return; }
-  // Se va desde donde esté (puede venir a mitad de su propia entrada), en
-  // in-out: hay alguien esperando detrás.
-  const sale = el.animate(
-    [{ opacity: getComputedStyle(el).opacity }, { opacity: 0 }],
-    { duration: tok('--ox-t-1'), easing: 'cubic-bezier(.65, 0, .35, 1)', fill: 'forwards' },
-  );
-  sale.finished.then(() => {
-    entrar();          // primero lo nuevo (o el hidden)…
-    sale.cancel();     // …y recién ahí se suelta la salida: si no, un cuadro a 100 %
-  }).catch(() => {});
+  } else if (plegandose) {
+    ponerStat(el, aviso, { relevo: true });
+    el.hidden = false;
+  } else {
+    deslizarAncho(el, () => ponerStat(el, aviso, { relevo: true }));
+  }
+  arrancarPct(el);
 }
 
 /* ── Arranque ───────────────────────────────────────────────────────────── */

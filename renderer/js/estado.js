@@ -237,9 +237,13 @@ function nuevaPestana(doc) {
  * arrancar, que abría las cuatro de a una y el lector pasaba por todas antes
  * de volver a la primera.
  *
+ * `posicion` es el lugar de la franja donde entra (por defecto, al final). La
+ * sesión lo usa para poner cada pestaña directo en su lugar: abría todas al
+ * final y después corría la activa, y la franja se reordenaba a la vista.
+ *
  * Tirá el error si no hay lugar: quien llama sabe cómo avisarle al usuario.
  */
-export async function abrir(archivo, { activar: activarla = true } = {}) {
+export async function abrir(archivo, { activar: activarla = true, posicion = null } = {}) {
   const ruta = archivo.ruta;
   if (ruta && enCurso.has(ruta)) {
     const doc = await enCurso.get(ruta);
@@ -247,13 +251,13 @@ export async function abrir(archivo, { activar: activarla = true } = {}) {
     if (p && activarla) activar(p.id);
     return doc;
   }
-  if (!ruta) return abrirUna(archivo, activarla);
-  const promesa = abrirUna(archivo, activarla);
+  if (!ruta) return abrirUna(archivo, activarla, posicion);
+  const promesa = abrirUna(archivo, activarla, posicion);
   enCurso.set(ruta, promesa);
   try { return await promesa; } finally { enCurso.delete(ruta); }
 }
 
-async function abrirUna(archivo, activarla) {
+async function abrirUna(archivo, activarla, posicion) {
   /* El mismo archivo dos veces es UNA pestaña. Abrirlo de nuevo desde el
      diálogo, o arrastrarlo otra vez, te lleva a la que ya está — y no es solo
      prolijidad: la capa de tinta se identifica por un hash de la ruta, así que
@@ -286,7 +290,12 @@ async function abrirUna(archivo, activarla) {
        vaciar la pantalla para volver a llenarla. */
     const p = nuevaPestana(doc);
     p.geometrias = await doc.geometrias();
-    p.esquema = await doc.esquema();
+    /* Los marcadores no se leen al abrir: los pide el lector recién cuando
+       abrís la pestaña Marcadores (lector-24). En un PDF con un índice largo
+       eran cientos de idas al worker antes de ver la primera hoja.
+       Documento.esquema() guarda la promesa, así que pedirlos dos veces no
+       vuelve a salir. */
+    p.esquema = null;
     p.metadatos = await doc.metadatos();
     /* La tinta se busca por un hash de la ruta y el tamaño: reabrir el mismo
        PDF trae de vuelta lo anotado, sin que el archivo haya cambiado nunca. */
@@ -296,9 +305,13 @@ async function abrirUna(archivo, activarla) {
     });
     p.tinta.onCambio = () => emitir('tinta');
 
-    pestanas.push(p);
+    /* Donde se pidió, recortado a los bordes. Si entra delante de la activa,
+       la activa sigue siendo la MISMA pestaña: se la vuelve a buscar. */
+    const actual = pestanas[activa];
+    const i = Number.isInteger(posicion) ? Math.max(0, Math.min(pestanas.length, posicion)) : pestanas.length;
+    pestanas.splice(i, 0, p);
     const cambia = activarla || pestanas.length === 1;
-    if (cambia) activa = pestanas.length - 1;
+    activa = cambia ? i : pestanas.indexOf(actual);
     emitir('pestanas');
     if (cambia) emitir('documento');
     return doc;

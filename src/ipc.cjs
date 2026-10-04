@@ -50,6 +50,10 @@ function register() {
     version: app.getVersion(),
     dataDir: store.ROOT,
     electron: process.versions.electron,
+    /* Modo desarrollo: `npm run dev` (--dev) o QUIRE_DEV en el entorno. Lo
+       pide el renderer para mostrar lo que es del framework y no de Quire,
+       como la vitrina de Piezas en el rail (ux-39). */
+    dev: process.argv.includes('--dev') || !!process.env.QUIRE_DEV,
   }));
 
   handle('settings:get', () => store.loadSettings());

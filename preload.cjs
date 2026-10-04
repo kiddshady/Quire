@@ -37,13 +37,22 @@ contextBridge.exposeInMainWorld('onyx', {
 
     /* El aviso de que la ventana se está por cerrar. El main ya canceló ese
        primer cierre y está esperando: hay que guardar lo pendiente y contestar
-       con `listoParaCerrar()`, o la ventana se cierra sola a los 3 segundos. */
+       con `listoParaCerrar()`, o la ventana se cierra sola a los 3 segundos.
+
+       Para preguntar antes (cambios de Páginas sin guardar, ux-03): primero
+       `preguntandoAntesDeCerrar()`, enseguida, que para el reloj del main
+       mientras el usuario decide; después `cancelarCierre()` para que la
+       ventana siga, o `cierreDecidido()` —el main vuelve a armar su reloj, por
+       si guardar se cuelga— y `listoParaCerrar()` cuando terminó de guardar. */
     onAntesDeCerrar: (cb) => {
       const handler = () => cb();
       ipcRenderer.on('app:antes-de-cerrar', handler);
       return () => ipcRenderer.off('app:antes-de-cerrar', handler);
     },
     listoParaCerrar: () => ipcRenderer.send('app:guardado'),
+    preguntandoAntesDeCerrar: () => ipcRenderer.send('app:cierre-preguntando'),
+    cancelarCierre: () => ipcRenderer.send('app:cierre-cancelado'),
+    cierreDecidido: () => ipcRenderer.send('app:cierre-decidido'),
   },
 
   settings: {

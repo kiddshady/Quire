@@ -28,6 +28,13 @@
      con `hidden`: un `display:none` la sacaría de ser ítem del grid y el
      cuerpo caería en la fila de alto automático que era de ella. El síntoma
      sería la app entera aplastada, así que se mide el alto del cuerpo.
+
+   · Que la franja se ponga al día y no se rehaga (shell-01, css-18, ux-18):
+     activar conserva los nodos y el foco, el subrayado CRECE, la que se cierra
+     sale absoluta y esfumándose, el «+» se pliega a lo ancho, el aterrizaje
+     de un arrastre no salta y, en una ventana angosta, el ancho de las que
+     quedan viaja. Todo medido por cuadro, no a ojo. Las pestañas se cuentan
+     sin la que se está cerrando (`:not([data-state=closing])`).
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const { app, BrowserWindow } = require('electron');
@@ -113,6 +120,18 @@ async function correr() {
 
   const js = (codigo) => win.webContents.executeJavaScript(codigo, true);
 
+  /* Un muestreador que corre EN la página, un dato por cuadro: desde Electron
+     cada lectura paga el viaje del IPC y se pierden los cuadros del medio. */
+  await js(`window.__cuadros = (fn, ms) => new Promise((ok) => {
+    const filas = []; const t0 = performance.now();
+    const paso = () => {
+      const t = performance.now() - t0;
+      filas.push({ t: Math.round(t), ...fn() });
+      if (t < ms) requestAnimationFrame(paso); else ok(filas);
+    };
+    requestAnimationFrame(paso);
+  }); window.__VIVAS = '.qr-tab:not([data-state="closing"])'; true`);
+
   /** Abre un PDF por el mismo camino que la app: leer del disco y abrir(). */
   const abrir = (ruta) => js(`(async () => {
     const est = await import('./js/estado.js');
@@ -145,7 +164,8 @@ async function correr() {
       alto: f.getBoundingClientRect().height,
       display: getComputedStyle(f).display,
       altoCuerpo: cuerpo.getBoundingClientRect().height,
-      tabs: document.querySelectorAll('.qr-tab').length,
+      tabs: document.querySelectorAll(__VIVAS).length,
+      inerte: f.inert,
     };
   })()`)]);
 
@@ -158,6 +178,9 @@ async function correr() {
     ok('y plegada por alto, no con display:none', n.display !== 'none', n.display);
     ok('el cuerpo se queda con la ventana entera', n.altoCuerpo > 700, `${n.altoCuerpo} px`);
     ok('igual hay una pestaña dibujada', n.tabs === 1, `${n.tabs}`);
+    /* Plegada, la franja no recibe el Tab: la pestaña, su cruz y el «+» eran
+       tres paradas invisibles del anillo (ux-18). */
+    ok('y la franja plegada es inerte', n.inerte === true, String(n.inerte));
   }
 
   /* ── 2. El segundo documento abre la franja ─────────────────────────────── */
@@ -168,7 +191,7 @@ async function correr() {
   notas.push(['dos-pestañas', await js(`(() => {
     const f = document.getElementById('qr-tabs');
     const r = f.getBoundingClientRect();
-    const tabs = [...document.querySelectorAll('.qr-tab')];
+    const tabs = [...document.querySelectorAll(__VIVAS)];
     const titlebar = document.querySelector('.ox-titlebar').getBoundingClientRect();
     const cuerpo = document.querySelector('.ox-body').getBoundingClientRect();
     return {
@@ -181,7 +204,8 @@ async function correr() {
       activaEs: tabs.findIndex((t) => t.classList.contains('is-active')),
       nombres: tabs.map((t) => t.querySelector('.qr-tab__nombre').textContent),
       contextoTitlebar: document.getElementById('titlebar-context').textContent.trim(),
-      hayMas: !!document.getElementById('qr-tab-mas'),
+      hayMas: !!document.getElementById('qr-tab-mas') && !document.getElementById('qr-tab-mas').hidden,
+      inerte: f.inert,
     };
   })()`)]);
 
@@ -199,7 +223,54 @@ async function correr() {
     ok('la activa es la recién abierta', n.activaEs === 1, `índice ${n.activaEs}`);
     ok('el titlebar deja de repetir el nombre', n.contextoTitlebar === '', n.contextoTitlebar);
     ok('está el botón de abrir otro', n.hayMas);
+    ok('con dos documentos la franja ya no es inerte', n.inerte === false, String(n.inerte));
   }
+
+  /* ── 2-ter. Activar conserva los nodos, el foco, y el subrayado crece ──────
+     Con la franja rehecha en cada aviso, Enter sobre una pestaña dejaba el
+     foco en el body (el nodo enfocado ya no existía) y el subrayado de la
+     nueva activa nacía crecido. Se activa con una tecla de verdad, sobre la
+     pestaña enfocada. */
+  console.log('\n2-ter. Activar sin rehacer la franja');
+  {
+    win.focus();
+    win.webContents.focus();
+    await js(`(() => {
+      window.__antes = [...document.querySelectorAll(__VIVAS)];
+      const otra = window.__antes.find((t) => !t.classList.contains('is-active'));
+      window.__otra = otra;
+      otra.focus();
+      return true;
+    })()`);
+    await esperar(50);
+    const pCrece = js(`__cuadros(() => {
+      const t = window.__otra;
+      const m = new DOMMatrixReadOnly(getComputedStyle(t, '::after').transform);
+      return { escala: Math.round(m.a * 100) / 100, activa: t.classList.contains('is-active') };
+    }, 420)`);
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+    const crece = await pCrece;
+    const n = await js(`(() => {
+      const ahora = [...document.querySelectorAll(__VIVAS)];
+      return {
+        mismos: ahora.length === window.__antes.length && ahora.every((t, i) => t === window.__antes[i]),
+        foco: document.activeElement === window.__otra,
+        activa: window.__otra.classList.contains('is-active'),
+      };
+    })()`);
+    const intermedias = crece.filter((f) => f.activa && f.escala > 0.05 && f.escala < 0.95).length;
+    ok('Enter activa la pestaña enfocada', n.activa);
+    ok('activar conserva los nodos de la franja', n.mismos);
+    ok('y el foco sigue en la pestaña', n.foco);
+    ok('el subrayado de la nueva activa crece (escalas intermedias)', intermedias >= 2,
+      crece.filter((_, i) => i % 3 === 0).map((f) => f.escala).join(' → '));
+    ok('y termina entero', crece.at(-1).escala === 1, String(crece.at(-1).escala));
+    notas.push(['subrayado', crece.map((f) => f.escala).join(' ')]);
+  }
+  // Lo que sigue espera la segunda activa, como la dejó el paso 2.
+  await js(`(async () => { const est = await import('./js/estado.js'); est.activar(est.S.pestanas[1].id); })()`);
+  await esperar(500);
 
   /* ── 2-bis. El anillo de foco de una pestaña no se corta ────────────────────
      La franja es un contenedor que recorta (scrollea en horizontal cuando no
@@ -330,9 +401,14 @@ async function correr() {
   console.log('\n5. El tope');
   notas.push(['tope', await js(`(async () => {
     const est = await import('./js/estado.js');
-    for (const ruta of ${JSON.stringify(PDFS.slice(2, 4))}) {
-      await est.abrir(await window.onyx.docs.leer(ruta));
-    }
+    await est.abrir(await window.onyx.docs.leer(${JSON.stringify(PDFS[2])}));
+    await new Promise((r) => setTimeout(r, 400));
+    /* La cuarta llena la franja y el «+» se va: tiene que plegarse a lo
+       ancho, no salir del DOM en un cuadro. */
+    const mas = document.getElementById('qr-tab-mas');
+    const pMas = __cuadros(() => ({ ancho: Math.round(mas.getBoundingClientRect().width * 10) / 10, vivo: mas.isConnected }), 900);
+    await est.abrir(await window.onyx.docs.leer(${JSON.stringify(PDFS[3])}));
+    const serieMas = await pMas;
     const llenas = est.S.pestanas.length;
 
     let error = null;
@@ -341,7 +417,9 @@ async function correr() {
     } catch (e) { error = e.message; }
 
     return { max: est.MAX_PESTANAS, llenas, error, tras: est.S.pestanas.length,
-             hayMas: !!document.getElementById('qr-tab-mas') };
+             hayMas: !!document.getElementById('qr-tab-mas') && !document.getElementById('qr-tab-mas').hidden,
+             masMismo: document.getElementById('qr-tab-mas') === mas,
+             serieMas: serieMas.map((f) => f.ancho) };
   })()`)]);
 
   {
@@ -351,6 +429,11 @@ async function correr() {
       !!n.error && /cerr/i.test(n.error), n.error || 'no tiró error');
     ok('y no queda una pestaña a medias', n.tras === n.max, `${n.tras}`);
     ok('el botón de abrir otro desaparece en el tope', !n.hayMas);
+    const intermedios = n.serieMas.filter((w) => w > 0.5 && w < 25.5).length;
+    ok('y se pliega a lo ancho, con medidas intermedias', intermedios >= 2 && n.serieMas.at(-1) === 0,
+      n.serieMas.filter((_, i) => i % 3 === 0).join(' → '));
+    ok('siendo el mismo botón, no uno nuevo', n.masMismo);
+    notas.push(['ancho-del-mas', n.serieMas.join(' ')]);
   }
 
   /* ── 5-bis. Reordenar ───────────────────────────────────────────────────── */
@@ -359,7 +442,7 @@ async function correr() {
     const est = await import('./js/estado.js');
     const { S } = est;
     const nombres = () => S.pestanas.map((p) => p.doc.nombre);
-    const enDom = () => [...document.querySelectorAll('.qr-tab__nombre')].map((n) => n.textContent);
+    const enDom = () => [...document.querySelectorAll(__VIVAS + ' .qr-tab__nombre')].map((n) => n.textContent);
 
     // La activa es la última (recién abierta). Se mueve la PRIMERA al final:
     // la activa tiene que seguir siendo la misma, corrida un lugar.
@@ -395,8 +478,9 @@ async function correr() {
      setPointerCapture() rechaza un pointerId inventado, así que un
      PointerEvent despachado a mano nunca llegaría a arrastrar nada. */
   console.log('\n5-ter. Arrastrar una pestaña');
+  await esperar(400);          // que termine de viajar lo que movió el mover() de recién
   {
-    const rects = await js(`(() => [...document.querySelectorAll('.qr-tab')].map((t) => {
+    const rects = await js(`(() => [...document.querySelectorAll(__VIVAS)].map((t) => {
       const r = t.getBoundingClientRect();
       return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
     }))()`);
@@ -416,19 +500,32 @@ async function correr() {
     }
     // A mitad de camino: la arrastrada está levantada y las vecinas corridas.
     const enVuelo = await js(`(() => {
-      const tabs = [...document.querySelectorAll('.qr-tab')];
+      const tabs = [...document.querySelectorAll(__VIVAS)];
       return {
         levantada: tabs.findIndex((t) => t.classList.contains('is-dragging')),
         corridas: tabs.filter((t) => /translateX\\(-/.test(t.style.transform)).length,
         franja: document.getElementById('qr-tabs').classList.contains('is-reordering'),
       };
     })()`);
+    /* El aterrizaje, cuadro por cuadro: la arrastrada es el MISMO nodo hasta
+       el final, no vuelve nunca hacia atrás (con el orden de limpieza al
+       revés, reconcile la veía en su lugar viejo y la hacía volver desde
+       ahí) y lo levantado se apoya de a poco (la sombra pasa por valores
+       intermedios en vez de irse de un cuadro al otro). */
+    await js(`window.__arrastrada = document.querySelector('.qr-tab.is-dragging'); true`);
+    const pAterriza = js(`__cuadros(() => {
+      const t = window.__arrastrada;
+      const sombra = getComputedStyle(t).boxShadow;
+      const alfas = [...sombra.matchAll(/rgba?\\([^)]*?([\\d.]+)\\)/g)].map((m) => +m[1]);
+      return { x: Math.round(t.getBoundingClientRect().left), vivo: t.isConnected, alfa: alfas.length ? Math.max(...alfas) : 0 };
+    }, 700)`);
     raton('mouseUp', a.x, de.y, { clickCount: 1 });
-    await esperar(500);
+    const aterriza = await pAterriza;
+    await esperar(100);
 
     const despues = await js(`(async () => {
       const est = await import('./js/estado.js');
-      const tabs = [...document.querySelectorAll('.qr-tab')];
+      const tabs = [...document.querySelectorAll(__VIVAS)];
       return {
         orden: est.S.pestanas.map((p) => p.doc.nombre),
         activa: est.S.doc.nombre,
@@ -444,10 +541,121 @@ async function correr() {
     ok('al soltar, la primera quedó tercera', despues.orden.join() === esperado.join(), despues.orden.join(' / '));
     ok('y pasó a ser la activa', despues.activa === nombresAntes[0], despues.activa);
     ok('no queda ningún transform ni clase colgada', despues.sucias === 0 && !despues.franja, `${despues.sucias}`);
+
+    const xs = aterriza.map((f) => f.x);
+    const finalX = xs.at(-1);
+    // Hacia dónde va: del primer cuadro al último. Un paso en contra de más de 2 px es un salto atrás.
+    const sentido = Math.sign(finalX - xs[0]) || 1;
+    const enContra = xs.slice(1).filter((x, i) => (x - xs[i]) * sentido < -2).length;
+    const saltoMax = Math.max(0, ...xs.slice(1).map((x, i) => Math.abs(x - xs[i])));
+    ok('la arrastrada sigue siendo el mismo nodo al aterrizar', aterriza.every((f) => f.vivo));
+    ok('y nunca vuelve hacia atrás mientras aterriza', enContra === 0, xs.join(' '));
+    ok('ni pega un salto de más de una pestaña', saltoMax < 120, `${saltoMax} px`);
+    const sombras = aterriza.map((f) => f.alfa);
+    const medias = sombras.filter((a) => a > 0.03 && a < 0.42).length;
+    ok('lo levantado se apoya de a poco (sombra con valores intermedios)', medias >= 2,
+      sombras.filter((_, i) => i % 3 === 0).map((v) => v.toFixed(2)).join(' → '));
+    notas.push(['aterrizaje', { x: xs.join(' '), sombra: sombras.map((v) => v.toFixed(2)).join(' ') }]);
+  }
+
+  /* ── 5-quater. En una ventana angosta, el ancho de las que quedan viaja ─────
+     reconcile() solo traslada. Con cuatro en una ventana de 900 las pestañas
+     se reparten el lugar (menos de su techo de 240), y al cerrar una las que
+     quedan crecen: ese ancho cambiaba de golpe mientras el FLIP corría. */
+  console.log('\n5-quater. Cerrar una con la ventana angosta');
+  {
+    const ancho0 = win.getSize();
+    win.setSize(900, ancho0[1]);
+    await esperar(500);
+    const n = await js(`(async () => {
+      const est = await import('./js/estado.js');
+      const tabs = [...document.querySelectorAll(__VIVAS)];
+      const antes = tabs.map((t) => Math.round(t.getBoundingClientRect().width));
+      // Se cierra la última; se mira la primera, que se queda y crece.
+      const mirada = tabs[0];
+      const ultima = est.S.pestanas.at(-1);
+      const ruta = ultima.doc.ruta;
+      const pSerie = __cuadros(() => {
+        const r = mirada.getBoundingClientRect();
+        return { w: Math.round(r.width * 10) / 10, x: Math.round(r.left) };
+      }, 500);
+      await est.cerrarPestana(ultima.id);
+      const serie = await pSerie;
+      await new Promise((r) => setTimeout(r, 300));
+
+      /* De vuelta a cuatro, para lo que sigue, y midiendo: al abrir la cuarta
+         el «+» se pliega, y los anchos finales se medían con él todavía en
+         26 px. Las pestañas quedaban quietas en un final falso y saltaban al
+         terminar el viaje (auditoría 2F: 205,5 → 214 en un cuadro, la x de
+         la tercera +17 px). Se mira la segunda y la tercera, que se mueven. */
+      const [t2, t3] = [...document.querySelectorAll(__VIVAS)].slice(1, 3);
+      const pAbrir = __cuadros(() => ({
+        w: Math.round(t2.getBoundingClientRect().width * 10) / 10,
+        x2: Math.round(t2.getBoundingClientRect().left * 10) / 10,
+        x3: Math.round(t3.getBoundingClientRect().left * 10) / 10,
+      }), 1600);
+      await est.abrir(await window.onyx.docs.leer(ruta), { activar: false });
+      const abrir = await pAbrir;
+      return { antes, serie, abrir };
+    })()`);
+    win.setSize(ancho0[0], ancho0[1]);
+    await esperar(500);
+    {
+      /* El viaje arranca en el primer cuadro que cambia; de ahí a 200 ms la
+         curva (expo-out) ya casi no se mueve, así que ahí no puede haber
+         ningún salto: con el final falso, el salto de 8 a 17 px caía justo
+         al terminar, a los 280 ms. */
+      const a = n.abrir;
+      const i0 = a.findIndex((f) => Math.abs(f.w - a[0].w) > 0.5 || Math.abs(f.x3 - a[0].x3) > 0.5);
+      const cola = i0 < 0 ? [] : a.filter((f) => f.t > a[i0].t + 200);
+      const salto = (k) => Math.max(0, ...cola.slice(1).map((f, i) => Math.abs(f[k] - cola[i][k])));
+      ok('al abrir la cuarta en 900 px las pestañas se angostan', i0 >= 0 && a.at(-1).w < a[0].w - 5, `${a[0].w} → ${a.at(-1).w}`);
+      ok('y al terminar el viaje no saltan: ni el ancho ni la x de las que se mueven', cola.length > 5 && salto('w') < 1.5 && salto('x2') < 1.5 && salto('x3') < 1.5,
+        `cola: ancho ${salto('w')} px, x de la segunda ${salto('x2')} px, x de la tercera ${salto('x3')} px`);
+      notas.push(['ancho-al-abrir-la-cuarta', a.filter((_, i) => i % 3 === 0).map((f) => `${f.t}:${f.w}/${f.x3}`).join(' ')]);
+    }
+    const ws = n.serie.map((f) => f.w);
+    const w0 = ws[0]; const w1 = ws.at(-1);
+    const intermedios = ws.filter((w) => w > Math.min(w0, w1) + 1 && w < Math.max(w0, w1) - 1).length;
+    const saltoMax = Math.max(0, ...ws.slice(1).map((w, i) => Math.abs(w - ws[i])));
+    ok('con cuatro en 900 px no llegan a su techo (si no, no hay nada que medir)', n.antes[0] < 235, n.antes.join(' / '));
+    ok('al cerrar una, las que quedan crecen', w1 > w0 + 5, `${w0} → ${w1}`);
+    ok('y el ancho viaja: hay medidas intermedias', intermedios >= 2, ws.filter((_, i) => i % 3 === 0).join(' → '));
+    ok('sin un salto de ancho de un cuadro al otro', saltoMax < (w1 - w0) * 0.6, `${saltoMax} px`);
+    notas.push(['ancho-al-cerrar-angosta', { w: ws.join(' '), x: n.serie.map((f) => f.x).join(' ') }]);
   }
 
   /* ── 6. Cerrar: a dónde salta, y el worker sigue vivo ───────────────────── */
   console.log('\n6. Cerrar una pestaña');
+  /* La que se cierra no desaparece de un cuadro al otro ni deja saltar a las
+     demás: sale fuera del flujo (absoluta, en su lugar) esfumándose. */
+  {
+    const n = await js(`(async () => {
+      const est = await import('./js/estado.js');
+      const { S } = est;
+      const p = S.pestanas.find((x) => x !== S.pestana);
+      const nodo = document.querySelector('.qr-tab[data-pestana="' + p.id + '"]');
+      const ruta = p.doc.ruta;
+      const pSerie = __cuadros(() => ({
+        vivo: nodo.isConnected,
+        pos: getComputedStyle(nodo).position,
+        estado: nodo.dataset.state || '',
+        op: Math.round(+getComputedStyle(nodo).opacity * 100),
+      }), 450);
+      await est.cerrarPestana(p.id);
+      const serie = await pSerie;
+      await est.abrir(await window.onyx.docs.leer(ruta), { activar: false });
+      return serie;
+    })()`);
+    const saliendo = n.filter((f) => f.vivo && f.estado === 'closing');
+    ok('la que se cierra queda absoluta mientras se va', saliendo.length > 0 && saliendo.every((f) => f.pos === 'absolute'),
+      JSON.stringify(n.slice(0, 3)));
+    ok('y se esfuma de a poco', saliendo.filter((f) => f.op > 5 && f.op < 95).length >= 2,
+      saliendo.map((f) => f.op).join(' → '));
+    ok('y al final sale del DOM', !n.at(-1).vivo);
+    notas.push(['la-que-se-cierra', saliendo.map((f) => `${f.pos}:${f.op}`).join(' ')]);
+  }
+  await esperar(300);
   notas.push(['cerrar', await js(`(async () => {
     const est = await import('./js/estado.js');
     const { S } = est;

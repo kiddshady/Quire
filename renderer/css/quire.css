@@ -60,6 +60,11 @@
      propósito: duplicados, cambiar el fondo de la app desincronizaría la
      selección sin que nada avise. */
   --qr-select-claro: color-mix(in oklab, var(--ox-bg) 16%, transparent);
+
+  /* El velo que oscurece la app mientras arrastrás un archivo encima (ver
+     chrome.css). Estaba crudo en la regla; es el mismo negro de las sombras
+     de la casa, más liviano: tiene que dejar leer lo que hay debajo. */
+  --qr-velo-soltar: rgb(0 0 0 / .28);
 }
 
 /* Pie del rail.
@@ -82,8 +87,18 @@
 }
 /* Onyx apaga el esfumado de abajo del nav cuando hay pie, porque su pie trae
    línea y la línea es el límite. Acá el pie no la lleva: el nav corta al aire y
-   el fade vuelve. */
-.ox-rail__nav:has(~ .ox-rail__foot) { --ox-fade-bottom: var(--ox-fade); }
+   el fade vuelve. Salvo al llegar al fondo: sin el :not, esta regla le ganaba
+   por orden a `.ox-scroll.is-bottom` (misma especificidad) y «Ajustes» quedaba
+   esfumado aunque no hubiera nada más abajo (css-25c). */
+.ox-rail__nav:has(~ .ox-rail__foot):not(.is-bottom) { --ox-fade-bottom: var(--ox-fade); }
+
+/* El rail esconde ítems con `hidden` (Piezas, fuera del modo desarrollo), y
+   `.ox-navitem` declara su display: sin esto el `hidden` del navegador pierde. */
+.ox-navitem[hidden] { display: none; }
+
+/* El botón Abrir ocupa el ancho del rail. Era un style="width:100%" suelto en
+   el HTML. */
+.qr-abrir { width: 100%; }
 
 /* Hairline como sombra interior y nunca como `border`: un border deja hilacha
    en las esquinas cuando el contenedor recorta. Es la regla de la casa. */
@@ -106,6 +121,13 @@
 .qr-col-ancha { gap: var(--ox-4); }                    /* el cuerpo de una tarjeta de opciones */
 .qr-angosto { max-width: 320px; }                      /* un segmentado que no se estira entero */
 .qr-remate { flex: none; height: var(--ox-7); }        /* aire al final de una página que scrollea */
+.qr-ajustes { max-width: 640px; }                      /* la columna de Ajustes: renglones que se leen */
+.qr-col-chica { gap: var(--ox-2); }                    /* un rótulo, un dato y su explicación */
+
+/* La lista de documentos con cambios sin guardar, en la pregunta antes de
+   cerrar la app (app.js, confirmarCierreConCambios). */
+.qr-cierre-lista { display: flex; flex-direction: column; gap: var(--ox-2); margin: 0; padding: 0; list-style: none; }
+.qr-cierre-lista li { display: flex; flex-direction: column; gap: calc(var(--ox-1) / 2); }
 /* ── Pestañas ────────────────────────────────────────────────────────────────
    Una fila más en el chasis, entre el titlebar y el cuerpo. La declaración
    completa se repite acá en vez de editar shell.css, por la misma razón que
@@ -133,6 +155,9 @@
      agarrar una pestaña movería la ventana en vez de cambiar de documento. */
   -webkit-app-region: no-drag;
   transition: height var(--ox-t-3) var(--ox-ease);
+  /* El «+» se pliega a lo ancho (ox-plegable--ancho) al llegar al tope: con
+     esto se come también el hueco del gap, en vez de soltarlo de golpe. */
+  --ox-plegable-gap: var(--ox-1);
 }
 
 /* Con un solo documento la franja no está: la app se ve igual que siempre y no
@@ -221,7 +246,7 @@
   z-index: 1;
   color: var(--ox-text);
   background: var(--ox-wash-3);
-  box-shadow: 0 4px 14px rgb(0 0 0 / .45);
+  box-shadow: var(--ox-e3);
 }
 
 /* El nombre se corta con elipsis y el título entero vive en el tooltip. */
@@ -276,6 +301,14 @@
   transition: var(--tr-color);
 }
 .qr-tabs__mas:hover { background: var(--ox-wash-1); color: var(--ox-text-2); }
+/* Plegado (hidden, con ox-plegable--ancho) también suelta su margen, y al
+   volver lo recupera de a poco: el plegable solo se ocupa del de la derecha. */
+.qr-tabs__mas.ox-plegable--ancho[hidden] { margin-left: 0; }
+@starting-style {
+  .qr-tabs__mas.ox-plegable--ancho:not([hidden]) { margin-left: 0; }
+}
+/* «Abriendo…»: el relevo al spinner (app.js) se apoya en la celda del botón. */
+.qr-tabs__mas > * { grid-area: 1 / 1; }
 
 .qr-lector {
   display: flex;

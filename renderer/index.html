@@ -59,7 +59,7 @@
 
   <!-- ── Titlebar propia: acá no hay frame nativo ─────────────────────────── -->
   <header class="ox-titlebar">
-    <div class="ox-brand ox-no-drag" data-tip="Quire" id="brand">
+    <div class="ox-brand ox-no-drag" id="brand">
       <svg class="ox-brand__mark ox-icon" viewBox="0 0 16 16" aria-hidden="true">
         <path d="M8 4.3 2.4 6.2v5.9L8 10.3l5.6 1.8V6.2z"/>
         <path class="ox-brand__trail" d="M8 4.3v6"/>
@@ -93,7 +93,10 @@
     <!-- ── Rail ──────────────────────────────────────────────────────────── -->
     <nav class="ox-rail">
       <div class="ox-rail__top">
-        <button class="ox-btn ox-btn--secondary ox-flashable" id="btn-abrir" style="width:100%">
+        <!-- El atajo vive en el tooltip: si no, Ctrl+O no lo decía ningún lado
+             salvo el «+» de la franja, que con un documento no se ve (ux-17). -->
+        <button class="ox-btn ox-btn--secondary ox-flashable qr-abrir" id="btn-abrir"
+                data-tip="Abrir un PDF" data-tip-key="Ctrl O" data-tip-side="right">
           <i data-icon="folder"></i> Abrir
         </button>
       </div>
@@ -123,7 +126,9 @@
 
         <div class="ox-rail__group">
           <div class="ox-rail__group-label">Sistema</div>
-          <button class="ox-navitem" data-view="piezas">
+          <!-- La vitrina del framework, no una función de Quire: solo se ve en
+               modo desarrollo (--dev o QUIRE_DEV; ver boot() en app.js). -->
+          <button class="ox-navitem" data-view="piezas" id="nav-piezas" hidden>
             <i data-icon="layers"></i> Piezas
           </button>
           <button class="ox-navitem" data-view="ajustes">
@@ -145,14 +150,14 @@
       <i data-icon="file"></i> <span class="ox-statusbar__value" id="stat-doc-name">Ningún documento</span>
     </div>
     <div class="ox-statusbar__item ox-plegable--ancho" id="stat-pagina" data-tip="Página actual" data-tip-side="top" hidden>
-      <span class="ox-statusbar__value ox-num" id="stat-pagina-value">—</span>
+      <span class="ox-statusbar__value ox-num" id="stat-pagina-value"></span>
     </div>
     <div class="ox-statusbar__item ox-plegable--ancho" id="stat-medida" data-tip="Tamaño real de la página" data-tip-side="top" hidden>
-      <span class="ox-statusbar__value ox-num" id="stat-medida-value">—</span>
+      <span class="ox-statusbar__value ox-num" id="stat-medida-value"></span>
     </div>
     <div class="ox-spacer"></div>
     <div class="ox-statusbar__item ox-plegable--ancho" id="stat-impresora" data-tip="Impresora activa" data-tip-side="top" hidden>
-      <i data-icon="printer"></i> <span class="ox-statusbar__value" id="stat-impresora-value">—</span>
+      <i data-icon="printer"></i> <span class="ox-statusbar__value" id="stat-impresora-value"></span>
     </div>
     <!-- Lo que queda visible cuando cerrás el cartel de actualización. -->
     <div class="ox-statusbar__item qr-stat-act ox-plegable--ancho" id="stat-update" data-tip-side="top" hidden></div>
