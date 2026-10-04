@@ -1,0 +1,344 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   QUIRE — presentar
+   La capa de la presentación (en la ventana de Quire) y la sala (la ventana
+   del proyector, que carga solo tokens.css y este archivo). Ver presentar.js.
+
+   El negro de la diapositiva es negro de verdad, #000, y no --ox-bg: es lo
+   que rodea a la lámina en un proyector, y cualquier tinte se nota como un
+   recuadro gris alrededor.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── La capa ─────────────────────────────────────────────────────────────────
+   Debajo de #ox-layer (z 100): los tooltips de la botonera van encima. */
+.qr-pres {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: #000;
+  color: var(--ox-text);
+  outline: none;
+  animation: qr-pres-entra var(--ox-t-3) var(--ox-ease) both;
+}
+.qr-pres.is-settled { animation: none; }
+.qr-pres[data-state='closing'] { animation: qr-pres-sale var(--ox-t-3) var(--ox-ease-both) both; pointer-events: none; }
+@keyframes qr-pres-entra { from { opacity: 0; } }
+@keyframes qr-pres-sale { to { opacity: 0; } }
+
+.qr-pres__cont { position: absolute; inset: 0; }
+
+/* El telón: negro encima de todo al entrar, al salir y al intercambiar las
+   pantallas. Lo que pasa detrás (la pantalla completa, el primer pintado) no
+   se ve. */
+.qr-pres__telon {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: #000;
+  pointer-events: none;
+  transition: opacity var(--ox-t-3) var(--ox-ease-both);
+}
+.qr-pres__telon.is-abierto { opacity: 0; }
+
+/* ── El escenario ──────────────────────────────────────────────────────────── */
+.qr-esc {
+  position: relative;
+  overflow: hidden;
+  background: #000;
+  min-width: 0;
+  min-height: 0;
+}
+/* Las láminas, en una sola celda: la que se va queda encima de la que llega. */
+.qr-esc__laminas {
+  position: absolute;
+  inset: 0;
+  display: grid;
+}
+.qr-esc__lamina {
+  grid-area: 1 / 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.qr-esc__tinta {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* El láser: un punto rojo con su halo. Se mueve con transform (lo pone
+   presentar.js) y aparece y se va por opacidad. */
+.qr-esc__laser {
+  --d: clamp(12px, 1.9vmin, 30px);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--d);
+  height: var(--d);
+  margin: calc(var(--d) / -2) 0 0 calc(var(--d) / -2);
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 16%, #ff3030 42%, rgb(255 48 48 / 0) 72%);
+  box-shadow: 0 0 calc(var(--d) * .7) calc(var(--d) * .2) rgb(255 40 40 / .5);
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform;
+  transition: opacity var(--ox-t-1) var(--ox-ease-soft);
+}
+.qr-esc__laser.is-on { opacity: 1; }
+
+.qr-esc__fin {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgb(255 255 255 / .42);
+  font: var(--ox-w-regular) clamp(13px, 2.2vmin, 22px) / 1 var(--ox-font);
+  letter-spacing: var(--ox-track-normal);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ox-t-3) var(--ox-ease-both);
+}
+.qr-esc.is-fin .qr-esc__fin { opacity: 1; }
+
+.qr-esc__negro {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ox-t-3) var(--ox-ease-both);
+}
+.qr-esc.is-negro .qr-esc__negro { opacity: 1; }
+
+/* En la vista del orador, la sala en negro no te deja a oscuras a vos: la
+   diapositiva se apaga a medias y lo dice. */
+.qr-esc--orador.is-negro .qr-esc__negro { opacity: .8; }
+.qr-esc--orador .qr-esc__negro::after {
+  content: 'La sala está en negro';
+  padding: var(--ox-2) var(--ox-4);
+  border-radius: var(--ox-r-pill);
+  background: var(--ox-s2);
+  box-shadow: var(--ox-hairline);
+  color: var(--ox-text-2);
+  font: var(--ox-w-medium) var(--ox-fs-12) / 1 var(--ox-font);
+}
+
+/* El cursor: el láser lo reemplaza, y para dibujar va la cruz. */
+.qr-pres.is-laser .qr-esc--principal { cursor: none; }
+.qr-pres.is-lapiz .qr-esc--principal { cursor: crosshair; }
+
+/* ── Una sola pantalla ─────────────────────────────────────────────────────── */
+.qr-pres--sola .qr-esc--principal { position: absolute; inset: 0; }
+.qr-pres--sola.is-quieto,
+.qr-pres--sola.is-quieto * { cursor: none !important; }
+
+/* La botonera aparece al mover el mouse y se va sola. Opaca: es una hoja que
+   aparece encima de la diapositiva, y el vidrio sobre una lámina blanca se
+   lee mal. */
+.qr-pres__flota {
+  position: absolute;
+  left: var(--ox-4);
+  bottom: var(--ox-4);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--ox-1);
+  padding: var(--ox-1);
+  border-radius: var(--ox-r-lg);
+  background: var(--ox-s2);
+  box-shadow: var(--ox-hairline), var(--ox-e3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ox-t-2) var(--ox-ease-both);
+}
+.qr-pres__flota.is-visible { opacity: 1; pointer-events: auto; }
+.qr-pres__flota .ox-vr { height: 16px; }
+.qr-pres__cuenta {
+  min-width: 52px;
+  padding: 0 var(--ox-2);
+  color: var(--ox-text-2);
+  font-size: var(--ox-fs-12);
+  text-align: center;
+}
+
+/* El cronómetro, en el rincón. T lo esconde; un clic lo pausa. */
+.qr-pres__reloj {
+  position: absolute;
+  right: var(--ox-4);
+  bottom: var(--ox-4);
+  z-index: 3;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: var(--ox-r-pill);
+  background: rgb(0 0 0 / .5);
+  color: rgb(255 255 255 / .62);
+  font-size: var(--ox-fs-12);
+  cursor: default;
+  transition: opacity var(--ox-t-2) var(--ox-ease-both), color var(--ox-t-1) var(--ox-ease-soft);
+}
+.qr-pres__reloj:hover { color: #fff; }
+.qr-pres__reloj.is-oculto { opacity: 0; pointer-events: none; }
+.qr-pres.is-pausado .qr-pres__reloj { color: rgb(255 255 255 / .34); }
+
+/* «Ir a la 12»: lo que se va tecleando antes del Enter. */
+.qr-pres__salto {
+  position: absolute;
+  left: 50%;
+  bottom: var(--ox-6);
+  z-index: 3;
+  padding: var(--ox-2) var(--ox-4);
+  border-radius: var(--ox-r-md);
+  background: var(--ox-s2);
+  box-shadow: var(--ox-hairline), var(--ox-e3);
+  color: var(--ox-text-2);
+  font-size: var(--ox-fs-13);
+  white-space: nowrap;
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ox-t-2) var(--ox-ease-both);
+}
+.qr-pres__salto.is-visible { opacity: 1; }
+.qr-pres__salto .ox-num { color: var(--ox-text); }
+
+/* ── La vista del orador ───────────────────────────────────────────────────── */
+.qr-pres--orador { background: var(--ox-bg); }
+.qr-pres--orador .qr-pres__cont {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.qr-orador__cabeza {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--ox-4);
+  padding: var(--ox-4) var(--ox-6);
+}
+.qr-orador__cual { color: var(--ox-text-2); font-size: var(--ox-fs-13); }
+.qr-orador__cual .ox-num { color: var(--ox-text); }
+.qr-orador__reloj { display: flex; align-items: center; gap: var(--ox-1); }
+.qr-orador__tiempo {
+  min-width: 96px;
+  margin-right: var(--ox-2);
+  color: var(--ox-text);
+  font-size: var(--ox-fs-26);
+  font-weight: var(--ox-w-medium);
+  letter-spacing: var(--ox-track-tight);
+  text-align: right;
+  transition: color var(--ox-t-1) var(--ox-ease-soft);
+}
+.qr-pres.is-pausado .qr-orador__tiempo { color: var(--ox-text-4); }
+.qr-orador__hora { justify-self: end; color: var(--ox-text-3); font-size: var(--ox-fs-15); }
+
+.qr-orador__cuerpo {
+  display: grid;
+  grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr);
+  gap: var(--ox-6);
+  padding: 0 var(--ox-6);
+  min-height: 0;
+}
+.qr-orador__actual { position: relative; display: grid; min-height: 0; }
+.qr-esc--orador,
+.qr-esc--siguiente { background: transparent; }
+.qr-orador__lado {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ox-2);
+  min-height: 0;
+}
+.qr-orador__rotulo {
+  color: var(--ox-text-3);
+  font-size: var(--ox-fs-11);
+  font-weight: var(--ox-w-medium);
+  letter-spacing: var(--ox-track-caps);
+  text-transform: uppercase;
+}
+.qr-esc--siguiente { aspect-ratio: 16 / 10; width: 100%; flex: 0 0 auto; }
+.qr-orador__pie {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-1);
+  padding: var(--ox-4) var(--ox-6);
+}
+.qr-orador__pie .ox-vr { height: 16px; margin: 0 var(--ox-1); }
+
+/* ── La grilla ─────────────────────────────────────────────────────────────── */
+.qr-diapos {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--ox-bg);
+  animation: qr-pres-entra var(--ox-t-2) var(--ox-ease) both;
+}
+.qr-diapos.is-settled { animation: none; }
+.qr-diapos[data-state='closing'] { animation: qr-pres-sale 160ms var(--ox-ease-both) both; pointer-events: none; }
+.qr-diapos__cabeza {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ox-4) var(--ox-6);
+}
+.qr-diapos__titulo { color: var(--ox-text); font-size: var(--ox-fs-15); font-weight: var(--ox-w-medium); }
+.qr-diapos__lista {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  align-content: start;
+  gap: var(--ox-5) var(--ox-4);
+  padding: var(--ox-1) var(--ox-6) var(--ox-6);
+  overflow: auto;
+}
+.qr-diapos__item {
+  display: grid;
+  gap: var(--ox-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ox-text-3);
+  font-size: var(--ox-fs-11);
+  text-align: left;
+  cursor: default;
+  outline: none;
+  transition: color var(--ox-t-1) var(--ox-ease-soft);
+}
+.qr-diapos__hoja {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 10;
+}
+/* El marco va en la miniatura y no en su caja: una diapositiva 4:3 o una
+   hoja A4 no quedan dentro de un recuadro negro de 16:10. */
+.qr-diapos__hoja img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--ox-r-xs);
+  box-shadow: var(--ox-hairline);
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+  opacity: 0;
+  transition: opacity var(--ox-t-2) var(--ox-ease-soft), outline-color var(--ox-t-1) var(--ox-ease-soft), box-shadow var(--ox-t-1) var(--ox-ease-soft);
+}
+.qr-diapos__hoja img.is-lista { opacity: 1; }
+.qr-diapos__item:hover { color: var(--ox-text); }
+.qr-diapos__item:hover img { box-shadow: var(--ox-hairline), 0 0 0 1px var(--ox-line-3); }
+.qr-diapos__item.is-actual { color: var(--ox-text); }
+.qr-diapos__item.is-actual img { outline-color: var(--ox-accent); }
+.qr-diapos__item:focus-visible img { outline-color: var(--ox-ring); }
+
+/* ── La sala ─────────────────────────────────────────────────────────────────
+   La ventana del proyector: solo la diapositiva, sin cursor. */
+html:has(> .qr-sala),
+.qr-sala {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+}
+.qr-sala,
+.qr-sala * { cursor: none; }
+.qr-esc--sala { position: fixed; inset: 0; }
+.qr-sala > .qr-pres__telon { position: fixed; }

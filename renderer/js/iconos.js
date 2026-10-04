@@ -85,4 +85,18 @@ Icons.add({
   /* Orientación del papel. */
   vertical: '<path d="M4.3 2.4h7.4v11.2H4.3z"/>',
   horizontal: '<path d="M2.4 4.3h11.2v7.4H2.4z"/>',
+
+  /* Presentar: la pantalla de proyección sobre su trípode, con el «play». */
+  presentar: '<path d="M2 2.9h12"/><path d="M3 2.9v6.6a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2.9"/>'
+    + '<path d="M8 10.5v1.6M5.5 14.1 8 12.1l2.5 2"/><path d="M7 5.1v3l2.4-1.5z"/>',
+
+  /* Puntero láser: el punto y lo que irradia. */
+  laser: '<circle cx="8" cy="8" r="1.9"/><path d="M8 1.9v2M8 12.1v2M1.9 8h2M12.1 8h2"/>'
+    + '<path d="m3.7 3.7 1.1 1.1M11.2 11.2l1.1 1.1M12.3 3.7l-1.1 1.1M4.8 11.2l-1.1 1.1"/>',
+
+  /* Pantalla en negro: el monitor, apagado. */
+  pantallaNegra: '<rect x="2.2" y="3" width="11.6" height="8" rx="1.4"/><path d="M5.8 13.6h4.4"/><path d="m2.4 1.9 11.2 11.2"/>',
+
+  /* Intercambiar las pantallas: una flecha que va y otra que vuelve. */
+  intercambiar: '<path d="M2.6 5.3h10.2M10.5 3l2.3 2.3-2.3 2.3"/><path d="M13.4 10.7H3.2M5.5 8.4l-2.3 2.3 2.3 2.3"/>',
 });

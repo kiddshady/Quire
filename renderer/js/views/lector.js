@@ -26,6 +26,7 @@ import { montarPuck } from '../puck.js';
 import { registrar as registrarSeleccion, olvidar as olvidarSeleccion, olvidarTodo as olvidarSelecciones } from '../pdf/seleccion.js';
 import { buscadorDe, ubicar } from '../pdf/buscador.js';
 import { alPedirClave } from '../pdf/documento.js';
+import { presentar } from '../presentar.js';
 
 /* Los tokens de motion.css que se usan desde acá (t-2, t-3 y la curva de
    entrada): el giro espera a que la hoja termine de apagarse y el pliegue del
@@ -2549,6 +2550,8 @@ export function viewLector() {
 
         <button class="ox-iconbtn ox-iconbtn--sm qr-tool${V.tintaActiva ? ' is-on' : ''}" id="qr-tinta-toggle"
                 data-tip="Anotar con la tablet" data-tip-key="Ctrl E"><i data-icon="tinta"></i></button>
+        <button class="ox-iconbtn ox-iconbtn--sm" id="qr-presentar"
+                data-tip="Presentar" data-tip-key="F5"><i data-icon="presentar"></i></button>
 
         <div class="ox-spacer"></div>
 
@@ -2742,6 +2745,7 @@ function cablear() {
   $('qr-toggle-panel')?.addEventListener('click', alternarPanel);
 
   $('qr-tinta-toggle')?.addEventListener('click', () => alternarTinta());
+  $('qr-presentar')?.addEventListener('click', () => empezarPresentacion(1));
 
   document.querySelectorAll('.qr-panel__tab').forEach((t) => {
     t.addEventListener('click', () => cambiarPanel(t.dataset.panel));
@@ -2784,6 +2788,15 @@ export function atajosLector(e) {
      (lector-31). */
   if (Modal.isOpen || Menu.isOpen) return false;
   const enCampo = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
+
+  /* Presentar: F5 desde el principio y Mayús+F5 desde la que estás mirando,
+     como en PowerPoint. Mientras se presenta, el teclado lo atiende
+     presentar.js y no llega hasta acá. */
+  if (e.key === 'F5' && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    if (!e.repeat) empezarPresentacion(e.shiftKey ? S.pagina : 1);
+    return true;
+  }
   /* Un botón al que se llegó con Tab se aprieta con Espacio, como en
      cualquier ventana. Uno que quedó enfocado por un clic (el lapicito, que
      es lo último que tocás antes de anotar) NO: ahí Espacio sigue siendo el
@@ -2867,6 +2880,14 @@ export function atajosLector(e) {
     return true;
   }
   return false;
+}
+
+/* Al terminar, el lector queda en la diapositiva donde terminaste. */
+function empezarPresentacion(desde) {
+  presentar({
+    desde,
+    alTerminar: (n) => { if (Router.name === 'lector' && S.doc) irA(n, { suave: false }); },
+  });
 }
 
 /* ── La contraseña ────────────────────────────────────────────────────────────

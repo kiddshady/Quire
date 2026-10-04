@@ -18,6 +18,7 @@ const documentos = require('./documentos.cjs');
 const impresion = require('./impresion.cjs');
 const actualizador = require('./actualizador.cjs');
 const conversion = require('./conversion.cjs');
+const presentacion = require('./presentacion.cjs');
 
 /* Las colecciones que el renderer puede tocar. Es una lista blanca a
    propósito: sin ella, cualquier bug en el renderer puede crear carpetas
@@ -32,11 +33,13 @@ function coll(name) {
   return store.collection(name);
 }
 
-/** Envuelve un handler para que un throw viaje como error y no como crash. */
-function handle(channel, fn) {
-  ipcMain.handle(channel, async (_e, ...args) => {
+/** Envuelve un handler para que un throw viaje como error y no como crash.
+    Con `conEvento`, el handler recibe primero el evento (para saber de qué
+    ventana vino el pedido). */
+function handle(channel, fn, conEvento = false) {
+  ipcMain.handle(channel, async (e, ...args) => {
     try {
-      return { ok: true, data: await fn(...args) };
+      return { ok: true, data: await fn(...(conEvento ? [e, ...args] : args)) };
     } catch (err) {
       console.error(`[ipc] ${channel}:`, err);
       return { ok: false, error: err?.message || String(err) };
@@ -118,6 +121,11 @@ function register() {
      que llega con el motor en su propio proceso; hasta entonces el canal
      existe y contesta false, «no había nada que cortar», en vez de romper. */
   handle('conv:cancelar', () => (typeof conversion.cancelar === 'function' ? conversion.cancelar() : false));
+
+  /* ── Presentar ──────────────────────────────────────────────────────────
+     Las pantallas, la pantalla completa y la ventana de la sala. Ver el
+     encabezado de presentacion.cjs. */
+  presentacion.registrar(handle);
 }
 
 module.exports = { register, COLLECTIONS };

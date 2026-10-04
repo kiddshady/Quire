@@ -43,7 +43,7 @@
     "caida": "electron test/caida.cjs",
     "cartel": "electron test/cartel.cjs",
     "apertura": "node test/apertura.cjs",
-    "verificar": "npm test && npm run ocr && npm run convertir && npm run herramientas && npm run imposicion && npm run imprimir && npm run tinta && npm run anotar && npm run seleccion && npm run buscar && npm run lector && npm run puck && npm run pestanas && npm run paginas && npm run cerrar && npm run caida && npm run cartel && npm run chrome && npm run humo && npm run smoke && npm run apertura",
+    "verificar": "npm test && npm run ocr && npm run convertir && npm run herramientas && npm run imposicion && npm run imprimir && npm run tinta && npm run anotar && npm run seleccion && npm run buscar && npm run lector && npm run presentar && npm run puck && npm run pestanas && npm run paginas && npm run cerrar && npm run caida && npm run cartel && npm run chrome && npm run humo && npm run smoke && npm run apertura",
     "color-ventana": "electron test/color-ventana.cjs",
     "icons": "magick -background none build/marca.svg -resize 1024x1024 build/icon.png && magick build/icon.png -define icon:auto-resize=256,128,64,48,32,16 build/icon.ico",
     "build": "electron-builder --win --publish never",
@@ -52,6 +52,7 @@
     "convertir": "electron test/convertir.cjs",
     "herramientas": "electron test/herramientas.cjs",
     "lector": "electron test/lector.cjs",
+    "presentar": "electron test/presentar.cjs",
     "imprimir": "electron test/imprimir.cjs",
     "paginas": "electron test/paginas.cjs",
     "chrome": "electron test/chrome.cjs"

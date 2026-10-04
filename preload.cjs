@@ -159,4 +159,26 @@ contextBridge.exposeInMainWorld('onyx', {
         en el papel que tenga puesto el driver. */
     papelesConNombre: () => call('print:papeles-con-nombre'),
   },
+
+  /** Presentar: las pantallas, la pantalla completa y la ventana de la sala
+      (la que va al proyector). Ver src/presentacion.cjs. */
+  presentar: {
+    /** Dónde iría la sala: `{ dual: false }` si hay una sola pantalla. */
+    preparar: () => call('pres:preparar'),
+    pantallaCompleta: (on) => call('pres:pantalla-completa', on),
+    intercambiar: () => call('pres:intercambiar'),
+    cerrarSala: () => call('pres:cerrar-sala'),
+    /** La sala ya está en su monitor. */
+    alSalaLista: (cb) => {
+      const handler = () => cb();
+      ipcRenderer.on('pres:sala-lista', handler);
+      return () => ipcRenderer.off('pres:sala-lista', handler);
+    },
+    /** La sala se cerró sola (Alt+F4, o se desenchufó el proyector). */
+    alCerrarSala: (cb) => {
+      const handler = () => cb();
+      ipcRenderer.on('pres:sala-cerrada', handler);
+      return () => ipcRenderer.off('pres:sala-cerrada', handler);
+    },
+  },
 });

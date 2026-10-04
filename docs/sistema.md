@@ -39,6 +39,7 @@ En el orden de `index.html`, que es el de la cascada:
 | `paginas.css` | Organizar páginas |
 | `chrome.css` | Soltar un archivo sobre la ventana y el cartel de actualizaciones |
 | `convertir.css` | Convertir |
+| `presentar.css` | Presentar: la capa, la vista del orador y la sala (la ventana del proyector carga solo `tokens.css` y esta hoja) |
 
 Cada hoja de zona era un tramo de `quire.css` y se separó en octubre de 2026
 sin cambiar el orden. Ese orden importa: `convertir.css` va después de

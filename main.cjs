@@ -38,6 +38,7 @@ const store = require('./src/store.cjs');
 const documentos = require('./src/documentos.cjs');
 const actualizador = require('./src/actualizador.cjs');
 const conversion = require('./src/conversion.cjs');
+const presentacion = require('./src/presentacion.cjs');
 const { rutaDeArgv, loteDeArgv } = require('./src/argv.cjs');
 
 const DEV = process.argv.includes('--dev');
@@ -184,11 +185,16 @@ function createWindow(state) {
   win.on('resize', saveWindowState);
   win.on('move', saveWindowState);
 
-  // Nada de navegación fuera de la app; los links externos van al navegador.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+  /* Nada de navegación fuera de la app; los links externos van al navegador.
+     La única ventana que se abre es la sala de una presentación (ver
+     src/presentacion.cjs). */
+  win.webContents.setWindowOpenHandler((detalles) => {
+    const sala = presentacion.abrirVentana(win, detalles);
+    if (sala) return sala;
+    if (/^https?:\/\//i.test(detalles.url)) shell.openExternal(detalles.url);
     return { action: 'deny' };
   });
+  presentacion.vigilar(win);
   win.webContents.on('will-navigate', (e) => e.preventDefault());
 
   /* ── Cerrar sin perder el último trazo ────────────────────────────────────
