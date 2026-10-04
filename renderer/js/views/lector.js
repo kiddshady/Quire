@@ -1495,7 +1495,7 @@ function cablearBuscar() {
       /* Con texto, Escape limpia; ya limpio, suelta el campo. Dos escapes
          seguidos te devuelven al documento sin tocar el mouse. */
       if (campo.value) { campo.value = ''; clearTimeout(reloj); lanzarBusqueda(''); }
-      else { campo.blur(); V.visor?.focus(); }
+      else { campo.blur(); devolverAlVisor(); }
       return;
     }
     if (e.key !== 'Enter') return;
@@ -2685,6 +2685,20 @@ function devolverLugar() {
   V.visor.scrollLeft = l.scrollLeft;
 }
 
+/* Devuelve el foco al documento desde un campo (Enter o Escape) sin el
+   anillo. El foco llega por una tecla y Chromium lo da por foco de teclado:
+   el visor quedaba recuadrado después de cada salto de página. El anillo es
+   para quien LLEGA al visor con Tab, no para quien vuelve a leer.
+   `focus({ focusVisible: false })` lo arreglaría, pero Electron 40 lo ignora:
+   la marca lo apaga mientras dure este foco y se va con el blur. */
+function devolverAlVisor() {
+  const visor = V.visor;
+  if (!visor) return;
+  visor.dataset.sinAnillo = '';
+  visor.addEventListener('blur', () => { delete visor.dataset.sinAnillo; }, { once: true });
+  visor.focus({ preventScroll: true });
+}
+
 function cablear() {
   const $ = (id) => document.getElementById(id);
 
@@ -2712,8 +2726,8 @@ function cablear() {
   };
   campo?.addEventListener('focus', () => { alEntrar = campo.value; saltado = false; });
   campo?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); saltar(); saltado = true; V.visor?.focus({ preventScroll: true }); }
-    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); restaurar(); saltado = true; V.visor?.focus({ preventScroll: true }); }
+    if (e.key === 'Enter') { e.preventDefault(); saltar(); saltado = true; devolverAlVisor(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); restaurar(); saltado = true; devolverAlVisor(); }
   });
   campo?.addEventListener('blur', () => {
     if (saltado) { saltado = false; return; }

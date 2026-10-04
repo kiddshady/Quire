@@ -448,6 +448,9 @@
   transition: outline-color var(--ox-t-1) var(--ox-ease-soft);
 }
 .qr-visor:focus-visible { box-shadow: none; outline-color: var(--ox-ring); }
+/* Volver al documento desde un campo con Enter o Escape no es llegar con Tab
+   (ver devolverAlVisor en lector.js). */
+.qr-visor[data-sin-anillo]:focus-visible { outline-color: transparent; }
 
 /* Acá NO va `align-items: center`, y es a propósito.
 

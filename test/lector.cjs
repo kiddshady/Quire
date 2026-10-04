@@ -345,6 +345,15 @@ app.whenReady().then(async () => {
     tecla('Return');
     await esperar(900);
     ok('Enter en el campo navega', await js(`(async () => (await T.mod('estado')).S.pagina)()`) === 12);
+    /* El foco vuelve al visor por una tecla, y Chromium lo da por foco de
+       teclado: el visor quedaba con el anillo puesto después de cada salto. */
+    const anillo = await js(`(() => { const v = T.visor(); return { foco: document.activeElement === v, color: getComputedStyle(v).outlineColor }; })()`);
+    ok('Enter en el campo devuelve el foco al visor sin anillo', anillo.foco && /rgba\(0, 0, 0, 0\)/.test(anillo.color), JSON.stringify(anillo));
+    // La marca dura lo que ese foco: el que vuelve con Tab tiene su anillo.
+    await js(`(() => { const v = T.visor(); v.blur(); v.focus({ focusVisible: true, preventScroll: true }); })()`);
+    await esperar(300); // el anillo entra con transición
+    const tab = await js(`(() => { const v = T.visor(); return { marca: 'sinAnillo' in v.dataset, color: getComputedStyle(v).outlineColor }; })()`);
+    ok('salir del visor le saca la marca y el anillo vuelve con el teclado', !tab.marca && !/rgba\(0, 0, 0, 0\)/.test(tab.color), JSON.stringify(tab));
 
     await js(`(() => { const c = document.getElementById('qr-pagina-input'); c.focus(); c.value = '30'; })()`);
     tecla('Escape');
