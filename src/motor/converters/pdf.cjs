@@ -26,6 +26,11 @@ const { revisar, conCorte, esCorte } = require('../corte.cjs');
 // barras, así que la barra que va es la de pdf.js.
 const STANDARD_FONTS_URL =
   path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'standard_fonts') + '/';
+// Los decodificadores en WebAssembly (JBIG2, JPEG 2000, color), con la misma
+// regla de la barra. Sin ellos, las imágenes JBIG2 de un paper escaneado no se
+// decodifican y el OCR recibe hojas en blanco.
+const WASM_URL =
+  path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'wasm') + '/';
 
 const OCR_THRESHOLD = 30;  // chars mínimos para considerar que una página "tiene texto"
 const OCR_SCALE = 2.5;     // ~180 dpi: buen balance velocidad/precisión
@@ -310,6 +315,7 @@ module.exports = {
       disableFontFace: true,
       useSystemFonts: false,
       standardFontDataUrl: STANDARD_FONTS_URL,
+      wasmUrl: WASM_URL,
     });
 
     const pages = [];

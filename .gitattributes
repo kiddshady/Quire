@@ -9,3 +9,4 @@
 *.woff2 binary
 *.ttf binary
 *.traineddata binary
+*.wasm binary

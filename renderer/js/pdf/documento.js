@@ -593,6 +593,13 @@ export async function abrirDocumento(bytes, meta = {}) {
     cMapUrl: VENDOR + 'cmaps/',
     cMapPacked: true,
     standardFontDataUrl: VENDOR + 'standard_fonts/',
+    /* Los decodificadores de imágenes que pdf.js 5 trae en WebAssembly: JBIG2
+       (el blanco y negro de casi todo paper escaneado), JPEG 2000 y el manejo
+       de color (qcms). Sin esta ruta no los encuentra y esas imágenes no se
+       dibujan: la hoja queda en blanco aunque Chrome la muestre bien (pasó con
+       un paper escaneado de Química Medicinal). Al lado van sus versiones en
+       JS, por si el WebAssembly no se puede compilar. */
+    wasmUrl: VENDOR + 'wasm/',
     // Sin esto, un PDF con JavaScript embebido puede pedirle cosas al visor.
     isEvalSupported: false,
   });
