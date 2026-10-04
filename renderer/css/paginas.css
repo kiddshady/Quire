@@ -27,12 +27,19 @@
 .qr-org__pie {
   box-shadow: inset 0 1px 0 var(--ox-line);
   gap: var(--ox-3);
+  /* El progreso se pliega a lo ancho y se come su hueco del gap. */
+  --ox-plegable-gap: var(--ox-3);
   min-height: var(--qr-pie);
 }
 
+.qr-org__estado { white-space: nowrap; }
+
 /* Sin esfumado en ningún lado: los dos bordes ya están cerrados por una línea
-   —la barra arriba, el pie abajo—, así que los dos cortes son limpios. */
+   —la barra arriba, el pie abajo—, así que los dos cortes son limpios.
+   Posicionada: las filas que se van (reconcile) quedan absolutas en su lugar
+   y se miden contra ella, con su scroll. */
 .qr-org__grilla {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -43,8 +50,20 @@
   align-content: start;
   padding: var(--ox-4) var(--ox-6);
   background: var(--ox-sunken);
+  /* Sin scroll anchoring. Al reordenar, las filas que estaban arriba de la
+     vista corren su lugar en el layout (no en pantalla: ahí ya estaban
+     corridas por el transform del arrastre), y Chromium compensaba el
+     scroll para que la miniatura «ancla» no se moviera: una fila entera
+     (616 → 342) en el mismo cuadro en que la arrastrada terminaba de caer,
+     que se iba de la vista. Acá los movimientos los hacen el arrastre y
+     reconcile, que ya miden con el scroll: el navegador no tiene nada que
+     corregir. */
+  overflow-anchor: none;
 }
 
+/* Sin transición de transform (css-24): nadie la usaba, y ahora el
+   transform es del arrastre, que la prende solo mientras reordena (abajo).
+   Los viajes de reconcile van por la API y no la necesitan. */
 .qr-org__item {
   display: flex;
   flex-direction: column;
@@ -55,52 +74,87 @@
   border: 0;
   border-radius: var(--ox-r-sm, var(--ox-r-xs));
   cursor: pointer;
-  transition: var(--tr-color), transform var(--ox-t-2) var(--ox-ease-soft);
+  transition: var(--tr-color);
 }
 
 .qr-org__item:hover { background: var(--ox-wash-1); }
 .qr-org__item.is-sel { background: var(--ox-wash-2); }
 
+/* Arrastrar para reordenar — el gesto vive en paginas.js, con el patrón de
+   las pestañas. La arrastrada sigue al puntero y NO transiciona su
+   transform: un retardo entre la mano y la miniatura se siente como
+   arrastrar por barro. Las demás sí: se corren a hacerle lugar, y eso tiene
+   que verse llegar. Al soltar, la arrastrada pasa a `is-settling` y recupera
+   la transición para deslizarse hasta su hueco, todavía levantada. */
+.qr-org__grilla.is-reordering .qr-org__item:not(.is-dragging) {
+  transition: var(--tr-color), transform var(--ox-t-2) var(--ox-ease);
+}
+/* Levantada: sube de plano con sombra. El fondo es una superficie OPACA y no
+   un lavado: pasa por encima de las otras miniaturas, y translúcida se verían
+   a través. Va después de :hover y .is-sel para pisarles el fondo. */
+.qr-org__item.is-dragging,
+.qr-org__item.is-settling {
+  z-index: 2;
+  background: var(--ox-s2);
+  box-shadow: var(--ox-e3);
+}
+.qr-org__item.is-dragging { cursor: grabbing; }
+
+/* La hoja. Su proporción es la de la página girada y TRANSICIONA (el
+   aspect-ratio se interpola): al girar, la caja se acuesta mientras el canvas
+   gira adentro. */
 .qr-org__hoja {
+  position: relative;
   display: block;
   width: 100%;
   background: #fff;
   border-radius: 1px;
   overflow: hidden;
   box-shadow: var(--ox-e1);
-  /* El giro se ve en la miniatura antes de escribir nada: el ángulo se aplica
-     acá y la rotación real recién va al PDF cuando se guarda. */
-  transition: box-shadow var(--ox-t-2) var(--ox-ease-soft);
+  transition:
+    box-shadow var(--ox-t-2) var(--ox-ease-soft),
+    aspect-ratio var(--ox-t-3) var(--ox-ease);
 }
 
 .qr-org__item.is-sel .qr-org__hoja {
   box-shadow: var(--ox-e2), 0 0 0 2px var(--ox-accent);
 }
 
+/* La miniatura es siempre la página derecha, del ancho de la caja, centrada.
+   El giro se ve antes de escribir nada: --qr-rot la gira (acumulado, así de
+   270 a 0 son +90 y no tres cuartos de vuelta para atrás) y --qr-esc la
+   achica o agranda para que acostada entre justo en la caja. La rotación
+   real recién va al PDF cuando se guarda (shell-09, css-08).
+
+   La entrada es ox-fade-in, que tiene `from`, y sin fill: qr-aparecer no
+   tenía de dónde partir y la página saltaba del blanco a dibujada (shell-10,
+   css-07). Terminada se apaga con `is-settled`: si la fila se mueve en el
+   DOM, una animación de CSS viva volvería a arrancar de cero. */
 .qr-org__lienzo {
+  position: absolute;
+  left: 0;
+  top: 50%;
   display: block;
   width: 100%;
-  height: 100%;
-  object-fit: contain;
-  animation: qr-aparecer var(--ox-t-3) var(--ox-ease) forwards;
+  height: auto;
+  aspect-ratio: var(--qr-proporcion);
+  transform: translateY(-50%) rotate(var(--qr-rot, 0deg)) scale(var(--qr-esc, 1));
+  transition: transform var(--ox-t-3) var(--ox-ease);
+  animation: ox-fade-in var(--ox-t-3) var(--ox-ease);
 }
+.qr-org__lienzo.is-settled { animation: none; }
 
-/* La miniatura de una página girada se muestra girada: su contenedor ya tiene
-   el aspect-ratio invertido, así que el lienzo rota adentro. */
-.qr-org__hoja[data-rot="90"] .qr-org__lienzo,
-.qr-org__hoja[data-rot="270"] .qr-org__lienzo {
-  width: 100%;
-  height: 100%;
-}
-
-.qr-org__hoja[data-rot="90"] { transform: none; }
-
+/* El número cambia de color con la fila: transiciona con ella (css-22). Los
+   datos que aparecen y se van (el «era N», el giro) se pliegan a lo ancho y
+   se comen su hueco del gap. */
 .qr-org__pie2 {
   display: flex;
   align-items: center;
   gap: var(--ox-1);
+  --ox-plegable-gap: var(--ox-1);
   font-size: var(--ox-fs-10);
   color: var(--ox-text-4);
+  transition: var(--tr-color);
 }
 
 .qr-org__item.is-sel .qr-org__pie2 { color: var(--ox-text-2); }
@@ -110,4 +164,19 @@
   background: var(--ox-danger-wash);
 }
 
-#org-cuenta.is-vacia { color: var(--ox-text-4); }
+/* Con clase y no con id (css-25b), como .qr-tinta-cuenta. */
+.qr-org-cuenta { transition: var(--tr-color); }
+.qr-org-cuenta.is-vacia { color: var(--ox-text-4); }
+
+/* El progreso de exportar varias como PNG (shell-15). Aparece y se va
+   plegándose a lo ancho (.ox-plegable--ancho, en motion.css). */
+.qr-org__progreso {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  flex: 0 0 auto;
+  width: 220px;
+}
+.qr-org__progreso .ox-meter { flex: 1 1 auto; }
+/* El medidor que arranca de nuevo se coloca sin viajar (paginas.js). */
+.qr-org__progreso.is-placing .ox-meter__fill { transition: none; }
