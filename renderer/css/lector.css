@@ -616,7 +616,7 @@
 /* Acá NO va --ox-select: ese es el acento tendido, y el acento de esta paleta
    es casi blanco — sobre una hoja blanca deja el papel en 253 de 255. La
    selección sobre papel es el mismo gesto invertido: oscurece en vez de
-   aclarar. Ver --qr-select-claro en quire.css.
+   aclarar: va --ox-select-claro (tokens.css de Onyx, nació acá).
 
    El `color: transparent` NO es redundante con el del span, y esto se ve solo
    mirando una captura: declarando únicamente el fondo, Chromium le pinta al
@@ -627,7 +627,7 @@
    a Chromium que el texto seleccionado tampoco se pinta, y lo único que cambia
    al seleccionar es el velo. */
 .qr-texto ::selection {
-  background: var(--qr-select-claro);
+  background: var(--ox-select-claro);
   color: transparent;
 }
 /* Los saltos de línea son nodos reales: sin esto, cada uno pinta una barrita al

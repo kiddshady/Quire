@@ -47,20 +47,6 @@
      la navegación del preview (28 px + 12 de aire arriba y abajo). */
   --qr-pie: 52px;
 
-  /* La selección sobre una superficie CLARA — en Quire, el papel del PDF.
-
-     Es el MISMO gesto que --ox-select, sobre el sustrato opuesto. Sobre el
-     fondo oscuro, seleccionar ACLARA: se tiende el acento, que en una paleta
-     acromática es el blanco. Sobre papel blanco eso no existe —blanco al 16%
-     sobre blanco deja el papel en 253 de 255, medido: se despega 1,02:1, o sea
-     nada—, así que del otro lado seleccionar OSCURECE, y lo que se tiende es el
-     fondo de la app en vez del acento. Mismo alfa, color invertido.
-
-     Se escribe con color-mix y no repitiendo los tres números de --ox-bg a
-     propósito: duplicados, cambiar el fondo de la app desincronizaría la
-     selección sin que nada avise. */
-  --qr-select-claro: color-mix(in oklab, var(--ox-bg) 16%, transparent);
-
   /* El velo que oscurece la app mientras arrastrás un archivo encima (ver
      chrome.css). Estaba crudo en la regla; es el mismo negro de las sombras
      de la casa, más liviano: tiene que dejar leer lo que hay debajo. */
@@ -159,13 +145,6 @@
 .qr-clave-aviso--fila svg { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 1px; }
 .qr-clave-aviso--fila > span { display: flex; flex-direction: column; gap: calc(var(--ox-1) / 2); }
 
-/* El botón apagado que dice por qué. Un .ox-btn:disabled corta el puntero
-   (controls.css) y su tooltip nunca salía: se veía apagado sin explicación.
-   Este lo recibe; el hover ya lo neutraliza :disabled, que va después en
-   controls.css, y el apretón se apaga acá. El clic no llega: un <button>
-   deshabilitado no lo dispara. */
-.ox-btn.qr-explica:disabled { pointer-events: auto; }
-.ox-btn.qr-explica:disabled:active { transform: none; }
 /* ── Pestañas ────────────────────────────────────────────────────────────────
    Una fila más en el chasis, entre el titlebar y el cuerpo. La declaración
    completa se repite acá en vez de editar shell.css, por la misma razón que

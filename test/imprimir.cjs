@@ -898,7 +898,7 @@ app.whenReady().then(async () => {
         aviso: __vivo(aviso), alto: Math.round(r.height),
         pliegos: document.querySelectorAll('#qr-preview-cuerpo .qr-pliego--preview:not(.qr-pliego--saliente)').length,
         trabajando: document.getElementById('qr-preview').classList.contains('is-trabajando'),
-        boton: { apagado: boton.disabled, explica: boton.classList.contains('qr-explica'), tip: boton.dataset.tip || null,
+        boton: { apagado: boton.disabled, explica: (boton.disabled && getComputedStyle(boton).pointerEvents === 'auto'), tip: boton.dataset.tip || null,
           tecla: boton.dataset.tipKey || null, puntero: getComputedStyle(boton).pointerEvents },
         flechas: [document.getElementById('qr-hoja-prev').disabled, document.getElementById('qr-hoja-next').disabled],
         cuenta: [__vivo(document.getElementById('qr-nav-actual')), __vivo(document.getElementById('qr-nav-total'))],

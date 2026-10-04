@@ -95,6 +95,14 @@
   --ox-wash-3:     rgb(var(--ox-accent-rgb) / .15);   /* activo / presionado */
   --ox-ring:       rgb(var(--ox-accent-rgb) / .55);   /* focus del teclado */
   --ox-select:     rgb(var(--ox-accent-rgb) / .16);   /* ::selection */
+  /* La selección sobre una superficie CLARA dentro de la app (una hoja de
+     PDF, una vista previa): el mismo gesto invertido. Sobre el fondo oscuro
+     seleccionar aclara (el acento tendido, que en la paleta luz es blanco);
+     sobre papel blanco eso no se ve —deja el papel en 253 de 255, 1,02:1—,
+     así que oscurece: el fondo de la app al mismo 16 %. Con color-mix y no
+     con los números de --ox-bg, así sigue a la paleta. Lo usa .ox-sobre-claro
+     (base.css). Nació en el lector de Quire. */
+  --ox-select-claro: color-mix(in oklab, var(--ox-bg) 16%, transparent);
 
   /* Con un acento oscuro o muy saturado, la tinta encima tiene que ser clara.
      Descomentá esto si tu acento no es luz:

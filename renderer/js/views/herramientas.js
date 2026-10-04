@@ -107,10 +107,9 @@ function avisoClave(id, nombre, accion, visible) {
 const tipClave = (bloqueo, accion) => `${tituloClave(bloqueo.nombre)}: Quire todavía no puede ${accion}`;
 
 /* El botón que hace el trabajo, apagado por la contraseña: el tooltip dice
-   por qué (.qr-explica le devuelve el puntero, ver quire.css). */
+   por qué (un .ox-btn apagado con data-tip recibe el puntero: controls.css). */
 function explicarBoton(boton, bloqueo, accion) {
   if (!boton) return;
-  boton.classList.toggle('qr-explica', !!bloqueo);
   if (bloqueo) boton.dataset.tip = tipClave(bloqueo, accion);
   else delete boton.dataset.tip;
 }
@@ -1115,9 +1114,8 @@ const rotulo = (id) => {
     Con `bloqueo` (un PDF con contraseña) nace apagado y diciendo por qué. */
 function botonHacer(id, puede, bloqueo = null, accion = '') {
   const ocupado = V.trabajando === id;
-  const clase = bloqueo ? ' qr-explica' : '';
   const tip = bloqueo ? ` data-tip="${esc(tipClave(bloqueo, accion))}"` : '';
-  return `<button class="ox-btn ox-btn--primary ox-flashable${clase}" id="${id}"${tip} data-ocupado="${ocupado ? 1 : 0}"${puede && !V.trabajando ? '' : ' disabled'}>${rotulo(id)}</button>`;
+  return `<button class="ox-btn ox-btn--primary ox-flashable" id="${id}"${tip} data-ocupado="${ocupado ? 1 : 0}"${puede && !V.trabajando ? '' : ' disabled'}>${rotulo(id)}</button>`;
 }
 
 /* Libre ↔ ocupado es un estado por otro: relevo en el lugar, y el ancho del

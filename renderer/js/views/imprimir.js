@@ -719,7 +719,6 @@ function pintarResumen() {
    tampoco imprime, y verlo al lado de «todavía no puede» confunde. */
 function ponerBotonBloqueado(boton) {
   if (!boton) return;
-  boton.classList.toggle('qr-explica', V.bloqueado);
   boton.dataset.tip = V.bloqueado ? tipBloqueado() : TIP_IMPRIMIR;
   if (V.bloqueado) delete boton.dataset.tipKey;
   else boton.dataset.tipKey = 'Ctrl Enter';

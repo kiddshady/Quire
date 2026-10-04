@@ -53,7 +53,6 @@ con prefijo `ox-`, y eso impedía traer el de Onyx copiando el archivo, fw-18):
 |---|---|
 | `--qr-pie` | El alto de la franja pegada arriba de la statusbar: el pie del rail y la barra de la vista de al lado. Son dos componentes, y sus líneas se leen como una sola: si no miden lo mismo se ve el escalón |
 | `--qr-statusbar-icono` · `--qr-statusbar-texto` | La columna donde arrancan los valores de la statusbar, para lo que se apila encima |
-| `--qr-select-claro` | La selección sobre el papel (abajo) |
 | `--qr-velo-soltar` | El velo que oscurece la app mientras arrastrás un archivo encima |
 
 **Retoques al shell.** Sobrescriben clases `ox-` desde acá, nunca editando
@@ -76,7 +75,7 @@ cerrar) y `.qr-abrir` (el botón Abrir, al ancho del rail). Más las pestañas
 (`.qr-tabs`, `.qr-tab`, `__nombre`, `__cerrar`, `.qr-tabs__mas`) y la caja del
 lector, `.qr-lector`.
 
-### La selección sobre una superficie clara: `--qr-select-claro`
+### La selección sobre una superficie clara: `--ox-select-claro`
 
 `--ox-select` es el acento tendido al 16 %, y el acento de esta paleta es casi
 blanco: sobre el papel blanco del PDF deja la hoja en 253 de 255 (se despega
@@ -84,13 +83,19 @@ blanco: sobre el papel blanco del PDF deja la hoja en 253 de 255 (se despega
 **oscurece**, y lo que se tiende es el fondo de la app. Mismo alfa, color
 invertido. Se escribe con `color-mix(in oklab, var(--ox-bg) 16%, transparent)`
 y no repitiendo los números de `--ox-bg`: duplicados, cambiar el fondo
-desincronizaría la selección sin aviso.
+desincronizaría la selección sin aviso. Nació acá y desde la 0.12.1 vive en
+`tokens.css` de Onyx, con la clase `.ox-sobre-claro` para el caso general.
 
 Lo usa `.qr-texto ::selection` (`lector.css`), con `color: transparent`
 además del fondo: sin eso Chromium le pinta al texto seleccionado su color de
 selección y las letras del canvas, debajo, quedan huecas. Los `<br>` de la
-capa llevan `::selection` transparente, o la selección se ve dentada. Se
-llamaba `--ox-select-claro` y vivía en `tokens.css`; no está en Onyx.
+capa llevan `::selection` transparente, o la selección se ve dentada. Por
+ese `color: transparent` el lector no usa `.ox-sobre-claro`, que deja la
+letra con su color: acá la letra visible es la del canvas.
+
+Lo mismo pasó con el botón de texto apagado que dice por qué (el aviso de la
+contraseña en Imprimir, Herramientas y Páginas): era `.qr-explica` y ahora
+lo hace Onyx con cualquier `.ox-btn` apagado que tenga `data-tip`.
 
 ### Las vistas van de borde a borde
 

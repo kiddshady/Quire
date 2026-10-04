@@ -69,6 +69,21 @@
 }
 .ox-btn--danger-solid:hover { background: #a04a50; }
 
+/* Un botón de texto apagado que tiene tooltip lo sigue mostrando: dice POR
+   QUÉ está apagado. Con pointer-events: none (arriba) se veía apagado y mudo;
+   en Quire, «Imprimir» con un PDF con contraseña no explicaba nada. Recibe el
+   puntero, pero el clic no llega (un <button disabled> no lo dispara) y no
+   se ilumina ni se aprieta: cada variante vuelve a su reposo. Solo con
+   :disabled de verdad: un [aria-disabled] sí recibiría el clic, y la vista
+   que lo usa cuenta con el puntero cortado. Es lo mismo que ya hacía
+   .ox-iconbtn (U3). Nació como .qr-explica en Quire (octubre de 2026). */
+.ox-btn[data-tip]:disabled { pointer-events: auto; }
+.ox-btn[data-tip]:disabled:active { transform: none; }
+.ox-btn--secondary[data-tip]:disabled:hover { background: var(--ox-s2); box-shadow: var(--ox-hairline), var(--ox-e1); }
+.ox-btn--ghost[data-tip]:disabled:is(:hover, :active),
+.ox-btn--danger[data-tip]:disabled:hover { background: transparent; color: var(--ox-text-4); }
+.ox-btn--danger-solid[data-tip]:disabled:hover { background: var(--ox-danger-dim); }
+
 /* Tamaños */
 .ox-btn--sm { height: 24px; padding: 0 var(--ox-2); font-size: var(--ox-fs-11); }
 .ox-btn--sm .ox-icon { width: 12px; height: 12px; }

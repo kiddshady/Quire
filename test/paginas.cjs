@@ -1014,7 +1014,7 @@ async function correr() {
           aviso: aviso ? __vivo(aviso) : null,
           avisoAlto: aviso ? Math.round(aviso.getBoundingClientRect().height) : 0,
           estado, filas: __filas().length,
-          guardar: { apagado: guardar.disabled, explica: guardar.classList.contains('qr-explica'), tip: guardar.dataset.tip || null, puntero: getComputedStyle(guardar).pointerEvents },
+          guardar: { apagado: guardar.disabled, explica: (guardar.disabled && getComputedStyle(guardar).pointerEvents === 'auto'), tip: guardar.dataset.tip || null, puntero: getComputedStyle(guardar).pointerEvents },
           extraer: { apagado: extraer.disabled, tip: extraer.dataset.tip || null },
           png: { apagado: png.disabled },
           cargas,

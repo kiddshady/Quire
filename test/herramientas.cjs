@@ -689,7 +689,7 @@ app.whenReady().then(async () => {
     let cargas = 0;
     PDFDocument.load = function (...a) { cargas++; return cargar.apply(this, a); };
     PDFDocument.create = function (...a) { cargas++; return crear.apply(this, a); };
-    const boton = (id) => { const b = document.getElementById(id); return b && { apagado: b.disabled, explica: b.classList.contains('qr-explica'), tip: b.dataset.tip || null, puntero: getComputedStyle(b).pointerEvents }; };
+    const boton = (id) => { const b = document.getElementById(id); return b && { apagado: b.disabled, explica: (b.disabled && getComputedStyle(b).pointerEvents === 'auto'), tip: b.dataset.tip || null, puntero: getComputedStyle(b).pointerEvents }; };
     const aviso = (id) => { const a = document.getElementById(id); return a && { visible: !a.hidden && a.getBoundingClientRect().height > 20, texto: __vivo(a) }; };
     const r = {};
     let falsa = null;

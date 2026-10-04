@@ -275,7 +275,7 @@ ${bloqueado ? `
         <button class="ox-btn ox-btn--ghost ox-flashable" id="org-reiniciar" ${apagado(!c || ocupado)}>
           <i data-icon="retry"></i> Descartar cambios
         </button>
-        <button class="ox-btn ox-btn--primary ox-flashable${bloqueado ? ' qr-explica' : ''}" id="org-guardar" data-ocupado="${trabajos.get(S.pestana)?.tipo === 'guardar' ? 1 : 0}"${bloqueado ? ` data-tip="${esc(tipClave(FALTA_GUARDAR))}"` : ''} ${apagado(!c || ocupado || bloqueado)}>${rotuloGuardar(trabajos.get(S.pestana)?.tipo === 'guardar')}</button>
+        <button class="ox-btn ox-btn--primary ox-flashable" id="org-guardar" data-ocupado="${trabajos.get(S.pestana)?.tipo === 'guardar' ? 1 : 0}"${bloqueado ? ` data-tip="${esc(tipClave(FALTA_GUARDAR))}"` : ''} ${apagado(!c || ocupado || bloqueado)}>${rotuloGuardar(trabajos.get(S.pestana)?.tipo === 'guardar')}</button>
       </div>
     </div>`);
 

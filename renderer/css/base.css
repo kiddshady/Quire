@@ -77,6 +77,17 @@ p, code, pre,
   background: var(--ox-select);
   color: var(--ox-text);
 }
+/* Texto oscuro sobre una superficie clara (ver --ox-select-claro): el velo
+   oscurece, y la letra se queda con su color. Con el de arriba la tinta se
+   volvía casi blanca sobre el papel y lo seleccionado desaparecía.
+   `currentColor` y no `inherit`: en un ::selection, inherit hereda del
+   ::selection del padre —el de arriba, claro— y la letra se aclaraba igual
+   (medido: 216 en vez de 17 sobre papel blanco). */
+.ox-sobre-claro ::selection,
+.ox-sobre-claro::selection {
+  background: var(--ox-select-claro);
+  color: currentColor;
+}
 
 /* ── Scrollbar propia ────────────────────────────────────────────────────────
    Fina, sin flechas, y el thumb se materializa con el hover del contenedor.
