@@ -15,15 +15,28 @@
   padding-right: var(--ox-6);
 }
 
-.qr-conv__lista { max-width: 760px; animation: ox-glide-in var(--ox-t-4) var(--ox-ease); }
+/* Sin entrada propia (herr-06, css-05, herr-25): la lista se rehacía con
+   cada cambio y volvía a entrar deslizándose entera; al navegar, además, se
+   corría debajo del calco del router. Las filas ahora entran, se van y
+   viajan de a una, por reconcile(). */
+.qr-conv__lista { max-width: 760px; }
 
-.qr-conv__vacio { margin: 48px auto; }
+.qr-conv__vacio { margin: var(--ox-8) auto; }
+.qr-conv__agregar-vacio { margin-top: var(--ox-2); }
 
 .qr-conv__item { align-items: flex-start; padding-top: var(--ox-3); padding-bottom: var(--ox-3); }
-.qr-conv__item .ox-listitem__main { gap: 3px; }
-/* La barra de progreso de cada archivo se pliega con el mismo gap. */
-.qr-conv__item .ox-listitem__main > .ox-plegable { --ox-plegable-gap: 3px; }
+.qr-conv__item .ox-listitem__main { gap: var(--ox-1); }
+/* La barra y los chips de cada archivo se pliegan con el mismo gap. */
+.qr-conv__item .ox-listitem__main > .ox-plegable { --ox-plegable-gap: var(--ox-1); }
 .qr-conv__item .ox-rowactions { align-self: center; }
+
+/* El motivo de una falla se lee entero y se puede copiar (ux-34): cortado
+   con puntos suspensivos no servía para buscarlo. */
+.qr-conv__item.is-error .ox-listitem__sub { white-space: normal; overflow-wrap: anywhere; }
+
+/* Para que la barra de un archivo que se reintenta arranque de su valor sin
+   desenrollarse desde 100: ponerMedidor() la pone, fuerza el estilo y la saca. */
+.qr-conv__meter.is-reiniciando .ox-meter__fill { transition: none; }
 
 /* Un archivo sin conversor sigue en la lista para que se vea por qué no va,
    pero atenuado: no es un error, es un "esto no". */
@@ -59,8 +72,10 @@
 .qr-conv__salida .ox-icon { flex: 0 0 auto; }
 
 /* Filas del inspector: control a la izquierda, texto que puede ser de dos
-   líneas a la derecha. El control se alinea con la primera línea. */
-.qr-conv__fila { gap: 10px; align-items: flex-start; cursor: pointer; }
+   líneas a la derecha. El gap y la alineación arriba son los de .qr-fila y
+   .qr-fila--arriba (css-20); acá queda lo propio: el control se alinea con
+   la primera línea. */
+.qr-conv__fila { cursor: pointer; }
 .qr-conv__fila > .ox-switch,
 .qr-conv__fila > .ox-check { flex: 0 0 auto; margin-top: 2px; }
 .qr-conv__fila .ox-meta { line-height: 1.5; }
@@ -68,5 +83,9 @@
 .qr-conv__salidas-lista { display: flex; flex-direction: column; gap: var(--ox-2); }
 
 .qr-conv__chunks { margin-top: var(--ox-1); }
+
+/* Una ruta elegida no tiene espacios donde cortar. */
+.qr-conv__destino-hint { overflow-wrap: anywhere; }
+.qr-conv__carpeta { align-self: flex-start; }
 
 .qr-resumen__n { font-size: var(--ox-fs-19); font-weight: var(--ox-w-semi); color: var(--ox-text); }

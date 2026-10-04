@@ -13,7 +13,8 @@
 
 import { createRequire } from 'module';
 import {
-  DPI_POR_DEFECTO, dpiDeclarado, giroDeOrientacion, medidaDePagina, orientacionExif,
+  DPI_POR_DEFECTO, dpiDeclarado, giroDeOrientacion, medidaDePagina, medirImagen, orientacionExif,
+  pixelesDeCabecera,
 } from '../renderer/js/imagenes.js';
 
 const require = createRequire(import.meta.url);
@@ -55,10 +56,14 @@ const phys = (porMetro, unidad = 1) => {
   return d;
 };
 
-/** Un JPEG con los segmentos que se le pidan, terminado en SOS. */
+/** Un JPEG con los segmentos que se le pidan, terminado en SOS. Un número
+    suelto en vez de un segmento es esa cantidad de bytes FF de relleno, que
+    el estándar permite entre dos marcadores. */
 function jpeg(segmentos) {
   const partes = [Buffer.from([0xff, 0xd8])];
-  for (const [marca, cuerpo] of segmentos) {
+  for (const seg of segmentos) {
+    if (typeof seg === 'number') { partes.push(Buffer.alloc(seg, 0xff)); continue; }
+    const [marca, cuerpo] = seg;
     const largo = Buffer.alloc(2);
     largo.writeUInt16BE(cuerpo.length + 2);
     partes.push(Buffer.from([0xff, marca]), largo, cuerpo);
@@ -95,6 +100,21 @@ function exifOrientacion(valor, chico = true) {
   cuatro(t + 14, 1);                       // un valor
   dos(t + 18, valor);                      // y el valor, en los dos primeros bytes
   return d;
+}
+
+/** SOF: [precisión:1][alto:2][ancho:2][componentes:1]… */
+function sof(ancho, alto) {
+  const d = Buffer.alloc(6);
+  d[0] = 8; d.writeUInt16BE(alto, 1); d.writeUInt16BE(ancho, 3); d[5] = 3;
+  return d;
+}
+
+/** Un WEBP con un solo chunk: RIFF, el largo, «WEBP» y el chunk. */
+function webp(tipo, datos) {
+  const cab = Buffer.alloc(20);
+  cab.write('RIFF', 0, 'latin1'); cab.writeUInt32LE(12 + datos.length, 4);
+  cab.write('WEBP', 8, 'latin1'); cab.write(tipo, 12, 'latin1'); cab.writeUInt32LE(datos.length, 16);
+  return new Uint8Array(Buffer.concat([cab, datos, Buffer.alloc(8)]));
 }
 
 /* ── 1. La firma dice qué es ─────────────────────────────────────────────── */
@@ -203,6 +223,75 @@ console.log('\n7. El tamaño de la página');
   const altoMM = p.alto / 72 * 25.4;
   ok('el redondeo del dpi deja la A4 dentro de la tolerancia de 1,5 mm',
     Math.abs(altoMM - 297) < 1.5, `${altoMM.toFixed(3)} mm`);
+}
+
+/* ── 8. Los rellenos entre segmentos (herr-28) ───────────────────────────── */
+
+console.log('\n8. JPEG: bytes FF de relleno entre segmentos');
+/* Se salteaban de a dos bytes: con un relleno impar el recorrido caía sobre el
+   código del marcador y se cortaba ahí. Pares andaban de casualidad. */
+for (const n of [1, 2, 3]) {
+  ok(`con ${n} de relleno lee los 300 dpi`, dpiDeclarado(jpeg([n, [0xe0, jfif(300, 1)]]), 'jpeg') === 300,
+    String(dpiDeclarado(jpeg([n, [0xe0, jfif(300, 1)]]), 'jpeg')));
+  ok(`con ${n} de relleno lee la orientación 6`, orientacionExif(jpeg([n, [0xe1, exifOrientacion(6)]]), 'jpeg') === 6,
+    String(orientacionExif(jpeg([n, [0xe1, exifOrientacion(6)]]), 'jpeg')));
+}
+ok('relleno entre el EXIF y el JFIF', dpiDeclarado(jpeg([[0xe1, exifOrientacion(1)], 1, [0xe0, jfif(200, 1)]]), 'jpeg') === 200);
+ok('un archivo que es todo relleno no se cuelga', dpiDeclarado(new Uint8Array([0xff, 0xd8, 0xff, 0xff, 0xff, 0xff, 0xff]), 'jpeg') === null);
+
+/* ── 9. Densidades absurdas (herr-29) ────────────────────────────────────── */
+
+console.log('\n9. Una densidad fuera de lo posible cuenta como no declarada');
+// 1 píxel por metro son 0,0254 dpi: una foto de 1000 px saldría de 39 metros.
+ok('1 ppm no es una densidad', dpiDeclarado(png([['IHDR', ihdr(4, 4)], ['pHYs', phys(1)]]), 'png') === null);
+ok('1 dpi en el JFIF tampoco', dpiDeclarado(jpeg([[0xe0, jfif(1, 1)]]), 'jpeg') === null);
+ok('19 dpi tampoco', dpiDeclarado(jpeg([[0xe0, jfif(19, 1)]]), 'jpeg') === null);
+// Y del otro lado: 10 000 dpi harían una estampilla de una foto.
+ok('10 000 dpi tampoco', dpiDeclarado(jpeg([[0xe0, jfif(10000, 1)]]), 'jpeg') === null);
+ok('los bordes del rango sí valen', dpiDeclarado(jpeg([[0xe0, jfif(20, 1)]]), 'jpeg') === 20
+  && dpiDeclarado(jpeg([[0xe0, jfif(4800, 1)]]), 'jpeg') === 4800);
+{
+  const p = medidaDePagina({ ancho: 1000, alto: 1000 }, dpiDeclarado(jpeg([[0xe0, jfif(1, 1)]]), 'jpeg'));
+  ok('con la absurda la página sale a 96 dpi', p.ancho === 750, `${p.ancho} pt`);
+}
+
+/* ── 10. Los píxeles, de la cabecera (herr-27) ───────────────────────────── */
+
+console.log('\n10. El tamaño en píxeles se lee de la cabecera, sin decodificar');
+const medida = (m) => (m ? `${m.ancho}x${m.alto}` : String(m));
+ok('PNG: del IHDR', medida(pixelesDeCabecera(png([['IHDR', ihdr(2480, 3508)]]), 'png')) === '2480x3508');
+ok('JPEG: del SOF0', medida(pixelesDeCabecera(jpeg([[0xe0, jfif(72)], [0xc0, sof(4032, 3024)]]), 'jpeg')) === '4032x3024');
+ok('JPEG progresivo: del SOF2', medida(pixelesDeCabecera(jpeg([[0xc2, sof(800, 600)]]), 'jpeg')) === '800x600');
+// La tabla de Huffman (C4) está en el medio de los SOF y no es un frame.
+ok('JPEG: la tabla de Huffman no se confunde con un frame',
+  medida(pixelesDeCabecera(jpeg([[0xc4, Buffer.alloc(8, 9)], [0xc0, sof(640, 480)]]), 'jpeg')) === '640x480');
+ok('JPEG: con relleno antes del SOF', medida(pixelesDeCabecera(jpeg([3, [0xc0, sof(10, 20)]]), 'jpeg')) === '10x20');
+{
+  const d = Buffer.alloc(10);
+  d[3] = 0x9d; d[4] = 0x01; d[5] = 0x2a; d.writeUInt16LE(1920, 6); d.writeUInt16LE(1080, 8);
+  ok('WEBP con pérdida (VP8)', medida(pixelesDeCabecera(webp('VP8 ', d), 'webp')) === '1920x1080');
+}
+{
+  // 14 bits de ancho−1 y 14 de alto−1, pegados después de la firma 2F.
+  const v = (300 - 1) | ((200 - 1) << 14);
+  const d = Buffer.alloc(5);
+  d[0] = 0x2f; d.writeUInt32LE(v >>> 0, 1);
+  ok('WEBP sin pérdida (VP8L)', medida(pixelesDeCabecera(webp('VP8L', d), 'webp')) === '300x200');
+}
+{
+  const d = Buffer.alloc(10);
+  d.writeUIntLE(5000 - 1, 4, 3); d.writeUIntLE(3000 - 1, 7, 3);
+  ok('WEBP extendido (VP8X)', medida(pixelesDeCabecera(webp('VP8X', d), 'webp')) === '5000x3000');
+}
+ok('una cabecera que no se entiende da null', pixelesDeCabecera(new Uint8Array([1, 2, 3]), 'png') === null
+  && pixelesDeCabecera(jpeg([[0xe0, jfif(72)]]), 'jpeg') === null);
+{
+  /* Node no tiene createImageBitmap: si medirImagen intentara decodificar,
+     acá reventaría. Que conteste es la prueba de que no decodifica. */
+  let m = null; let err = null;
+  try { m = await medirImagen(jpeg([[0xe1, exifOrientacion(6)], [0xc0, sof(3000, 4000)]]), 'jpeg'); } catch (e) { err = e.message; }
+  ok('medirImagen contesta sin decodificar (y con los píxeles crudos, sin girar)',
+    medida(m) === '3000x4000', err || medida(m));
 }
 
 console.log(`\n═══ ${pass} ok · ${fail} fallas ═══`);

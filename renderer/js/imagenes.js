@@ -43,8 +43,18 @@ const texto = (b, i, n) => String.fromCharCode(...b.subarray(i, i + n));
    viajan convertidas a píxeles por metro, así que vuelven con decimales:
    300 dpi se guarda como 11811 ppm y al deshacer la cuenta da 299,9994. Sin
    redondear, una A4 escaneada saldría de 297,0006 mm y la app la mostraría
-   como un tamaño desconocido en vez de "A4". */
-const redondearDPI = (v) => (v > 0 && Number.isFinite(v) ? Math.round(v * 100) / 100 : null);
+   como un tamaño desconocido en vez de "A4".
+
+   Y una densidad absurda cuenta como no declarada (herr-29). Una cabecera mal
+   escrita —un pHYs de 1 píxel por metro, que son 0,03 dpi, o un JFIF con
+   «1 por pulgada»— hacía una página de metros de lado, y una de 100 000 dpi
+   una estampilla. Ningún escáner ni cámara anda por debajo de 20 ni por
+   encima de 4800: fuera de ahí se toma como un screenshot, a 96. */
+const DPI_MINIMO = 20;
+const DPI_MAXIMO = 4800;
+const redondearDPI = (v) => (Number.isFinite(v) && v >= DPI_MINIMO && v <= DPI_MAXIMO
+  ? Math.round(v * 100) / 100
+  : null);
 
 /**
  * La densidad que el archivo declara, en dpi, o null si no dice nada.
@@ -88,15 +98,7 @@ function dpiPNG(b) {
    porque no siempre lo es: una foto de teléfono suele arrancar con el APP1 del
    EXIF y meter el JFIF después. */
 function dpiJPEG(b) {
-  let i = 2;                                   // saltea el SOI (FF D8)
-  while (i + 4 <= b.length && b[i] === 0xff) {
-    const marca = b[i + 1];
-    // Marcadores sin cuerpo: relleno, reinicios y el SOI repetido.
-    if (marca === 0xff || marca === 0x01 || (marca >= 0xd0 && marca <= 0xd9)) { i += 2; continue; }
-    if (marca === 0xda) return null;           // arrancó el scan: la cabecera terminó
-    const largo = u16(b, i + 2);
-    if (largo < 2) return null;
-
+  for (const { marca, i } of segmentosJPEG(b)) {
     if (marca === 0xe0 && i + 16 <= b.length && texto(b, i + 4, 4) === 'JFIF') {
       const unidad = b[i + 11];
       const x = u16(b, i + 12);
@@ -105,9 +107,34 @@ function dpiJPEG(b) {
       if (unidad === 2) return redondearDPI(x * 2.54);
       return null;
     }
-    i += 2 + largo;
   }
   return null;
+}
+
+/**
+ * Los segmentos de la cabecera de un JPEG, hasta que arranca el scan: cada uno
+ * con su marcador, dónde empieza (en el FF) y su largo. Lo recorren la
+ * densidad, la orientación y los píxeles, que antes tenían cada uno su copia.
+ *
+ * Un FF suelto entre segmentos es relleno, y el estándar lo permite: se
+ * saltea de a UN byte (herr-28). Se salteaba de a dos, caía sobre el código
+ * del marcador siguiente —que no es FF— y el recorrido se cortaba ahí: con
+ * una cantidad impar de rellenos no se leían ni el DPI ni el giro del EXIF, y
+ * una foto de costado entraba acostada.
+ */
+function* segmentosJPEG(b) {
+  let i = 2;                                   // saltea el SOI (FF D8)
+  while (i + 4 <= b.length && b[i] === 0xff) {
+    const marca = b[i + 1];
+    if (marca === 0xff) { i += 1; continue; }  // relleno: el FF que sigue es el de verdad
+    // Marcadores sin cuerpo: reinicios y el SOI repetido.
+    if (marca === 0x01 || (marca >= 0xd0 && marca <= 0xd9)) { i += 2; continue; }
+    if (marca === 0xda) return;                // arrancó el scan: la cabecera terminó
+    const largo = u16(b, i + 2);
+    if (largo < 2) return;
+    yield { marca, i, largo };
+    i += 2 + largo;
+  }
 }
 
 /* ── La orientación del EXIF ────────────────────────────────────────────────
@@ -121,19 +148,12 @@ export function orientacionExif(bytes, formato) {
   if (formato !== 'jpeg') return 1;
   const b = bytesDe(bytes);
 
-  let i = 2;
-  while (i + 4 <= b.length && b[i] === 0xff) {
-    const marca = b[i + 1];
-    if (marca === 0xff || marca === 0x01 || (marca >= 0xd0 && marca <= 0xd9)) { i += 2; continue; }
-    if (marca === 0xda) return 1;
-    const largo = u16(b, i + 2);
-    if (largo < 2) return 1;
+  for (const { marca, i, largo } of segmentosJPEG(b)) {
     if (marca === 0xe1 && texto(b, i + 4, 4) === 'Exif') {
       const o = orientacionEnTIFF(b, i + 10, i + 2 + largo);
       if (o >= 1 && o <= 8) return o;
       return 1;
     }
-    i += 2 + largo;
   }
   return 1;
 }
@@ -198,16 +218,83 @@ export function medidaDePagina(px, dpi, giro = 0) {
 /**
  * Los píxeles que tiene el archivo.
  *
- * `imageOrientation: 'none'` es deliberado: se quieren los píxeles CRUDOS, los
- * mismos que va a embeber pdf-lib. El navegador, librado a su criterio, aplica
- * el EXIF y devuelve el bitmap ya girado — y como acá el giro se aplica aparte,
- * como rotación de la página, terminaría aplicándose dos veces.
+ * Se leen de la cabecera, que ya se recorre para la densidad (herr-27): antes
+ * se decodificaba la imagen entera con createImageBitmap solo para preguntarle
+ * el ancho y el alto, de a una y en serie al agregar, y veinte fotos de 12
+ * megapíxeles eran segundos sin respuesta. El decodificador queda de respaldo
+ * para una cabecera que no se entiende.
+ *
+ * Son los píxeles CRUDOS, los mismos que va a embeber pdf-lib: la cabecera no
+ * aplica el EXIF, y el respaldo tampoco (`imageOrientation: 'none'`). El giro
+ * se aplica aparte, como rotación de la página; si el navegador también lo
+ * aplicara, terminaría aplicándose dos veces.
  */
 export async function medirImagen(bytes, formato) {
+  const deCabecera = pixelesDeCabecera(bytes, formato);
+  if (deCabecera) return deCabecera;
   const bm = await abrirBitmap(bytes, formato);
   const medida = { ancho: bm.width, alto: bm.height };
   bm.close();
   return medida;
+}
+
+/**
+ * El ancho y el alto que declara la cabecera, o null si no se pudieron leer.
+ *
+ * @param {Uint8Array|ArrayBuffer} bytes
+ * @param {'png'|'jpeg'|'webp'} formato
+ * @returns {{ancho:number, alto:number}|null}
+ */
+export function pixelesDeCabecera(bytes, formato) {
+  const b = bytesDe(bytes);
+  const m = formato === 'png' ? pixelesPNG(b)
+    : formato === 'jpeg' ? pixelesJPEG(b)
+      : formato === 'webp' ? pixelesWEBP(b)
+        : null;
+  return m && m.ancho > 0 && m.alto > 0 ? m : null;
+}
+
+/* PNG: el IHDR es por norma el primer chunk, y arranca con el ancho y el alto
+   en 4 bytes cada uno (big endian). */
+function pixelesPNG(b) {
+  if (b.length < 24 || u32(b, 0) !== 0x89504e47 || texto(b, 12, 4) !== 'IHDR') return null;
+  return { ancho: u32(b, 16), alto: u32(b, 20) };
+}
+
+/* JPEG: el SOF (start of frame) trae [precisión:1][alto:2][ancho:2]. Hay uno
+   por tipo de compresión —base, progresivo, aritmético…— y los códigos C4,
+   C8 y CC del medio NO son frames (tablas de Huffman, reservado, aritmética). */
+const ES_SOF = (m) => m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc;
+function pixelesJPEG(b) {
+  for (const { marca, i } of segmentosJPEG(b)) {
+    if (ES_SOF(marca) && i + 9 <= b.length) return { ancho: u16(b, i + 7), alto: u16(b, i + 5) };
+  }
+  return null;
+}
+
+/* WEBP: RIFF, el largo, «WEBP», y el primer chunk dice cuál de los tres es.
+   · VP8 (con pérdida): después de 3 bytes de cuadro y el código 9D 01 2A,
+     ancho y alto en 14 bits, little endian.
+   · VP8L (sin pérdida): la firma 2F y después ancho−1 y alto−1 en 14 bits
+     cada uno, pegados.
+   · VP8X (extendido): el lienzo, ancho−1 y alto−1 en 24 bits. */
+function pixelesWEBP(b) {
+  if (b.length < 30 || texto(b, 0, 4) !== 'RIFF' || texto(b, 8, 4) !== 'WEBP') return null;
+  const tipo = texto(b, 12, 4);
+  const d = 20;                                // acá empiezan los datos del chunk
+  const le16 = (i) => b[i] | (b[i + 1] << 8);
+  const le24 = (i) => b[i] | (b[i + 1] << 8) | (b[i + 2] << 16);
+  if (tipo === 'VP8 ' && b[d + 3] === 0x9d && b[d + 4] === 0x01 && b[d + 5] === 0x2a) {
+    return { ancho: le16(d + 6) & 0x3fff, alto: le16(d + 8) & 0x3fff };
+  }
+  if (tipo === 'VP8L' && b[d] === 0x2f) {
+    return {
+      ancho: 1 + (((b[d + 2] & 0x3f) << 8) | b[d + 1]),
+      alto: 1 + (((b[d + 4] & 0x0f) << 10) | (b[d + 3] << 2) | ((b[d + 2] & 0xc0) >> 6)),
+    };
+  }
+  if (tipo === 'VP8X') return { ancho: 1 + le24(d + 4), alto: 1 + le24(d + 7) };
+  return null;
 }
 
 /**

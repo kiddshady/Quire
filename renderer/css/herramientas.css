@@ -23,28 +23,30 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--ox-4) var(--ox-6) 26px;
+  padding: var(--ox-4) var(--ox-6) var(--ox-6);
 }
 
-/* ── Sobre el `both` en las animaciones de entrada ───────────────────────────
-   Las que revelan contenido van SIN fill-mode. Con `both`, un keyframe que
-   arranca en `opacity: 0` deja el elemento invisible mientras la animación no
-   progrese, y sin fill-mode el estado en reposo es el normal — se ve igual
-   aunque la animación no llegue a correr. Es un seguro barato.
-
-   (Ojo al diagnosticar esto: si medís la app en una BrowserWindow con
-   `show: false`, Chromium le congela las animaciones y TODO lo que entre
-   animado se mide en `opacity: 0`. Eso es el instrumento, no la app. El test
-   de humo muestra la ventana en x:-20000 justamente para no caer en eso.) */
-
+/* El panel NO tiene entrada propia (herr-02, css-04, herr-25). Tenía un
+   ox-glide-in de 420 ms, y como cada clic de DPI o de formato rehacía la
+   sección, el panel entero volvía a entrar desde la izquierda; al navegar,
+   además, se corría 10 px debajo del calco del router, que lo deja quieto a
+   propósito. Ahora la sección se arma una vez y se pone al día en el lugar,
+   cambiar de pestaña es un fundido (swap con `fundido`) y la entrada de la
+   vista la da el router. */
 .qr-herr__panel {
   display: flex;
   flex-direction: column;
   gap: var(--ox-4);
   max-width: 720px;
   padding-bottom: var(--ox-8);
-  animation: ox-glide-in var(--ox-t-4) var(--ox-ease);
 }
+/* Lo que se prende según una opción (Calidad, el campo de cada tipo de corte)
+   se pliega comiéndose el gap de la columna. */
+.qr-herr__panel > .ox-plegable { --ox-plegable-gap: var(--ox-4); }
+
+.qr-herr__campo-corto { max-width: 280px; }
+.qr-herr__campo-medio { max-width: 340px; }
+.qr-herr__vacio { margin: var(--ox-6) auto; }
 
 .qr-herr__intro {
   margin: 0;
@@ -69,6 +71,9 @@
 }
 
 /* ── Cola de combinación ─────────────────────────────────────────────────── */
+
+/* El orden cambia en su lugar con numero(): el número de la fila que sube es
+   el mismo nodo, con su destello. */
 
 .qr-cola__orden {
   display: grid;
@@ -113,7 +118,7 @@
   padding: var(--ox-2) 0;
   background: var(--ox-s2);
   border: 0;
-  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  border-radius: var(--ox-r-sm);
   cursor: pointer;
   box-shadow: var(--ox-hairline);
   transition: var(--tr-color);
@@ -139,3 +144,10 @@
 }
 
 .qr-progreso .ox-meter { flex: 1 1 auto; }
+/* Para arrancar de 0 sin desenrollarse (herr-16): mostrarProgreso() la pone,
+   fuerza el estilo y la saca. */
+.qr-progreso.is-reiniciando .ox-meter__fill { transition: none; }
+
+/* El eco de un slider: ancho fijo para que «100%» no le robe un carácter al
+   slider bajo el puntero (herr-31). Mismo arreglo que el grosor de la tinta. */
+.qr-eco { min-width: calc(4ch + 2 * var(--ox-2)); justify-content: center; }   /* 4 cifras más el padding del chip */
