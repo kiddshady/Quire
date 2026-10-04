@@ -20,9 +20,38 @@
    del viewport, acá lo hace esta función.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-import { PDFDocument, rgb } from '../../vendor/pdf-lib/pdf-lib.mjs';
+import { PDFDocument, BlendMode, rgb } from '../../vendor/pdf-lib/pdf-lib.mjs';
 import { contornoDeTrazo, pathDeContorno } from './contorno.js';
-import { contarTrazos } from './capa.js';
+import { contarTrazos, esResaltador } from './capa.js';
+
+/* ── Un PDF con contraseña de apertura no se aplana ──────────────────────────
+   pdf.js lo lee (con la contraseña de apertura, o sin pedir nada si solo
+   tiene la de propietario), pero sus bytes siguen cifrados y pdf-lib no los
+   descifra: con `ignoreEncryption` los carga igual, conserva el /Encrypt al
+   guardar, y el PDF que sale trae la tinta ilegible o las hojas en blanco,
+   en silencio. Decisión de Fran: avisar y bloquear, no rasterizar. Se tira
+   un error con código y un texto que se puede mostrar tal cual; cada acción
+   (imprimir, exportar, combinar) lo dice a su manera antes de llegar acá, y
+   esto es la red por si alguna no mira.
+
+   El código es el MISMO que usa el motor de imposición para lo mismo (CLAVE
+   en imposicion/motor.js, paquete 4A): la vista que ataja
+   err.code === 'quire-clave' ataja también lo que tira el aplanado, que
+   corre antes que el motor.
+
+   Y el texto distingue los dos casos (revisión del paquete 3A): un PDF de
+   cátedra con contraseña de propietario sola se abre sin pedir nada, y
+   decirle «tiene contraseña» a quien nunca tipeó una es falso. */
+export const CON_CLAVE = 'quire-clave';
+
+function errorConClave(conClave) {
+  const e = new Error(conClave
+    ? 'Este PDF tiene contraseña: Quire lo puede leer, pero todavía no imprimirlo ni exportarlo con anotaciones.'
+    : 'Este PDF está protegido: Quire lo puede leer, pero todavía no imprimirlo ni exportarlo con anotaciones.');
+  e.code = CON_CLAVE;
+  e.conClave = !!conClave;
+  return e;
+}
 
 function aRgb(hex) {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || '#000'));
@@ -41,8 +70,14 @@ function aRgb(hex) {
  */
 export async function aplanarTinta(bytes, capa, { soloPaginas = null } = {}) {
   if (!capa || capa.vacia) return bytes;
+  /* `cifrado` es la marca que el paquete 4A le pide a documento.js para los
+     de solo lectura (ya la miran imprimir.js y herramientas.js); mientras no
+     exista vale undefined, y a esos los delata el /Encrypt de abajo. */
+  if (capa.doc?.conClave || capa.doc?.cifrado) throw errorConClave(capa.doc.conClave);
 
   const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  // Por si los bytes no son los del documento de la capa: el diccionario /Encrypt manda.
+  if (doc.isEncrypted) throw errorConClave(capa.doc?.conClave);
   const total = doc.getPageCount();
   let escritos = 0;
 
@@ -56,15 +91,13 @@ export async function aplanarTinta(bytes, capa, { soloPaginas = null } = {}) {
     /* Los resaltadores primero, para que la tinta opaca de la pluma quede por
        encima. Mismo orden que en pantalla — si no, lo impreso no coincide. */
     const trazos = capa.trazos(numero);
-    const orden = [
-      ...trazos.filter((t) => t.herramienta === 'resaltador'),
-      ...trazos.filter((t) => t.herramienta !== 'resaltador'),
-    ];
+    const orden = [...trazos.filter(esResaltador), ...trazos.filter((t) => !esResaltador(t))];
 
     for (const t of orden) {
+      const resalta = esResaltador(t);
       const vertices = contornoDeTrazo(t.puntos, {
         ancho: t.ancho,
-        sensible: t.herramienta !== 'resaltador',
+        sensible: !resalta,
       });
       if (!vertices.length) continue;
 
@@ -77,11 +110,17 @@ export async function aplanarTinta(bytes, capa, { soloPaginas = null } = {}) {
          en los Resources de sus páginas para decir «opaco», que es lo que ya
          es un relleno sin nada (tinta-26). */
       const opacidad = t.opacidad ?? 1;
+      /* El resaltador se mezcla con multiply, igual que en pantalla
+         (tinta-07, decisión de Fran): con alfa a secas, el 34 % de amarillo
+         encima de una letra negra la dejaba oliva, y así salía impresa. El
+         modo va en el MISMO ExtGState que la opacidad, así que no suma
+         entradas a los Resources. */
       pagina.drawSvgPath(d, {
         x: 0,
         y: alto,
         color: aRgb(t.color),
         opacity: opacidad < 1 ? opacidad : undefined,
+        blendMode: resalta ? BlendMode.Multiply : undefined,
         borderWidth: 0,
       });
       escritos++;

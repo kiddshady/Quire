@@ -2,6 +2,12 @@
    Era un tramo de quire.css; cada zona tiene su hoja desde octubre de 2026.
    Se cargan en el orden de index.html, que es el de antes: la cascada no cambia. */
 
+/* El amarillo del resaltador, en UN lugar (css-23). Lo usan las marcas de la
+   búsqueda (abajo) y la tinta: capa.js lo lee al cargar para el color de la
+   herramienta y de la pastilla. Estaba tres veces, y cambiarlo en una dejaba
+   a las otras con el viejo. Es tinta, no interfaz: no es un token de Onyx. */
+:root { --qr-resaltador-rgb: 241 196 15; }
+
 /* ── Barra de herramientas ───────────────────────────────────────────────── */
 
 .qr-barra {
@@ -515,7 +521,9 @@
 .qr-pliego__falla {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  /* Encima de las capas de tinta, que llegan hasta 3 (ver «El orden de las
+     capas» más abajo). */
+  z-index: 4;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -677,8 +685,8 @@
   opacity: 0;
   transition: opacity var(--ox-t-2) var(--ox-ease-soft);
 
-  --qr-marca: rgb(241 196 15 / .40);
-  --qr-marca-viva: rgb(241 196 15 / .88);
+  --qr-marca: rgb(var(--qr-resaltador-rgb) / .40);
+  --qr-marca-viva: rgb(var(--qr-resaltador-rgb) / .88);
   --qr-marca-borde: rgb(146 104 0 / .55);
 }
 
@@ -717,21 +725,72 @@
 /* ── La capa de tinta ────────────────────────────────────────────────────────
    Va SIEMPRE encima de la página, esté o no activo el modo de anotación: lo
    anotado tiene que verse mientras leés, igual que se ve en el papel. Lo que
-   cambia con el modo es solo si captura el puntero. */
+   cambia con el modo es solo si captura el puntero.
 
-.qr-tinta {
+   Son tres canvas (ver el encabezado de tinta/editor.js): los resaltadores
+   abajo, lo confirmado en el medio —es el que escucha al lápiz— y el trazo
+   en curso arriba. Los calcos de un fundido (deshacer, borrar) van pegados a
+   su capa mientras se esfuman. Ninguno lleva tamaño en línea: miden el 100 %
+   del pliego y se estiran con él (tinta-02). */
+
+.qr-tinta,
+.qr-tinta-resaltador,
+.qr-tinta-viva,
+.qr-tinta-calco {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
+}
+
+/* La tinta entra con la hoja (tinta-20). La hoja se funde de 0 a 1 al
+   ponerse is-pintada, y la tinta, sin fundido, aparecía entera sobre el
+   blanco del pliego: durante 180 ms los trazos flotaban y el texto aparecía
+   debajo. reescalar() mantiene is-pintada, así que el zoom no la vuelve a
+   fundir. */
+.qr-tinta,
+.qr-tinta-resaltador,
+.qr-tinta-viva {
+  opacity: 0;
   transition: opacity var(--ox-t-2) var(--ox-ease-soft);
 }
+.qr-pliego.is-pintada :is(.qr-tinta, .qr-tinta-resaltador, .qr-tinta-viva) { opacity: 1; }
+
+/* El resaltador se mezcla con la hoja (tinta-07, decisión de Fran): con alfa
+   a secas, el 34 % de amarillo encima de una letra negra la dejaba oliva.
+   Con multiply, amarillo por blanco da amarillo y amarillo por negro sigue
+   dando negro, como en el papel. Funciona porque el pliego es un grupo
+   aislado (isolation) y entre la hoja y este canvas no hay otro grupo: la
+   mezcla es con la hoja, no con la mesa de atrás. Lo mismo para su calco y
+   para el resaltador mientras se dibuja, que el editor marca en el canvas
+   vivo; y así sale también impreso y exportado (aplanar.js, componerTinta). */
+.qr-tinta-resaltador,
+.qr-tinta-calco--resaltador,
+.qr-tinta-viva[data-herramienta='resaltador'] { mix-blend-mode: multiply; }
+
+/* El orden de las capas dentro del pliego, escrito: los resaltadores (y su
+   calco) abajo, lo confirmado de las demás herramientas (y su calco) encima,
+   el canvas vivo arriba de todo. Todo por encima de la capa de texto y de las
+   marcas, que van con z-index 0 o sin él, como antes.
+   Lo que cambia es el resaltador EN CURSO: baja a la altura de los
+   resaltadores, debajo de la pluma. Arriba de todo, donde cruzaba un trazo de
+   color se mezclaba encima de él (rojo por amarillo, un rojo más oscuro), y
+   al levantar el lápiz pasaba a su capa, debajo, y quedaba el rojo puro: el
+   color saltaba (revisión del paquete 3A). Ahora en vivo se ve como va a
+   quedar. Por orden del árbol, dentro del mismo z-index el vivo queda
+   encima de los resaltadores ya confirmados. */
+.qr-tinta-resaltador,
+.qr-tinta-calco--resaltador,
+.qr-tinta-viva[data-herramienta='resaltador'] { z-index: 1; }
+.qr-tinta,
+.qr-tinta-calco--tinta { z-index: 2; }
+.qr-tinta-viva { z-index: 3; }
 
 /* Girando (ver girar en lector.js): la tinta y las marcas se apagan junto con
    la hoja, y recién apagadas cambia la geometría. Ningún cuadro muestra la
    hoja vieja recortada ni aplastada en la forma nueva (lector-07). */
-.qr-visor.is-girando .qr-tinta,
+.qr-visor.is-girando :is(.qr-tinta, .qr-tinta-resaltador, .qr-tinta-viva, .qr-tinta-calco),
 .qr-visor.is-girando .qr-marcas { opacity: 0; }
 
 .qr-visor.is-anotando .qr-tinta {
@@ -929,7 +988,8 @@
   border: 0;
   border-radius: var(--ox-r-pill);
   background: var(--tinta);
-  cursor: pointer;
+  /* Como los demás botones de la barra (tinta-24). */
+  cursor: default;
   /* Hairline propio: sobre el fondo oscuro, una tinta oscura necesita borde
      para no desaparecer. Va como inset para no crecer al seleccionarse. */
   box-shadow: inset 0 0 0 1px var(--ox-line-3);
@@ -938,9 +998,12 @@
 
 .qr-color:hover { transform: scale(1.12); }
 
+/* El hueco entre la pastilla y el anillo es del color de la barra (--ox-s2),
+   así se lee como un hueco. Con --ox-bg, más oscuro que la barra, el color
+   elegido llevaba un halo negro alrededor (tinta-24). */
 .qr-color.is-on {
   box-shadow: inset 0 0 0 1px var(--ox-line-3),
-              0 0 0 2px var(--ox-bg),
+              0 0 0 2px var(--ox-s2),
               0 0 0 3px var(--ox-accent);
 }
 
@@ -958,6 +1021,8 @@
 
 .qr-pliego__num {
   position: absolute;
+  /* Encima de la tinta, como cuando iba sin z-index y última en el árbol. */
+  z-index: 4;
   right: var(--ox-2);
   bottom: var(--ox-2);
   padding: 2px 6px;
@@ -973,12 +1038,62 @@
 
 .qr-pliego:hover .qr-pliego__num { opacity: 1; }
 
-@keyframes qr-aparecer { to { opacity: 1; } }
-
 /* «Abriendo…»: lo que dice el lector mientras se abre el primer documento,
    en vez del vacío con su botón de abrir (shell-05). */
 .qr-abriendo { display: grid; place-items: center; }
 .qr-abriendo .ox-empty > svg { width: 22px; height: 22px; }
+
+/* ── El inicio: los recientes (ux-21) ────────────────────────────────────────
+   Debajo del vacío, centrados con él. La caja es un .ox-plegable: entra
+   desplegándose cuando el main contesta y se pliega al olvidarlos.
+
+   Con 8 recientes y la ventana baja, la lista no entra y se scrollea: es un
+   .ox-scroll (lo arma paint()), que se esfuma del lado donde recorta al aire
+   en vez de cortar en seco contra el borde de la vista (dark-app-aesthetics;
+   revisión del paquete 3A). El overflow lo pone .ox-scroll. Y el centrado es
+   `safe`: centrado a secas, lo que no entra desborda también para ARRIBA,
+   y el scroll no llega al vacío ni a su botón de abrir. */
+.qr-inicio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  /* La caja de abajo se pliega con su gap: ver --ox-plegable-gap en motion.css. */
+  gap: var(--ox-4);
+  --ox-plegable-gap: var(--ox-4);
+  min-height: 0;
+}
+/* Sin recientes, el vacío conserva su relleno de abajo y queda donde estaba
+   siempre (la foto de antes y después dio 36 px más abajo sin él). Con la
+   caja de recientes a la vista, el relleno se lo come el gap. Viaja con el
+   mismo tiempo y curva que el pliegue de la caja, así no salta al prenderse. */
+.qr-inicio > .ox-empty { transition: padding var(--ox-t-2) var(--ox-ease-both); }
+.qr-inicio > .ox-empty:has(+ .qr-recientes:not([hidden])) { padding-bottom: 0; }
+
+.qr-recientes {
+  width: min(460px, 100%);
+  padding-bottom: var(--ox-6);
+}
+.qr-recientes__cabeza {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-2);
+  padding: 0 var(--ox-3) var(--ox-2);
+}
+/* Rutas y nombres de archivo: se copian (dark-app-aesthetics §5). */
+.qr-reciente .ox-listitem__main { user-select: text; }
+.qr-reciente > .ox-icon { width: 16px; height: 16px; flex: 0 0 auto; color: var(--ox-text-3); }
+/* La carpeta es una ruta: dato exacto, en mono. */
+.qr-reciente__carpeta { font-family: var(--ox-mono); font-size: var(--ox-fs-10); }
+.qr-reciente .ox-listitem__aside { font-variant-numeric: tabular-nums; }
+/* El que ya no está en esa carpeta queda apagado y no responde al hover.
+   La opacidad viaja: una fila que ya se ve puede pasar a «ya no está» (o
+   volver) cuando contesta el main, y ponerReciente() en lector.js solo le
+   cambia la clase. Las transiciones de .ox-listitem se repiten porque
+   `transition` no se suma: se pisa. */
+.qr-reciente { transition: var(--tr-color), transform var(--ox-t-1) var(--ox-ease-soft), opacity var(--ox-t-2) var(--ox-ease-soft); }
+.qr-reciente.is-perdido { opacity: .45; }
+.qr-reciente.is-perdido:hover { background: transparent; }
 
 /* El cartel de la contraseña (pedirClave, ux-11). */
 .qr-clave { display: flex; flex-direction: column; gap: var(--ox-2); }

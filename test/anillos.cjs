@@ -79,6 +79,9 @@ const auditarAnillos = (alcance = null) => `(((scope) => {
     }
   }
   document.querySelectorAll('.ox-scroll, .ox-main, [class*="scroll"]').forEach((s) => { s.scrollTop = 0; s.scrollLeft = 0; });
+  // Se saca al terminar: si quedaba, todo lo que se medía después en la misma
+  // página corría sin transiciones (el pliegue de los recientes no animaba).
+  document.getElementById('aud-notr')?.remove();
   return out;
 }))(${alcance ? `document.querySelector(${JSON.stringify(alcance)})` : 'document'})`;
 

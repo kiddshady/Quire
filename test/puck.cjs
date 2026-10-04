@@ -28,6 +28,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const { vigilarConsola } = require('./consola.cjs');
+const { abandono, vivo } = require('./_comun.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 const PDF = path.join(RAIZ, 'renderer', 'vendor', 'cobayo.pdf');
@@ -37,6 +38,11 @@ const PDF = path.join(RAIZ, 'renderer', 'vendor', 'cobayo.pdf');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'quire-puck-'));
 process.env.QUIRE_DATA = path.join(TMP, 'datos');
 fs.mkdirSync(process.env.QUIRE_DATA, { recursive: true });
+
+/* Un rechazo sin atajar o pasarse de tiempo terminan la suite diciendo por
+   qué, en vez de dejar Electron colgado (tests-07); la carpeta de datos se
+   borra igual. */
+abandono({ salir: (c) => { limpiar(); app.exit(c); } });
 
 const problemas = [];
 let pass = 0;
@@ -103,7 +109,9 @@ async function correr() {
       activo: puck?.dataset.activo || '',
       transform: pista.style.transform,
       tintaRecibe: tinta ? getComputedStyle(tinta).pointerEvents : 'sin canvas',
-      etiqueta: document.getElementById('qr-zoom-valor').textContent,
+      /* El % pasa por valor(), que releva: se lee lo vivo y no el calco que
+         se va (tests-13). */
+      etiqueta: ${vivo('#qr-zoom-valor')},
       visor: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
     };
   })()`);

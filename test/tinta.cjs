@@ -13,19 +13,25 @@ const { app, BrowserWindow } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { vigilarConsola } = require('./consola.cjs');
+const { abandono } = require('./_comun.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 const HTML = path.join(RAIZ, 'renderer', '_tinta.html');
 
-let pass = 0; let fail = 0;
-const ok = (n, c, x = '') => { if (c) { pass++; console.log(`  ok   ${n}`); } else { fail++; console.log(`  FALLA ${n} ${x}`); } };
+/* Si algo se cuelga o tira, la suite sale con código 3 diciendo por qué en
+   vez de quedarse con Electron abierto (tests-07). Y la página del test se
+   borra en TODAS las salidas (tests-08): también cuando explota a mitad de
+   camino, que es cuando antes quedaba en renderer/ y se empaquetaba. */
+const bail = abandono({ ms: 150000 });
+const salirApp = app.exit.bind(app);
+app.exit = (c) => { try { fs.rmSync(HTML, { force: true }); } catch { /* ya no está */ } salirApp(c); };
 
-/* Si algo se cuelga, el test falla en vez de quedarse con Electron abierto
-   para siempre, y la página del test no queda en renderer/ (se empaqueta). */
-const limpiar = () => { try { fs.unlinkSync(HTML); } catch { /* ya no estaba */ } };
-const abandonar = (motivo) => { console.log(`EXPLOTÓ: ${motivo}`); limpiar(); app.exit(1); };
-setTimeout(() => abandonar('pasaron 90 s'), 90000).unref();
-process.on('unhandledRejection', (e) => abandonar(String(e?.stack || e)));
+/* Un PDF chico con contraseña de apertura «quire» (RC4, hecho con pypdf): el
+   mismo de lector.cjs. pdf-lib no cifra, así que va acá adentro. */
+const CON_CLAVE_B64 = 'JVBERi0xLjMKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPDM3YzhmZTlmOGI+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbIDQgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKPj4KL01lZGlhQm94IFsgMC4wIDAuMCAyMDAgMjAwIF0KL1BhcmVudCAyIDAgUgo+PgplbmRvYmoKNSAwIG9iago8PAovViAxCi9SIDIKL0xlbmd0aCA0MAovUCA0Mjk0OTY3MjkyCi9GaWx0ZXIgL1N0YW5kYXJkCi9PIDxjNzI4ODNjN2M5OWQzYzcwODU3NjE3NDBhNTBiYmE4YjdlOGJjYjg5NGViZTUzNGY5YzlhOTUxMDhmY2JkNWIyPgovVSA8M2FhODUyYWRiZWNhY2ZiOWJkNDdlZWFhMDliYmRjMTU2NDg4MDk5Nzc3YzUwM2Y0YWIzNGMxZTQ4ZDJhNjY4MT4KPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxNSAwMDAwMCBuIAowMDAwMDAwMDU5IDAwMDAwIG4gCjAwMDAwMDAxMTggMDAwMDAgbiAKMDAwMDAwMDE2NyAwMDAwMCBuIAowMDAwMDAwMjYxIDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgNgovUm9vdCAzIDAgUgovSW5mbyAxIDAgUgovSUQgWyA8MzUzOTYzMzIzMDYyNjI2MTY1NjMzODMyNjUzMTYyMzU2MzM2MzM2MzYxNjI2NTY2MzU2MTY2NjE2NTY2MzEzMT4gPDM1Mzk2MzMyMzA2MjYyNjE2NTYzMzgzMjY1MzE2MjM1NjMzNjMzNjM2MTYyNjU2NjM1NjE2NjYxNjU2NjMxMzE+IF0KL0VuY3J5cHQgNSAwIFIKPj4Kc3RhcnR4cmVmCjQ3NQolJUVPRgo=';
+
+let pass = 0; let fail = 0;
+const ok = (n, c, x = '') => { if (c) { pass++; console.log(`  ok   ${n}` + (process.env.VERBOSO ? ' ' + x : '')); } else { fail++; console.log(`  FALLA ${n} ${x}`); } };
 
 app.whenReady().then(async () => {
   fs.writeFileSync(HTML,
@@ -34,8 +40,9 @@ app.whenReady().then(async () => {
     /* Lo mismo que lector.css le pone a la tinta: el canvas mide el 100 % de
        su pliego. Es lo que tinta-02 necesita para que la tinta se estire con
        la hoja. */
-    + '<style>body{margin:0} .pliego{position:relative;overflow:hidden;background:#fff}'
-    + ' .qr-tinta{position:absolute;inset:0;width:100%;height:100%;touch-action:none}</style>\n'
+    + '<style>body{margin:0} .pliego{position:relative;overflow:hidden;background:#fff;isolation:isolate}'
+    + ' .qr-tinta,.qr-tinta-resaltador,.qr-tinta-viva,.qr-tinta-calco{position:absolute;inset:0;width:100%;height:100%}'
+    + ' .qr-tinta{touch-action:none} .qr-tinta-viva,.qr-tinta-calco{pointer-events:none}</style>\n'
     + '<body></body>\n');
 
   /* Fuera de pantalla pero VISIBLE: con show:false Chromium no corre los
@@ -309,7 +316,7 @@ app.whenReady().then(async () => {
     return salida;
   })()`, true).catch((e) => ({ error: String(e) }));
 
-  if (r.error) { abandonar(r.error); return; }
+  if (r.error) { bail('la primera parte tiró', r.error); return; }
 
   /* ── El editor, con el puntero ─────────────────────────────────────────
      Se arma un pliego con su canvas como el del lector y se le tiran
@@ -317,6 +324,7 @@ app.whenReady().then(async () => {
      existe de verdad: se neutraliza acá, en el test, y no en stroke.js (vino
      de Scrawl sin cambios y así se queda). */
   const e = await win.webContents.executeJavaScript(`(async () => {
+    const CON_CLAVE_B64 = ${JSON.stringify(CON_CLAVE_B64)};
     const editorMod = await import('./js/tinta/editor.js');
     const { cablearTinta } = editorMod;
     const { CapaDeTinta, HERRAMIENTAS, contarTrazos } = await import('./js/tinta/capa.js');
@@ -428,10 +436,11 @@ app.whenReady().then(async () => {
     // ── lector-22: el bitmap de la tinta tiene tope, y el trazo cae igual donde va
     {
       const m = await montar({ escala: 10 / dpr });     // viewport de ~5950 × 8420
-      const area = m.canvas.width * m.canvas.height;
       m.capa.agregar(1, { herramienta: 'pluma', color: '#ff0000', ancho: 20, opacidad: 1,
         puntos: [[g.anchoPt * 0.4, g.altoPt / 2, 1], [g.anchoPt * 0.6, g.altoPt / 2, 1]] });
       m.ed.redibujar();
+      // Con un trazo, para que reserve (sin trazos no reserva nada: lector-23).
+      const area = m.canvas.width * m.canvas.height;
       const cx = Math.round(m.canvas.width / 2);
       const cy = Math.round(m.canvas.height / 2);
       const px = m.canvas.getContext('2d').getImageData(cx, cy, 1, 1).data;
@@ -653,6 +662,198 @@ app.whenReady().then(async () => {
       salida.extgstate = { original, aplanado, nuevos: aplanado - original };
     }
 
+    /* Cuántos píxeles con tinta tiene un canvas. Se lee una COPIA (como
+       PIXELES en _comun.cjs): leer dos veces el canvas del editor hace que
+       Chromium avise por consola y hasta puede mudarlo a CPU. */
+    const tinta = (c, test = (r, g, b, a) => a > 20) => {
+      if (!c?.width) return 0;
+      const k = document.createElement('canvas');
+      k.width = c.width; k.height = c.height;
+      const x = k.getContext('2d', { willReadFrequently: true });
+      x.drawImage(c, 0, 0);
+      const d = x.getImageData(0, 0, k.width, k.height).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (test(d[i], d[i + 1], d[i + 2], d[i + 3])) n++;
+      return n;
+    };
+    const rojoOpaco = (r, g, b, a) => a > 120 && r > 130 && g < 90 && b < 90;
+    const enElAire = { buttons: 0, pressure: 0, button: -1 };
+    const capaDe = (m, clase) => m.pliego.querySelector('canvas.' + clase);
+
+    /* Cada caso nuevo va en su propio try: corrido al revés, contra un editor
+       que no arma estos canvas, el que explota no se lleva puestos a los demás. */
+    const probar = async (fn) => {
+      try { await fn(); } catch (err) { (salida.explotaron ||= []).push(String(err?.message || err).slice(0, 160)); }
+    };
+
+    // ── lector-23: sin trazos no se reserva nada; cada capa, cuando la necesita
+    await probar(async () => {
+      const m = await montar();
+      const anchos = () => ({ resaltador: capaDe(m, 'qr-tinta-resaltador')?.width ?? -1, tinta: m.canvas.width, viva: capaDe(m, 'qr-tinta-viva')?.width ?? -1 });
+      const vacio = anchos();
+      m.capa.agregar(1, { herramienta: 'pluma', color: '#000', ancho: 2, opacidad: 1, puntos: [[100, 100, 1], [200, 100, 1]] });
+      m.ed.redibujar();
+      const conPluma = anchos();
+      m.capa.agregar(1, { herramienta: 'resaltador', color: '#ffee00', ancho: 14, opacidad: 0.34, puntos: [[100, 200, 1], [200, 200, 1]] });
+      m.ed.redibujar();
+      const conResaltador = anchos();
+      m.tirar('pointermove', 0.5, 0.5, enElAire);
+      await cuadro(); await cuadro();
+      const punta = anchos();
+      m.canvas.dispatchEvent(new PointerEvent('pointerleave', { pointerId: 7, pointerType: 'pen' }));
+      salida.reserva = { vacio, conPluma, conResaltador, punta, seFue: anchos(), canvases: m.pliego.querySelectorAll('canvas').length };
+      m.pliego.remove();
+    });
+
+    // ── tinta-10: mientras se dibuja, lo confirmado no se toca; lo vivo va arriba
+    await probar(async () => {
+      const m = await montar({ herramienta: 'fibra' });
+      m.capa.agregar(1, { herramienta: 'pluma', color: '#000', ancho: 2, opacidad: 1, puntos: [[50, 50, 1], [80, 50, 1]] });
+      m.ed.redibujar();
+      const viva = capaDe(m, 'qr-tinta-viva');
+      const ctx = m.canvas.getContext('2d');
+      const vctx = viva?.getContext('2d');
+      let toques = 0; let vivos = 0;
+      for (const f of ['fill', 'clearRect', 'stroke']) { const o = ctx[f].bind(ctx); ctx[f] = (...a) => { toques++; return o(...a); }; }
+      if (vctx) { const o = vctx.fill.bind(vctx); vctx.fill = (...a) => { vivos++; return o(...a); }; }
+      m.tirar('pointerdown', 0.2, 0.5);
+      for (let i = 1; i <= 8; i++) { m.tirar('pointermove', 0.2 + i * 0.05, 0.5); await cuadro(); }
+      const durante = { toques, vivos, rojoVivo: tinta(viva, rojoOpaco), rojoFijo: tinta(m.canvas, rojoOpaco) };
+      m.tirar('pointerup', 0.6, 0.5);
+      salida.vivo = { durante, trasSoltar: { toques, rojoFijo: tinta(m.canvas, rojoOpaco), vivaConAlgo: tinta(viva) }, trazos: m.capa.trazos(1).length };
+      m.pliego.remove();
+    });
+
+    // ── tinta-21: el anillo de la punta, y que se borra
+    await probar(async () => {
+      const m = await montar({ herramienta: 'borrador' });
+      const viva = capaDe(m, 'qr-tinta-viva');
+      const caja = () => {
+        if (!viva?.width) return { n: 0, ancho: 0 };
+        const k = document.createElement('canvas');
+        k.width = viva.width; k.height = viva.height;
+        const x = k.getContext('2d', { willReadFrequently: true });
+        x.drawImage(viva, 0, 0);
+        const d = x.getImageData(0, 0, k.width, k.height).data;
+        let x0 = Infinity; let x1 = -Infinity; let n = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i + 3] < 40) continue;
+          const px = (i / 4) % k.width; n++;
+          if (px < x0) x0 = px; if (px > x1) x1 = px;
+        }
+        return { n, ancho: n ? x1 - x0 + 1 : 0 };
+      };
+      m.tirar('pointermove', 0.5, 0.5, enElAire);
+      await cuadro(); await cuadro();
+      const anillo = { ...caja(), herramienta: viva?.dataset.herramienta };
+      m.sel.id = 'pluma';
+      m.tirar('pointermove', 0.52, 0.5, enElAire);
+      await cuadro(); await cuadro();
+      const punto = { ...caja(), herramienta: viva?.dataset.herramienta };
+      m.canvas.dispatchEvent(new PointerEvent('pointerleave', { pointerId: 7, pointerType: 'pen' }));
+      salida.anillo = { anillo, punto, fuera: viva ? viva.width : -1, esperado: +(HERRAMIENTAS.borrador.ancho * m.viewport.scale).toFixed(1) };
+      m.pliego.remove();
+    });
+
+    // ── tinta-13: lo que no hace el lápiz se funde
+    await probar(async () => {
+      const m = await montar();
+      const y = g.altoPt / 2;
+      const t = m.capa.agregar(1, { herramienta: 'fibra', color: '#ff0000', ancho: 12, opacidad: 1,
+        puntos: [[g.anchoPt * 0.2, y, 1], [g.anchoPt * 0.8, y, 1]] });
+      m.ed.redibujar();
+      const entero = tinta(m.canvas, rojoOpaco);
+      const muestrear = async (c) => {
+        const serie = []; const t0 = performance.now();
+        while (performance.now() - t0 < 360) { serie.push(c.isConnected ? +(+getComputedStyle(c).opacity).toFixed(2) : null); await esperar(20); }
+        return serie;
+      };
+      // Deshacer el trazo: se va en un calco, la base ya no lo tiene.
+      const op = m.capa.deshacer();
+      const [sale] = m.ed.fundir({ salen: op.trazos });
+      const sal = { baseRoja: tinta(m.canvas, rojoOpaco), calcoRojo: tinta(sale, rojoOpaco), serie: await muestrear(sale) };
+      // Rehacerlo: llega en otro calco, y la base lo suma recién al final.
+      const op2 = m.capa.rehacer();
+      const [entra] = m.ed.fundir({ entran: op2.trazos });
+      const ent = { baseRoja: tinta(m.canvas, rojoOpaco), serie: await muestrear(entra) };
+      ent.baseAlFinal = tinta(m.canvas, rojoOpaco);
+      ent.calcosQuedan = m.pliego.querySelectorAll('.qr-tinta-calco').length;
+      // La goma: deshacerla trae solo el tramo comido, no el trazo entero encima de los pedazos.
+      m.capa.empezarBorrado();
+      m.capa.borrarEn(1, g.anchoPt * 0.5, y, 30);
+      m.capa.terminarBorrado();
+      m.ed.redibujar();
+      const conHueco = tinta(m.canvas, rojoOpaco);
+      const op3 = m.capa.deshacer();
+      const originales = op3.cortes.map((c) => c.original);
+      const pedazos = op3.cortes.flatMap((c) => c.piezas);
+      const [tramo] = m.ed.fundir({ entran: originales, debajo: pedazos });
+      const goma = { conHueco, baseConPedazos: tinta(m.canvas, rojoOpaco), tramo: tinta(tramo, rojoOpaco) };
+      await esperar(420);
+      goma.alFinal = tinta(m.canvas, rojoOpaco);
+      salida.fundido = { entero, sal, ent, goma, mismoTrazo: m.capa.trazos(1)[0]?.id === t.id };
+      m.pliego.remove();
+    });
+
+    // ── tinta-07: el resaltador se mezcla con multiply, en el PDF y al exportar
+    await probar(async () => {
+      /* Una hoja con un rectángulo negro a la izquierda: el resaltador lo cruza
+         y sigue sobre el blanco. Sobre el negro tiene que seguir negro; sobre
+         el blanco, el amarillo de siempre. */
+      const base = await PDFDocument.create();
+      base.addPage([400, 300]).drawRectangle({ x: 40, y: 100, width: 120, height: 100, color: (await import('./vendor/pdf-lib/pdf-lib.mjs')).rgb(0, 0, 0) });
+      const bytesBase = await base.save();
+      const capa = new CapaDeTinta({ ruta: 'C:/x/m.pdf', nombre: 'm.pdf', tamano: 7 });
+      capa.esperaGuardado = 1e9;
+      capa.agregar(1, { herramienta: 'resaltador', color: '#f1c40f', ancho: 40, opacidad: 0.34, puntos: [[60, 150, 1], [340, 150, 1]] });
+      const aplanado = await aplanarTinta(bytesBase, capa);
+      const d = await abrirDocumento(aplanado.slice(), { nombre: 'm.pdf' });
+      const lienzo = await d.lienzo(1, { escala: 1, dpr: 1 });
+      // Una sola lectura del lienzo: dos hacen que Chromium avise por consola.
+      const todo = lienzo.getContext('2d').getImageData(0, 0, lienzo.width, lienzo.height).data;
+      const px = (x, yPdf) => { const i = ((300 - yPdf) * lienzo.width + x) * 4; return [todo[i], todo[i + 1], todo[i + 2]]; };
+      const pdf = { sobreNegro: px(100, 150), sobreBlanco: px(280, 150) };
+      d.destruir();
+      const docM = await PDFDocument.load(aplanado);
+      const gs = docM.getPage(0).node.Resources()?.lookup(PDFName.of('ExtGState'));
+      pdf.modos = gs ? gs.keys().map((k) => String(gs.lookup(k).get(PDFName.of('BM')))) : [];
+      salida.multiply = { pdf };
+
+      // Exportar a imagen: componerTinta sobre la página ya rasterizada.
+      const { componerTinta } = await import('./js/tinta/capa.js');
+      const c = document.createElement('canvas');
+      c.width = 400; c.height = 300;
+      const cx = c.getContext('2d', { alpha: false, willReadFrequently: true });
+      cx.fillStyle = '#fff'; cx.fillRect(0, 0, 400, 300);
+      cx.fillStyle = '#000'; cx.fillRect(40, 100, 120, 100);
+      const vpM = { transform: [1, 0, 0, -1, 0, 300], scale: 1 };
+      componerTinta(cx, capa.trazos(1), vpM, { dpr: 1 });
+      const leer = (x, yPdf) => [...cx.getImageData(x, 300 - yPdf, 1, 1).data].slice(0, 3);
+      salida.multiply.exportar = { sobreNegro: leer(100, 150), sobreBlanco: leer(280, 150) };
+    });
+
+    // ── PDF con contraseña: aplanar avisa y no escribe hojas en blanco (decisión de Fran)
+    await probar(async () => {
+      const capa = new CapaDeTinta({ ruta: 'C:/x/k.pdf', nombre: 'k.pdf', tamano: 9, conClave: true });
+      capa.esperaGuardado = 1e9;
+      capa.agregar(1, { herramienta: 'pluma', color: '#000', ancho: 2, opacidad: 1, puntos: [[10, 10, 1], [40, 40, 1]] });
+      const porLaMarca = await aplanarTinta(bytes, capa).then(() => 'aplanó', (err) => ({ code: err.code, texto: err.message }));
+      /* El mismo PDF chico cifrado que usa lector.cjs (RC4, contraseña «quire»),
+         con una capa cuyo documento no dice nada: lo delata el /Encrypt. */
+      const cifrado = Uint8Array.from(atob(CON_CLAVE_B64), (ch) => ch.charCodeAt(0));
+      const capa2 = new CapaDeTinta({ ruta: 'C:/x/k2.pdf', nombre: 'k2.pdf', tamano: 10 });
+      capa2.esperaGuardado = 1e9;
+      capa2.agregar(1, { herramienta: 'pluma', color: '#000', ancho: 2, opacidad: 1, puntos: [[10, 10, 1], [40, 40, 1]] });
+      const porLosBytes = await aplanarTinta(cifrado, capa2).then(() => 'aplanó', (err) => ({ code: err.code, texto: err.message }));
+      salida.conClave = { porLaMarca, porLosBytes };
+    });
+
+    // ── tinta-24, ux-19: los colores con nombre
+    await probar(async () => {
+      const { COLORES } = await import('./js/tinta/capa.js');
+      salida.colores = COLORES.map((c) => c?.nombre ?? String(c));
+    });
+
     // ── tinta-14: el resaltador tiene su ícono, distinto del marcador del esquema
     salida.icono = {
       herramienta: HERRAMIENTAS.resaltador.icono,
@@ -664,7 +865,7 @@ app.whenReady().then(async () => {
     return salida;
   })()`, true).catch((err) => ({ error: String(err) }));
 
-  if (e.error) { abandonar(e.error); return; }
+  if (e.error) { bail('el editor tiró', e.error); return; }
 
   console.log('\n1. El vuelco de la Y — lo que decide si sale espejado');
   ok('un trazo en y=800 (de 842) cae ARRIBA del papel',
@@ -828,16 +1029,77 @@ app.whenReady().then(async () => {
       JSON.stringify(i));
   }
 
+  if (e.explotaron) console.log('  (casos que explotaron adentro: ' + JSON.stringify(e.explotaron) + ')');
+  console.log('\n12. Tres capas, y ninguna reservada de más (lector-23, tinta-10)');
+  try {
+    const r = e.reserva;
+    ok('el editor arma sus tres canvas', r.canvases === 3, JSON.stringify(r));
+    ok('sin trazos no reserva ningún bitmap', r.vacio.resaltador === 0 && r.vacio.tinta === 0 && r.vacio.viva === 0, JSON.stringify(r.vacio));
+    ok('con una pluma reserva solo lo confirmado', r.conPluma.tinta > 0 && r.conPluma.resaltador === 0 && r.conPluma.viva === 0, JSON.stringify(r.conPluma));
+    ok('con un resaltador, también su capa', r.conResaltador.resaltador > 0, JSON.stringify(r.conResaltador));
+    ok('la punta en el aire reserva el canvas vivo, y al irse lo suelta', r.punta.viva > 0 && r.seFue.viva === 0, JSON.stringify(r));
+    const v = e.vivo;
+    ok('mientras se dibuja, lo confirmado no se toca ni una vez', v.durante.toques === 0, JSON.stringify(v));
+    ok('el trazo en curso se ve, en el canvas vivo', v.durante.vivos >= 4 && v.durante.rojoVivo > 50 && v.durante.rojoFijo === 0, JSON.stringify(v.durante));
+    ok('al soltar pasa a lo confirmado y lo vivo queda limpio', v.trasSoltar.rojoFijo > 50 && v.trasSoltar.vivaConAlgo === 0 && v.trazos === 2, JSON.stringify(v));
+  } catch (err) { ok('el caso explotó', false, String(err?.message || err).slice(0, 200)); }
+
+  console.log('\n13. El anillo de la punta (tinta-21)');
+  try {
+    const a = e.anillo;
+    ok('el borrador muestra un anillo del tamaño de la goma', a.anillo.n > 20 && a.anillo.herramienta === 'borrador'
+      && a.anillo.ancho >= a.esperado - 2 && a.anillo.ancho <= a.esperado + 8, JSON.stringify(a));
+    ok('las demás herramientas, un punto', a.punto.n > 0 && a.punto.herramienta === 'pluma' && a.punto.ancho < a.anillo.ancho, JSON.stringify(a.punto));
+    ok('y al irse la punta se borra', a.fuera === 0, JSON.stringify(a));
+  } catch (err) { ok('el caso explotó', false, String(err?.message || err).slice(0, 200)); }
+
+  console.log('\n14. Lo que no hace el lápiz se funde (tinta-13)');
+  try {
+    const f = e.fundido;
+    const baja = (s) => s.filter((x) => x !== null);
+    const sal = baja(f.sal.serie);
+    ok('deshacer: la base ya no tiene el trazo y el calco sí', f.sal.baseRoja === 0 && f.sal.calcoRojo > f.entero * 0.9, JSON.stringify({ ...f.sal, serie: undefined, entero: f.entero }));
+    ok('y el calco se esfuma de a poco, sin saltos, hasta irse', sal.some((x) => x > 0.1 && x < 0.9) && sal.every((x, i) => i === 0 || x <= sal[i - 1] + 0.01)
+      && f.sal.serie.at(-1) === null && sal.every((x, i) => i === 0 || sal[i - 1] - x < 0.5), JSON.stringify(f.sal.serie));
+    const ent = baja(f.ent.serie);
+    ok('rehacer: el que llega entra fundiéndose y la base lo suma al final', f.ent.baseRoja === 0 && ent.some((x) => x > 0.1 && x < 0.9)
+      && f.ent.baseAlFinal > f.entero * 0.9 && f.ent.calcosQuedan === 0, JSON.stringify({ ...f.ent, entero: f.entero }));
+    const g = f.goma;
+    ok('deshacer la goma funde solo el tramo comido, con los pedazos quietos debajo',
+      g.baseConPedazos === g.conHueco && g.tramo > 0 && g.tramo < f.entero * 0.5 && Math.abs(g.alFinal - f.entero) < f.entero * 0.03, JSON.stringify({ ...g, entero: f.entero }));
+  } catch (err) { ok('el caso explotó', false, String(err?.message || err).slice(0, 200)); }
+
+  console.log('\n15. El resaltador con multiply (tinta-07) y el PDF con contraseña');
+  try {
+    const m = e.multiply;
+    const luz = ([r, g, b]) => 0.299 * r + 0.587 * g + 0.114 * b;
+    const amarillo = ([r, g, b]) => r > 230 && g > 200 && b < 215;
+    ok('en el PDF, la letra negra sigue negra debajo del amarillo', luz(m.pdf.sobreNegro) < 30, JSON.stringify(m.pdf));
+    ok('y sobre el blanco, el amarillo de siempre', amarillo(m.pdf.sobreBlanco), JSON.stringify(m.pdf.sobreBlanco));
+    ok('con /BM /Multiply en el ExtGState', m.pdf.modos.includes('/Multiply'), JSON.stringify(m.pdf.modos));
+    ok('al exportar a imagen, lo mismo', !!m.exportar && luz(m.exportar.sobreNegro) < 30 && amarillo(m.exportar.sobreBlanco), JSON.stringify(m.exportar));
+  } catch (err) { ok('el caso explotó', false, String(err?.message || err).slice(0, 200)); }
+  try {
+    const k = e.conClave;
+    /* El código es el del motor de imposición (CLAVE, paquete 4A), así la vista que lo ataja ataja los dos. */
+    ok('un PDF con contraseña no se aplana: avisa (por la marca del documento)', k.porLaMarca?.code === 'quire-clave' && /tiene contraseña/.test(k.porLaMarca.texto), JSON.stringify(k));
+    ok('ni aunque la capa no lo diga: lo delata el /Encrypt', k.porLosBytes?.code === 'quire-clave', JSON.stringify(k));
+    /* Uno que se abrió sin pedir contraseña (la de propietario sola, típica del
+       material de cátedra) no dice «tiene contraseña»: nadie tipeó una. */
+    ok('y sin contraseña de apertura, el aviso no dice que la tiene', /protegido/.test(k.porLosBytes?.texto || '') && !/contraseña/.test(k.porLosBytes?.texto || ''), JSON.stringify(k));
+    ok('los colores tienen nombre, no un hexadecimal (tinta-24, ux-19)',
+      JSON.stringify(e.colores) === JSON.stringify(['Negro', 'Rojo', 'Azul', 'Verde', 'Violeta', 'Amarillo']), JSON.stringify(e.colores));
+  } catch (err) { ok('el caso explotó', false, String(err?.message || err).slice(0, 200)); }
+
   /* El aviso de tinta-28 también va a la consola, una vez por racha de
      fallos: los dos de la prueba son esperados, y cualquier otro cuenta. */
   const esperados = errores.filter((x) => x.includes('[tinta] no se pudo guardar'));
   ok('el fallo del disco queda en la consola, una vez por racha', esperados.length === 2, `${esperados.length}`);
   errores.splice(0, errores.length, ...errores.filter((x) => !x.includes('[tinta] no se pudo guardar')));
 
-  limpiar();
   console.log(`\n----- errores de consola: ${errores.length} -----`);
   for (const e of errores) console.log('  ! ' + e);
   console.log(`\n═══ ${pass} ok · ${fail} fallas ═══`);
   win.destroy();
   app.exit(fail || errores.length ? 1 : 0);
-});
+}).catch((e) => bail('excepción', e));

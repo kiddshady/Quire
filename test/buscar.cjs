@@ -24,6 +24,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { vigilarConsola } = require('./consola.cjs');
+const { abandono, hastaQuieto, vivo, sinSalir } = require('./_comun.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 
@@ -35,13 +36,9 @@ const ok = (n, c, x = '') => { if (c) { pass++; console.log(`  ok   ${n}`); } el
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 const cerca = (a, b, tol) => Math.abs(a - b) <= tol;
 
-const morir = (por, err) => {
-  console.log(`\n!!! ${por}: ${err?.stack || err}`);
-  console.log(`\n═══ ${pass} ok · ${fail + 1} fallas ═══`);
-  app.exit(1);
-};
-process.on('unhandledRejection', (e) => morir('promesa sin atrapar', e));
-const reloj = setTimeout(() => morir('se colgó', new Error('pasaron 90 s')), 90_000);
+/* Un rechazo sin atajar, una excepción o pasarse de 90 s terminan la suite
+   diciendo por qué y cuánto llevaba (tests-07). */
+const bail = abandono({ ms: 90_000, alAbandonar: () => console.log(`\n═══ ${pass} ok · ${fail + 1} fallas ═══`) });
 
 /* ── El cobayo del buscador ───────────────────────────────────────────────────
    Cuatro páginas, cada una probando algo:
@@ -160,12 +157,8 @@ app.whenReady().then(async () => {
       /* Lo que se lee de lo que pasa por un relevo o por reconcile(): la
          cuenta va por frase() y lo que sale queda en el DOM unos 150-350 ms
          (en un calco, o absoluto con data-state=closing). Se lee lo vivo. */
-      cuenta() {
-        const el = document.getElementById('qr-buscar-cuenta');
-        return [...el.childNodes].filter((n) => !(n.nodeType === 1 && n.classList.contains('ox-swap-out')))
-          .map((n) => n.textContent).join('').trim();
-      },
-      filas: () => [...document.querySelectorAll('#qr-buscar-lista > .qr-hit:not([data-state=closing])')],
+      cuenta: () => ${vivo('#qr-buscar-cuenta')},
+      filas: () => [...document.querySelectorAll(${JSON.stringify(sinSalir('#qr-buscar-lista > .qr-hit'))})],
     };
     return true;
   })()`);
@@ -215,13 +208,17 @@ app.whenReady().then(async () => {
   /* ── 2 · Buscar ──────────────────────────────────────────────────────── */
   console.log('\n2. Buscar');
 
+  /* Después de tipear ya no se esperan 900 ms a ciegas (tests-18): se espera
+     a que la cuenta se quede quieta tres lecturas seguidas. Antes, 250 ms:
+     más que el respiro de 180 del campo, para no leer como «quieta» la
+     cuenta de la búsqueda anterior, que no cambia hasta que arranca la nueva. */
   await js(`document.querySelector('.qr-panel__tab[data-panel="buscar"]').click()`);
   await esperar(300);
   ok('la pestaña Buscar existe y abre su panel',
     await js(`!!document.getElementById('qr-buscar-campo')`));
 
   await js(`window.T.tipear('palabra')`);
-  await esperar(900);
+  await esperar(250); await hastaQuieto(() => js(`window.T.cuenta()`), 5000, 'la cuenta de la búsqueda', { veces: 3 });
 
   const buscada = await js(`(() => ({
     filas: window.T.filas().length,
@@ -268,7 +265,7 @@ app.whenReady().then(async () => {
 
   /* La que cruza el renglón tiene que pintarse en DOS pedazos, uno por línea. */
   await js(`window.T.tipear('estado del')`);
-  await esperar(900);
+  await esperar(250); await hastaQuieto(() => js(`window.T.cuenta()`), 5000, 'la cuenta de la búsqueda', { veces: 3 });
   const cruzada = await js(`({ marcas: window.T.marcas(1), filas: window.T.filas().length })`);
   ok('la coincidencia que cruza el renglón se encuentra', cruzada.filas === 1, `(${cruzada.filas} filas)`);
   ok('y se pinta en dos pedazos, uno por renglón', cruzada.marcas.length === 2,
@@ -277,11 +274,11 @@ app.whenReady().then(async () => {
     cruzada.marcas.length === 2 && cruzada.marcas[1].y > cruzada.marcas[0].y);
 
   await js(`window.T.tipear('compensación')`);
-  await esperar(900);
+  await esperar(250); await hastaQuieto(() => js(`window.T.cuenta()`), 5000, 'la cuenta de la búsqueda', { veces: 3 });
   ok('la palabra partida con guion se encuentra escribiéndola entera',
     await js(`window.T.filas().length`) === 1);
   await js(`window.T.tipear('compensacion')`);
-  await esperar(900);
+  await esperar(250); await hastaQuieto(() => js(`window.T.cuenta()`), 5000, 'la cuenta de la búsqueda', { veces: 3 });
   ok('y también sin la tilde',
     await js(`window.T.filas().length`) === 1);
 
@@ -289,7 +286,7 @@ app.whenReady().then(async () => {
   console.log('\n4. Navegar entre resultados');
 
   await js(`window.T.tipear('palabra')`);
-  await esperar(900);
+  await esperar(250); await hastaQuieto(() => js(`window.T.cuenta()`), 5000, 'la cuenta de la búsqueda', { veces: 3 });
   await js(`document.getElementById('qr-buscar-next').click()`);
   await esperar(700);
 
@@ -366,7 +363,7 @@ app.whenReady().then(async () => {
   await js(`(async () => { (await import('./js/views/lector.js')).irA(1, { suave: false }); })()`);
   await esperar(600);
   await js(`window.T.tipear('palabra')`);
-  await esperar(900);
+  await esperar(250); await hastaQuieto(() => js(`window.T.cuenta()`), 5000, 'la cuenta de la búsqueda', { veces: 3 });
   const antes = await js(`window.T.marcas(1)[0]`);
   ok('antes de zoomear hay una marca para medir', !!antes);
 
@@ -443,7 +440,7 @@ app.whenReady().then(async () => {
   console.log('\n9. Las marcas y la lista se ponen al día, no se rehacen');
 
   await js(`window.T.tipear('palabra')`);
-  await esperar(900);
+  await esperar(250); await hastaQuieto(() => js(`window.T.cuenta()`), 5000, 'la cuenta de la búsqueda', { veces: 3 });
   /* lector-05, css-11: pasar de una coincidencia a la otra de la misma hoja
      mueve is-actual sobre las MISMAS marcas, sin rehacerlas. */
   const marcasEnter = await js(`(async () => {
@@ -515,7 +512,6 @@ app.whenReady().then(async () => {
   await esperar(400);
 
   fs.rmSync(dir, { recursive: true, force: true });
-  clearTimeout(reloj);
   console.log(`\n═══ ${pass} ok · ${fail} fallas ═══\n`);
   app.exit(fail ? 1 : 0);
-}).catch((e) => morir('el arranque', e));
+}).catch((e) => bail('el arranque', e));

@@ -1,15 +1,33 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    QUIRE — dibujar sobre una página
-   Cablea un canvas de tinta encima de un pliego del lector: lee el stylus,
+   Cablea los canvas de tinta encima de un pliego del lector: lee el stylus,
    suaviza el camino y guarda el trazo en coordenadas de página.
 
    La entrada y el suavizado vienen de Scrawl (stroke.js) sin tocar. Lo que
    agrega este archivo es la traducción a coordenadas de página PDF y el
    redibujado.
+
+   ── Tres canvas por pliego, y ninguno reservado de más ─────────────────────
+   · `.qr-tinta-resaltador`, abajo: los resaltadores. La hoja lo mezcla con
+     multiply, así que la letra negra sigue negra debajo del amarillo
+     (tinta-07).
+   · `.qr-tinta`: lo confirmado de las demás herramientas. Es el que recibe el
+     puntero (StrokeInput escucha acá).
+   · `.qr-tinta-viva`, arriba: solo el trazo en curso y el anillo de la punta.
+     En cada cuadro se borra y se pinta ESE trazo; lo confirmado no se toca
+     mientras se dibuja (tinta-10). Antes el trazo en curso se pintaba entero
+     encima de sí mismo en cada cuadro —el borde se iba engrosando y al
+     levantar el lápiz adelgazaba de golpe—, y con el resaltador se rehacía la
+     página entera en cada cuadro.
+   Cada bitmap se reserva recién cuando hace falta: el de los resaltadores si
+   la hoja tiene alguno, el de lo confirmado si tiene otra cosa, y el vivo
+   mientras la punta anda por la hoja. En modo lectura, una hoja sin tinta no
+   pesa nada (lector-23): antes cada hoja pintada reservaba un segundo lienzo
+   del tamaño del suyo aunque no tuviera un solo trazo.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 import { StrokeInput, StrokePath } from './stroke.js';
-import { dibujarTrazos, HERRAMIENTAS } from './capa.js';
+import { dibujarTrazos, caminoDe, esResaltador, HERRAMIENTAS } from './capa.js';
 import { pathDeTrazo } from './contorno.js';
 
 /* ── El tope del bitmap ───────────────────────────────────────────────────
@@ -21,27 +39,60 @@ import { pathDeTrazo } from './contorno.js';
    que a zoom extremo la tinta se ve apenas más suave, igual que la hoja. */
 export const MAX_PIXELES = 2 ** 25;
 
+/* El fundido de lo que no hace el lápiz (deshacer, rehacer, borrar): t-2 y
+   la curva de los relevos, que baja pareja (motion-timing). Son los tokens de
+   motion.css; acá van en números porque el editor anima con la API. */
+const FUNDIDO_MS = 180;
+const EASE_BOTH = 'cubic-bezier(.65, 0, .35, 1)';
+
 /* Si en esta sesión ya apareció un lápiz, un toque de dedo sobre la hoja es
    la palma apoyada, no alguien que quiere dibujar (tinta-23). Es de todo el
    módulo y no de cada editor: el lápiz que se vio en la página 3 es el mismo
    que va a escribir en la 4. */
 let vistoLapiz = false;
 
+/* El mismo chequeo que reducido() en motion.js, que no lo exporta. */
+const reducido = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
 /**
- * @param {HTMLCanvasElement} canvas
+ * @param {HTMLCanvasElement} canvas   el `.qr-tinta`: lo confirmado, y el que escucha
  * @param {object} opciones
  *   pagina, capa, viewport, herramienta() → {id, color, ancho, opacidad, sensible}
  *   onCambio(), activo() → boolean
+ *   resaltador, viva                opcionales: los otros dos canvas del pliego.
+ *                                   Sin ellos se buscan entre los hermanos de
+ *                                   `canvas` por su clase, y si no están se crean.
  *   goma() → {id, ancho}            opcional: la goma del lápiz (el otro extremo).
  *                                   Sin ella, el ancho del borrador de HERRAMIENTAS.
  *   onPan({ fase, x, y })           opcional: el botón lateral del lápiz o el del
  *                                   medio arrastran. fase 'empezar' | 'mover' |
  *                                   'terminar'; x, y en px de la ventana (client).
  *                                   Sin él, esos botones no hacen nada.
- * @returns {{ redibujar(), actualizar(viewport), destruir(), readonly vivo: boolean }}
+ * @returns {{ redibujar(), actualizar(viewport), fundir(cambio), reposo(),
+ *             destruir(), readonly vivo: boolean, readonly viewport }}
  */
-export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, goma, onCambio, onPan, activo }) {
-  const ctx = canvas.getContext('2d');
+export function cablearTinta(canvas, opciones) {
+  const { pagina, capa, viewport, herramienta, goma, onCambio, onPan, activo } = opciones;
+
+  /* Los otros dos canvas van pegados a este: el de los resaltadores antes
+     (debajo) y el vivo después (encima). */
+  function hermano(clase, antes) {
+    const padre = canvas.parentElement;
+    const hay = padre?.querySelector(`:scope > canvas.${clase}`);
+    if (hay) return hay;
+    const c = document.createElement('canvas');
+    c.className = clase;
+    c.width = 0;
+    c.height = 0;
+    if (padre) { if (antes) canvas.before(c); else canvas.after(c); }
+    return c;
+  }
+  const capas = {
+    resaltador: opciones.resaltador ?? hermano('qr-tinta-resaltador', true),
+    tinta: canvas,
+  };
+  const viva = opciones.viva ?? hermano('qr-tinta-viva', false);
+  const ctxDe = new Map([capas.resaltador, capas.tinta, viva].map((c) => [c, c.getContext('2d')]));
 
   let vp = viewport;
   let k = 1;               // px del bitmap por px del viewport: < 1 solo pasado el tope
@@ -55,40 +106,150 @@ export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, goma
      viejo de la hoja y las dos se ven igual de borrosas un instante.
      Se limpia por si el canvas es un clon de uno cableado por una versión
      vieja: cloneNode copia el atributo style. */
-  canvas.style.width = '';
-  canvas.style.height = '';
+  for (const c of [capas.resaltador, capas.tinta, viva]) { c.style.width = ''; c.style.height = ''; }
 
   function medir() {
     const area = vp.width * vp.height;
     k = area > MAX_PIXELES ? Math.sqrt(MAX_PIXELES / area) : 1;
-    canvas.width = Math.max(1, Math.round(vp.width * k));
-    canvas.height = Math.max(1, Math.round(vp.height * k));
+  }
+  const anchoBitmap = () => Math.max(1, Math.round(vp.width * k));
+  const altoBitmap = () => Math.max(1, Math.round(vp.height * k));
+
+  /** Reserva (o suelta, con `hace` en false) el bitmap de un canvas. Devuelve si cambió. */
+  function reservar(c, hace) {
+    const w = hace ? anchoBitmap() : 0;
+    const h = hace ? altoBitmap() : 0;
+    if (c.width === w && c.height === h) return false;
+    c.width = w;
+    c.height = h;
+    return true;
   }
   medir();
 
   let vivo = true;         // destruir() lo apaga: un editor muerto no acepta trazos
   let enCurso = null;      // { puntos, herramienta… } mientras la punta toca
+  let anillo = null;       // { pt, h }: dónde está la punta en el aire, y con qué
   let frame = null;
   let sucio = false;       // la goma recortó algo y la página hay que rehacerla
   let paneo = false;       // el gesto en curso es un desplazamiento, no tinta
   let ultimoCrudo = null;  // el último punto tal cual llegó, sin suavizar
 
+  /* Mientras llega algo fundiéndose (deshacer un borrado, rehacer un trazo),
+     la base no lo dibuja todavía: lo trae su calco. `sin` son los ids que la
+     base se saltea y `mas` lo que dibuja aunque ya no esté en la capa (los
+     pedazos de la goma). Ver fundir(). */
+  let base = null;
+  const calcos = new Set();
+
+  function trazosDeLaBase() {
+    const todos = capa.trazos(pagina);
+    if (!base) return todos;
+    const quedan = todos.filter((t) => !base.sin.has(t.id));
+    const ids = new Set(quedan.map((t) => t.id));
+    return [...quedan, ...base.mas.filter((t) => !ids.has(t.id))];
+  }
+
+  /** Redibuja lo confirmado: cada capa, solo si tiene algo (si no, suelta su bitmap). */
   const redibujar = () => {
-    dibujarTrazos(ctx, capa.trazos(pagina), vp, { dpr: k });
-    if (enCurso) pintarEnCurso();
+    const lista = trazosDeLaBase();
+    for (const tipo of ['resaltador', 'tinta']) {
+      const c = capas[tipo];
+      const hay = lista.some((t) => esResaltador(t) === (tipo === 'resaltador'));
+      reservar(c, hay);
+      if (hay) dibujarTrazos(ctxDe.get(c), lista, vp, { dpr: k, solo: tipo });
+    }
+    if (enCurso || anillo) pintarViva();
   };
 
-  function pintarEnCurso() {
-    if (!enCurso || enCurso.puntos.length === 0) return;
-    const d = pathDeTrazo(enCurso);
-    if (!d) return;
+  /* Un trazo recién confirmado se pinta solo, encima de su capa: es el último
+     de la lista, así que el orden de apilado queda igual que redibujando todo.
+     Si esa capa todavía no tenía bitmap (el primer trazo de la hoja), se
+     reserva y ahí sí se pinta entera, que es ese trazo solo. */
+  function confirmar(t) {
+    const c = capas[esResaltador(t) ? 'resaltador' : 'tinta'];
+    if (base || reservar(c, true)) { redibujar(); return; }
+    const ctx = ctxDe.get(c);
     ctx.save();
     ctx.setTransform(k, 0, 0, k, 0, 0);
     ctx.transform(...vp.transform);
-    ctx.globalAlpha = enCurso.opacidad ?? 1;
-    ctx.fillStyle = enCurso.color;
-    ctx.fill(new Path2D(d));
+    const p = caminoDe(t);
+    if (p) { ctx.globalAlpha = t.opacidad ?? 1; ctx.fillStyle = t.color || '#000'; ctx.fill(p); }
     ctx.restore();
+  }
+
+  /* ── El canvas vivo ────────────────────────────────────────────────────── */
+
+  function pintarViva() {
+    const vctx = ctxDe.get(viva);
+    const algo = (enCurso && enCurso.puntos.length) || anillo;
+    if (!algo) {
+      if (viva.width) { vctx.setTransform(1, 0, 0, 1, 0, 0); vctx.clearRect(0, 0, viva.width, viva.height); }
+      return;
+    }
+    reservar(viva, true);
+    vctx.setTransform(1, 0, 0, 1, 0, 0);
+    vctx.clearRect(0, 0, viva.width, viva.height);
+    if (enCurso) {
+      /* El resaltador en curso también va con multiply, como va a quedar:
+         lo dice el atributo, que el CSS lee. */
+      viva.dataset.herramienta = enCurso.herramienta;
+      const d = pathDeTrazo(enCurso);
+      if (!d) return;
+      vctx.save();
+      vctx.setTransform(k, 0, 0, k, 0, 0);
+      vctx.transform(...vp.transform);
+      vctx.globalAlpha = enCurso.opacidad ?? 1;
+      vctx.fillStyle = enCurso.color;
+      vctx.fill(new Path2D(d));
+      vctx.restore();
+      return;
+    }
+    pintarAnillo(vctx);
+  }
+
+  /* ── El anillo de la punta (tinta-21) ─────────────────────────────────────
+     Con la punta en el aire, el cursor era la misma cruz para todo: con el
+     borrador en 16 o en 48 no se sabía qué iba a borrar hasta que borraba.
+     Ahora el borrador muestra un anillo del tamaño de la goma (blanco por
+     fuera y oscuro por dentro, así se ve sobre el papel y sobre la letra), y
+     las demás herramientas un punto de su color y su grosor. */
+  function pintarAnillo(vctx) {
+    const { pt, h } = anillo;
+    const r = canvas.getBoundingClientRect();
+    const f = r.width > 0 ? viva.width / r.width : 1;   // px del bitmap por px CSS
+    const [px, py] = aPagina(pt);
+    const [vx, vy] = vp.convertToViewportPoint(px, py);
+    const x = vx * k;
+    const y = vy * k;
+    const radio = ((h.ancho || 1) / 2) * Math.abs(vp.scale) * k;
+    vctx.save();
+    if (h.id === 'borrador') {
+      viva.dataset.herramienta = 'borrador';
+      vctx.beginPath();
+      vctx.arc(x, y, Math.max(radio, 2 * f), 0, Math.PI * 2);
+      vctx.lineWidth = 3 * f;
+      vctx.strokeStyle = 'rgba(255, 255, 255, .9)';
+      vctx.stroke();
+      vctx.lineWidth = 1.25 * f;
+      vctx.strokeStyle = 'rgba(0, 0, 0, .62)';
+      vctx.stroke();
+    } else {
+      viva.dataset.herramienta = h.id;
+      vctx.beginPath();
+      vctx.arc(x, y, Math.max(radio, 1.5 * f), 0, Math.PI * 2);
+      vctx.globalAlpha = h.opacidad ?? 1;
+      vctx.fillStyle = h.color || '#000';
+      vctx.fill();
+    }
+    vctx.restore();
+  }
+
+  /** Suelta el bitmap vivo cuando la punta se fue de la hoja. */
+  function soltarViva() {
+    anillo = null;
+    if (enCurso) return;
+    reservar(viva, false);
+    delete viva.dataset.herramienta;
   }
 
   /** Un frame por movimiento, no un redibujado por punto coalescido. */
@@ -97,15 +258,13 @@ export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, goma
     frame = requestAnimationFrame(() => {
       frame = null;
       if (!vivo) return;
-      /* La goma rehace la página una vez por cuadro, no una por cada punto
-         coalescido que recortó algo: con tablet llegan 3 a 5 por cuadro, y
-         cada redibujo recalcula todos los contornos (tinta-11). */
+      /* La goma rehace lo confirmado una vez por cuadro, no una por cada
+         punto coalescido que recortó algo: con tablet llegan 3 a 5 por
+         cuadro, y cada redibujo pinta todos los contornos (tinta-11). */
       if (sucio) { sucio = false; redibujar(); return; }
-      /* Con tinta opaca alcanza con pintar el trazo en curso encima de lo que
-         ya está. Con el resaltador no: superponer semitransparente sobre sí
-         mismo lo va oscureciendo, así que hay que rehacer la página entera. */
-      if (enCurso && (enCurso.opacidad ?? 1) < 1) redibujar();
-      else pintarEnCurso();
+      /* El trazo en curso y el anillo viven en el canvas de arriba: lo
+         confirmado no se toca mientras se dibuja (tinta-10). */
+      pintarViva();
     });
   }
 
@@ -124,10 +283,10 @@ export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, goma
 
      La proporción sale de lo que el canvas mide EN PANTALLA contra el
      viewport, no del devicePixelRatio. Son lo mismo solo si la caja coincide
-     con el viewport, y desde tinta-02 no siempre: entre un zoom y el render
-     siguiente el canvas ya mide lo del pliego nuevo y el viewport sigue siendo
-     el viejo. Con la proporción real, lo que se dibuja en ese rato cae donde
-     se ve la tinta estirada, que es donde se lo está viendo. */
+     con el viewport, y desde tinta-02 no siempre: entre un zoom y el viewport
+     nuevo el canvas ya mide lo del pliego nuevo y el viewport sigue siendo el
+     viejo. Con la proporción real, lo que se dibuja en ese rato cae donde se
+     ve la tinta estirada, que es donde se lo está viendo. */
   function escalaCss() {
     const r = canvas.getBoundingClientRect();
     if (r.width > 0 && r.height > 0) return [vp.width / r.width, vp.height / r.height, r];
@@ -224,6 +383,7 @@ export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, goma
         return;
       }
 
+      anillo = null;
       enCurso = {
         herramienta: h.id,
         color: h.color,
@@ -259,8 +419,20 @@ export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, goma
       if (ultimoBorrado) { terminarGoma(); onCambio?.(); return; }
       if (!enCurso) return;
       cerrarTrazo();
-      redibujar();
       onCambio?.();
+    },
+
+    /* La punta en el aire: el anillo la sigue, un cuadro a la vez. */
+    hover(pt, mods) {
+      if (!vivo || !activo()) { if (anillo) soltarViva(); return; }
+      const h = mods.eraser ? gomaDelLapiz() : herramienta();
+      anillo = { pt, h };
+      invalidar();
+    },
+
+    leave() {
+      if (!anillo && !viva.width) return;
+      soltarViva();
     },
   });
 
@@ -278,9 +450,13 @@ export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, goma
       if (Math.hypot(ult[0] - prev[0], ult[1] - prev[1]) >= 0.01) enCurso.puntos.push(ult);
     }
     ultimoCrudo = null;
-    // Un trazo de un solo punto es un toque y vale; uno de cero, no.
-    if (enCurso.puntos.length) capa.agregar(pagina, enCurso);
+    const hecho = enCurso;
     enCurso = null;
+    // Un trazo de un solo punto es un toque y vale; uno de cero, no.
+    if (hecho.puntos.length) confirmar(capa.agregar(pagina, hecho));
+    // Lo vivo se limpia en la misma tarea en que lo confirmado lo recibe: ningún cuadro ve los dos.
+    if (frame) { cancelAnimationFrame(frame); frame = null; }
+    pintarViva();
   }
 
   function terminarGoma() {
@@ -312,45 +488,225 @@ export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, goma
     }
     if (capa.borrarEn(pagina, x, y, radio)) hubo = true;
     gomaAnterior = [x, y];
+    // El anillo acompaña a la goma mientras borra.
+    anillo = { pt, h };
     // El redibujo espera al cuadro: ver invalidar().
-    if (hubo) { sucio = true; invalidar(); }
+    if (hubo) sucio = true;
+    invalidar();
+  }
+
+  /* ── Lo que cambia sin el lápiz se funde (tinta-13, lector-33) ────────────
+     Deshacer, rehacer y borrar redibujaban en seco: el trazo desaparecía de
+     un cuadro al otro, y al confirmar «Borrar toda la tinta» las anotaciones
+     de la hoja se iban de golpe mientras el cartel todavía se esfumaba.
+     Ahora lo que se va pasa a un calco —un canvas con la misma caja, pegado a
+     su capa— que se esfuma en t-2 con la curva de los relevos, y la base se
+     redibuja sin eso en la misma tarea. Lo que llega entra en otro calco que
+     se funde, y la base lo suma recién cuando terminó: en ningún cuadro hay
+     dos copias.
+
+     La goma es un caso aparte: deshacerla devuelve los trazos ENTEROS donde
+     hoy hay pedazos. Fundir el original entero encima de los pedazos
+     doblaría la tinta (y el resaltador, que es transparente, se oscurecería
+     donde se pisan). Por eso `debajo`: los pedazos se quedan en la base todo
+     el fundido, y al calco se le recortan con destination-out, así lo único
+     que se funde es el tramo que la goma se había comido. */
+  function calco(tipo, trazos, debajo) {
+    const capaEl = capas[tipo];
+    const c = document.createElement('canvas');
+    c.className = `qr-tinta-calco qr-tinta-calco--${tipo}`;
+    c.width = anchoBitmap();
+    c.height = altoBitmap();
+    const ctx = c.getContext('2d');
+    dibujarTrazos(ctx, trazos, vp, { dpr: k, solo: tipo });
+    if (debajo.length) {
+      ctx.save();
+      ctx.setTransform(k, 0, 0, k, 0, 0);
+      ctx.transform(...vp.transform);
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.globalAlpha = 1;
+      for (const t of debajo) { const p = caminoDe(t); if (p) ctx.fill(p); }
+      ctx.restore();
+    }
+    /* Pegado a su capa: el nuevo queda DEBAJO de otro calco que todavía se
+       esté yendo, no encima (motion-timing: un calco opaco nuevo encima de
+       otro tapa de golpe lo que se iba). */
+    if (capaEl.parentElement) capaEl.after(c);
+    calcos.add(c);
+    return c;
+  }
+
+  /* El calco va de `de` a `a` en t-2. `parte` acorta la duración cuando
+     arranca a mitad de camino (un fundido que se da vuelta, ver fundir()):
+     la velocidad es la de siempre, no un fundido entero para medio recorrido. */
+  function animar(c, de, a, alTerminar, parte = 1) {
+    const ms = Math.max(60, Math.round(FUNDIDO_MS * parte));
+    let listo = false;
+    const fin = () => {
+      if (listo) return;
+      listo = true;
+      clearTimeout(red);
+      alTerminar();
+    };
+    c.__anim = typeof c.animate === 'function'
+      ? c.animate([{ opacity: de }, { opacity: a }], { duration: ms, easing: EASE_BOTH, fill: 'both' })
+      : null;
+    c.__anim?.finished.then(fin, () => {});
+    // Red: una ventana que no pinta no corre animaciones.
+    const red = setTimeout(fin, ms + 200);
+    // Para darlo vuelta sin que el final viejo se dispare igual.
+    c.__parar = () => { listo = true; clearTimeout(red); c.__anim?.cancel(); };
+  }
+
+  function sacarCalco(c) {
+    calcos.delete(c);
+    c.__parar?.();
+    c.remove();
+    c.width = 0;
+    c.height = 0;
+  }
+
+  /* Lo que la base se saltea (`sin`) y lo que dibuja aunque ya no esté en la
+     capa (`mas`, los pedazos de la goma) sale de los calcos que todavía
+     entran: cada uno lleva sus ids y sus pedazos. */
+  function ponerBase() {
+    const sin = new Set();
+    const mas = new Map();
+    for (const c of calcos) {
+      if (!c.__entra) continue;
+      for (const id of c.__ids) sin.add(id);
+      for (const t of c.__mas) mas.set(t.id, t);
+    }
+    base = sin.size || mas.size ? { sin, mas: [...mas.values()] } : null;
+  }
+
+  /* Un calco que entra terminó: la base suma lo que traía y el calco se va en
+     la MISMA tarea, así el cuadro siguiente es la misma imagen, ya sin él. */
+  function llego(c) {
+    if (!calcos.has(c)) return;
+    sacarCalco(c);
+    ponerBase();
+    redibujar();
+  }
+
+  /* Un fundido que se da vuelta: sigue desde la opacidad que tiene ahora
+     hacia el otro lado. */
+  function invertir(c, mas) {
+    const op = Number(getComputedStyle(c).opacity);
+    c.__parar?.();
+    c.__entra = !c.__entra;
+    c.__mas = c.__entra ? mas : [];
+    const a = c.__entra ? 1 : 0;
+    const de = Number.isFinite(op) ? op : 1 - a;
+    animar(c, de, a, c.__entra ? () => llego(c) : () => sacarCalco(c), Math.abs(a - de));
+  }
+
+  /* Varios fundidos seguidos (Ctrl+Z o Ctrl+Y con la tecla sostenida, que
+     repite cada ~30 ms) se SUMAN. Antes cada fundir() nuevo cortaba en seco lo
+     que estaba entrando y la base lo dibujaba entero en ese cuadro: cada
+     deshacer de un borrado o rehacer de un trazo aparecía de golpe, justo lo
+     que tinta-13 venía a sacar (revisión del paquete 3A). Ahora lo que entra
+     termina su fundido, y la base se saltea lo de todos los calcos que todavía
+     entran.
+
+     Y lo que vuelve sobre un fundido que todavía corre lo da vuelta: rehacer
+     un trazo que se estaba yendo (o deshacer uno que estaba llegando) ya no
+     pone un calco nuevo desde 1 o desde 0 encima del viejo, que saltaba desde
+     su opacidad de ese momento; el mismo calco sigue desde donde estaba hacia
+     el otro lado. Pasa solo si el calco lleva exactamente esos trazos, que es
+     lo que da el historial (el Ctrl+Y rehace lo que deshizo el Ctrl+Z).
+
+     Con prefers-reduced-motion no hay calcos: se redibuja en seco, como hace
+     motion.js con reducido(). */
+  function fundir({ salen = [], entran = [], debajo = [] } = {}) {
+    if (!vivo) return [];
+    if (reducido()) { cortarFundidos(); redibujar(); return []; }
+    const hechos = [];
+    const sal = new Set(salen.map((t) => t.id));
+    const ent = new Set(entran.map((t) => t.id));
+    for (const c of [...calcos]) {
+      const contra = c.__entra ? sal : ent;
+      if (!c.__ids.size || ![...c.__ids].every((id) => contra.has(id))) continue;
+      for (const id of c.__ids) contra.delete(id);
+      invertir(c, debajo.filter((t) => esResaltador(t) === (c.__tipo === 'resaltador')));
+      hechos.push(c);
+    }
+    for (const tipo of ['resaltador', 'tinta']) {
+      const deTipo = (lista) => lista.filter((t) => esResaltador(t) === (tipo === 'resaltador'));
+      const sl = deTipo(salen).filter((t) => sal.has(t.id));
+      const en = deTipo(entran).filter((t) => ent.has(t.id));
+      const deb = deTipo(debajo);
+      if (sl.length) {
+        const c = calco(tipo, sl, deb);
+        Object.assign(c, { __tipo: tipo, __ids: new Set(sl.map((t) => t.id)), __entra: false, __mas: [] });
+        animar(c, 1, 0, () => sacarCalco(c));
+        hechos.push(c);
+      }
+      if (en.length) {
+        const c = calco(tipo, en, deb);
+        Object.assign(c, { __tipo: tipo, __ids: new Set(en.map((t) => t.id)), __entra: true, __mas: deb });
+        animar(c, 0, 1, () => llego(c));
+        hechos.push(c);
+      }
+    }
+    /* La base espera solo lo que llega. Si solo se van cosas (y los pedazos
+       de `debajo` ya están en la capa), se redibuja como está. */
+    ponerBase();
+    redibujar();
+    return hechos;
+  }
+
+  /** Termina en seco todo fundido en curso (zoom, giro, destruir). */
+  function cortarFundidos() {
+    for (const c of [...calcos]) sacarCalco(c);
+    base = null;
   }
 
   redibujar();
 
   return {
-    redibujar,
+    /** Redibuja lo confirmado con lo que tiene la capa ahora, en seco. */
+    redibujar() { if (vivo) { cortarFundidos(); redibujar(); } },
 
     /**
      * El zoom o el giro cambiaron: el mismo editor sigue, con el viewport
-     * nuevo (tinta-04). El bitmap se rehace al tamaño nuevo y se redibuja en la
-     * misma tarea, así que no hay cuadro en blanco. Un trazo en curso sigue
-     * valiendo: sus puntos están en coordenadas de página. Lo que no sigue
-     * valiendo es el estado del suavizado, que está en px CSS de la caja
+     * nuevo (tinta-04). Los bitmaps se rehacen al tamaño nuevo y se redibujan
+     * en la misma tarea, así que no hay cuadro en blanco. Un trazo en curso
+     * sigue valiendo: sus puntos están en coordenadas de página. Lo que no
+     * sigue valiendo es el estado del suavizado, que está en px CSS de la caja
      * vieja: se vuelve a sembrar desde el último punto, medido con la caja de
-     * ahora. Hoy el lector todavía rehace el editor; esto lo usa el paquete 3A.
+     * ahora.
      */
     actualizar(viewport) {
       if (!vivo || !viewport) return;
+      cortarFundidos();
       vp = viewport;
       medir();
       if (enCurso?.puntos.length) {
         camino.begin(aCss(enCurso.puntos[enCurso.puntos.length - 1]), 0.35);
         ultimoCrudo = null;
       }
+      if (viva.width) reservar(viva, true);
       redibujar();
+    },
+
+    fundir,
+
+    /** La tinta se apagó: el anillo se va y el bitmap vivo se suelta. */
+    reposo() {
+      if (!vivo || enCurso) return;
+      soltarViva();
     },
 
     destruir() {
       if (!vivo) return;
       /* Desde acá el editor no acepta nada. StrokeInput no expone un destroy y
-         sus listeners siguen sobre el canvas hasta que el lector lo reemplaza:
-         sin esta bandera, entre un zoom y el render siguiente se podía seguir
-         dibujando con el viewport y la caja viejos, y el trazo caía corrido
-         (tinta-04). */
+         sus listeners siguen sobre el canvas hasta que el lector lo reemplaza
+         por un clon. */
       vivo = false;
       if (frame) cancelAnimationFrame(frame);
       frame = null;
+      cortarFundidos();
       if (paneo) { paneo = false; onPan?.({ fase: 'terminar' }); }
       if (ultimoBorrado) {
         ultimoBorrado = null;
@@ -358,19 +714,23 @@ export function cablearTinta(canvas, { pagina, capa, viewport, herramienta, goma
         sucio = false;
         capa.terminarBorrado();
       }
-      /* Un trazo a medio hacer no se tira. Si el render termina con la punta
-         apoyada, el lector cambia el canvas por un clon, el pointerup cae en el
-         clon y este editor nunca se enteraba de que el trazo terminó: se perdía
-         entero al levantar el lápiz. Se guarda con lo que tenga. */
+      /* Un trazo a medio hacer no se tira: se guarda con lo que tenga. Pasaba
+         cuando el lector rehacía el editor con la punta apoyada (tinta-04);
+         ahora el lector lo conserva al hacer zoom, pero la hoja todavía se
+         puede ir de la precarga en medio de un trazo. */
       if (enCurso?.puntos.length) {
         cerrarTrazo();
         onCambio?.();
       }
       enCurso = null;
       ultimoCrudo = null;
+      anillo = null;
+      reservar(viva, false);
       void entrada;
     },
 
     get vivo() { return vivo; },
+    /** El viewport con el que está medido: el lector lo compara antes de actualizar. */
+    get viewport() { return vp; },
   };
 }

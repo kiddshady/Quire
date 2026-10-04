@@ -17,9 +17,9 @@ import { S, emitir, alCambiar } from '../estado.js';
 import { Icons } from '../icons.js';
 import { Toast, Menu, Modal } from '../overlays.js';
 import Router from '../router.js';
-import { paint, head, empty, esc } from '../ui.js';
+import { paint, head, esc, attempt } from '../ui.js';
 import { exit, swap, frase, valor, reconcile, deslizarAncho, asentarPlegables } from '../motion.js';
-import { fmtDec } from '../format.js';
+import { fmtDec, relTime } from '../format.js';
 import { HERRAMIENTAS, COLORES } from '../tinta/capa.js';
 import { cablearTinta } from '../tinta/editor.js';
 import { montarPuck } from '../puck.js';
@@ -57,7 +57,8 @@ const V = {
      que se apague sola sería como que se te caiga el lápiz al mirar otra cosa. */
   tintaActiva: false,
   herramienta: 'pluma',
-  colores: { pluma: '#1a1a1a', fibra: '#c0392b', resaltador: '#f1c40f' },
+  // El del resaltador sale de la hoja (--qr-resaltador-rgb, css-23): ver capa.js.
+  colores: { pluma: HERRAMIENTAS.pluma.color, fibra: HERRAMIENTAS.fibra.color, resaltador: HERRAMIENTAS.resaltador.color },
   anchos: { pluma: 1.8, fibra: 4.5, resaltador: 14, borrador: 16 },
   editores: new Map(),     // nº de página → editor de tinta cableado
 
@@ -248,44 +249,118 @@ function montarTexto(contenedor, n) {
 }
 
 /**
- * Pone (o repone) la capa de tinta encima de una página ya pintada.
+ * Pone la capa de tinta encima de una página ya pintada, o la pone al día si
+ * ya estaba.
  *
- * El canvas de tinta existe SIEMPRE, esté o no el modo de anotación activo:
- * lo anotado tiene que verse mientras leés, igual que se ve en el papel. Lo
- * que cambia con el modo es si captura el puntero.
+ * La tinta se cablea SIEMPRE, esté o no el modo de anotación activo: lo
+ * anotado tiene que verse mientras leés, igual que se ve en el papel. Lo que
+ * cambia con el modo es si captura el puntero. Y cablear no reserva nada: el
+ * editor pide bitmap recién cuando la hoja tiene trazos o la punta pasa por
+ * encima (lector-23, ver editor.js).
  */
 async function montarTinta(contenedor, n) {
   if (!S.tinta || !S.doc) return;
-  const viejo = contenedor.querySelector('.qr-tinta');
-  if (!viejo) return;
-
-  V.editores.get(n)?.destruir();
-
-  /* El canvas se REEMPLAZA por un clon vacío antes de volver a cablearlo.
-     StrokeInput registra sus listeners sobre el elemento y no expone forma de
-     sacarlos (viene de Scrawl tal cual y así se queda), así que si el mismo
-     canvas se cablea dos veces —y se cablea: reescalar() no rehace el DOM, solo
-     cambia tamaños, y el observador vuelve a pintar la página— quedan dos
-     StrokeInput escuchando y CADA TRAZO SE GUARDA DUPLICADO. Se ve solo si uno
-     mira el contador: en pantalla los dos trazos caen exactamente encima. */
-  const canvas = viejo.cloneNode(false);
-  viejo.replaceWith(canvas);
+  const doc = S.doc;
+  const escala = escalaActual();
+  const rotacion = S.rotacion;
+  let viewport;
   try {
-    const viewport = await S.doc.viewport(n, {
-      escala: escalaActual() * (window.devicePixelRatio || 1),
-      rotacionExtra: S.rotacion,
-    });
-    const editor = cablearTinta(canvas, {
-      pagina: n,
-      capa: S.tinta,
-      viewport,
-      herramienta: herramientaActual,
-      activo: () => V.tintaActiva,
-      // La barra se entera por el evento 'tinta' de la capa, no por acá.
-    });
-    V.editores.set(n, editor);
+    viewport = await doc.viewport(n, { escala: escala * (window.devicePixelRatio || 1), rotacionExtra: rotacion });
   } catch (err) {
     console.error(`[tinta] página ${n}:`, err);
+    return;
+  }
+  /* Mientras pdf.js contestaba, la hoja se pudo ir (liberar, otro documento)
+     o la escala pudo cambiar: el render que viene después la vuelve a montar. */
+  if (S.doc !== doc || !contenedor.isConnected || !V.pintadas.has(n)) return;
+  if (escala !== escalaActual() || rotacion !== S.rotacion) return;
+
+  /* El editor de la hoja SOBREVIVE al zoom y al giro (tinta-04): sigue con su
+     canvas y su StrokeInput y solo cambia de viewport. Antes reescalar() lo
+     destruía y esto lo volvía a cablear sobre un clon: entre el zoom y la hoja
+     nítida el lápiz no escribía, y si el render terminaba con la punta
+     apoyada, el pointerup caía en el clon y el trazo se perdía entero. */
+  const vivo = V.editores.get(n);
+  if (vivo?.vivo) { ponerViewport(vivo, viewport); return; }
+
+  let canvas = contenedor.querySelector('.qr-tinta');
+  if (!canvas) return;
+  /* Un canvas que ya estuvo cableado se REEMPLAZA por un clon antes de volver
+     a cablearlo. StrokeInput registra sus listeners sobre el elemento y no
+     expone forma de sacarlos (viene de Scrawl tal cual y así se queda), así
+     que cablear dos veces el mismo canvas deja dos StrokeInput escuchando y
+     CADA TRAZO SE GUARDA DUPLICADO. Pasa con una hoja que se fue de la
+     precarga (liberar destruye su editor) y vuelve. Un canvas que nunca se
+     cableó no se clona. Va después del await, en una sola tarea: dos
+     montajes de la misma hoja no se pisan. */
+  if (canvas.__cableado) {
+    const limpio = canvas.cloneNode(false);
+    canvas.replaceWith(limpio);
+    canvas = limpio;
+  }
+  canvas.__cableado = true;
+  const editor = cablearTinta(canvas, {
+    pagina: n,
+    capa: S.tinta,
+    viewport,
+    resaltador: contenedor.querySelector('.qr-tinta-resaltador'),
+    viva: contenedor.querySelector('.qr-tinta-viva'),
+    herramienta: herramientaActual,
+    /* La goma del otro extremo del lápiz borra con el tamaño del borrador de
+       la barra, no con el grosor de la pluma (tinta-05). */
+    goma: () => ({ ...HERRAMIENTAS.borrador, id: 'borrador', ancho: V.anchos.borrador }),
+    activo: () => V.tintaActiva,
+    onPan: panLateral,
+    // La barra se entera por el evento 'tinta' de la capa, no por acá.
+  });
+  V.editores.set(n, editor);
+}
+
+const mismoViewport = (a, b) => !!a && !!b && Math.abs(a.scale - b.scale) < 1e-6
+  && a.rotation === b.rotation && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
+
+function ponerViewport(editor, viewport) {
+  if (editor.vivo && !mismoViewport(editor.viewport, viewport)) editor.actualizar(viewport);
+}
+
+/* Con la escala o el giro nuevos, cada editor vivo pide su viewport y se pone
+   al día apenas llega (pdf.js tiene la página en caché: es casi inmediato).
+   Mientras tanto la tinta se estira con el pliego, como la hoja, y lo que se
+   dibuje cae donde se ve: el editor convierte con la caja real del canvas. */
+function actualizarEditores() {
+  const doc = S.doc;
+  const escala = V.escalaHecha;
+  const rotacion = S.rotacion;
+  const dpr = window.devicePixelRatio || 1;
+  for (const [n, ed] of V.editores) {
+    if (!ed.vivo) continue;
+    doc.viewport(n, { escala: escala * dpr, rotacionExtra: rotacion }).then((vp) => {
+      if (S.doc !== doc || V.editores.get(n) !== ed || V.escalaHecha !== escala || S.rotacion !== rotacion) return;
+      ponerViewport(ed, vp);
+    }).catch((err) => console.error(`[tinta] página ${n}:`, err));
+  }
+}
+
+/* ── El botón lateral del lápiz desplaza (tinta-15) ─────────────────────────
+   Con la tinta prendida el canvas se queda con el puntero, y el lápiz no
+   tenía cómo mover la hoja sin soltar la herramienta (salvo el puck). El
+   botón lateral —o la rueda apretada del mouse— arrastran la hoja como la
+   mano del puck: el editor avisa las tres fases con el punto en px de la
+   ventana, y acá se corre el scroll lo que se movió la mano. */
+let paneoLateral = null;
+
+function panLateral({ fase, x, y }) {
+  const visor = V.visor;
+  if (!visor) { paneoLateral = null; return; }
+  if (fase === 'empezar') {
+    // Moverse a mano suelta un salto a un resultado que esperaba su capa de texto (lector-34).
+    V.pendiente = null;
+    paneoLateral = { x, y, sl: visor.scrollLeft, st: visor.scrollTop };
+  } else if (fase === 'mover' && paneoLateral) {
+    visor.scrollLeft = paneoLateral.sl - (x - paneoLateral.x);
+    visor.scrollTop = paneoLateral.st - (y - paneoLateral.y);
+  } else {
+    paneoLateral = null;
   }
 }
 
@@ -388,7 +463,9 @@ function construirPaginas() {
         <canvas class="qr-hoja" width="0" height="0"></canvas>
         <div class="qr-marcas"></div>
         <div class="qr-texto"></div>
+        <canvas class="qr-tinta-resaltador" width="0" height="0"></canvas>
         <canvas class="qr-tinta" width="0" height="0"></canvas>
+        <canvas class="qr-tinta-viva" width="0" height="0"></canvas>
         <span class="qr-pliego__num">${g.numero}</span>
       </div>`;
   }).join('');
@@ -476,12 +553,11 @@ function reescalar({ ancla } = {}) {
      escala anterior, estirado por CSS, se ve borroso un instante y después se
      nitidiza. Liberarlos acá dejaría la hoja en blanco hasta que termine el
      repintado, que es justo el parpadeo que se quiere evitar. Los editores de
-     tinta sí se sueltan: se recablean con el viewport nuevo. */
+     tinta tampoco se sueltan: siguen escuchando al lápiz y se ponen al día
+     con el viewport nuevo (tinta-04, ver actualizarEditores). */
   for (const t of V.renders.values()) t.cancelar();
   V.renders.clear();
   V.pintadas.clear();
-  for (const e of V.editores.values()) e.destruir();
-  V.editores.clear();
   /* La capa de texto sí se rehace: sus spans están calzados sobre las letras a
      la escala vieja, y un span corrido no se ve pero se selecciona mal. */
   for (const t of V.textos.values()) t.cancelar();
@@ -521,6 +597,7 @@ function reescalar({ ancla } = {}) {
   }, { root: V.visor, rootMargin: `${Math.round(MARGEN_PRECARGA * 100)}% 0px` });
 
   V.visor.querySelectorAll('.qr-pliego').forEach((el) => V.observador.observe(el));
+  actualizarEditores();
 
   // El mismo punto del papel donde estaba (ver fotoAncla). Antes: el tope de la página.
   if (punto) ponerAncla(punto);
@@ -1473,6 +1550,9 @@ function alternarTinta(forzar = null) {
   /* Mientras se anota, el canvas de tinta captura el puntero. La clase va en
      el visor y no en cada pliego para que un solo toggle alcance. */
   V.visor?.classList.toggle('is-anotando', V.tintaActiva);
+  /* Apagada, el canvas deja de recibir el puntero y no llega ningún
+     pointerleave: el anillo de la punta (tinta-21) se quedaría pintado. */
+  if (!V.tintaActiva) for (const ed of V.editores.values()) ed.reposo?.();
   if (!V.tintaActiva && V.navegando) salirNav();
 }
 
@@ -1521,8 +1601,8 @@ function armarBarraTinta() {
     <div class="qr-colores-pliegue ox-plegable--ancho" id="qr-colores-pliegue"${esBorrador ? ' hidden' : ''}>
       <div class="qr-tintabarra__grupo qr-colores">
         ${COLORES.map((c) => `
-          <button class="qr-color${h.color === c ? ' is-on' : ''}" data-tinta-color="${c}"
-                  style="--tinta:${c}" data-tip="${c}"></button>`).join('')}
+          <button class="qr-color${h.color === c.hex ? ' is-on' : ''}" data-tinta-color="${c.hex}"
+                  style="--tinta:${c.hex}" data-tip="${c.nombre}"></button>`).join('')}
       </div>
       <div class="ox-vr"></div>
     </div>
@@ -1650,8 +1730,12 @@ function cablearBarraTinta() {
 
 /** Borra lo anotado en la página que estás mirando. Se deshace con Ctrl+Z. */
 function borrarTintaDeLaPagina() {
-  if (!S.tinta?.limpiarPagina(S.pagina)) return;
-  V.editores.get(S.pagina)?.redibujar();
+  const n = S.pagina;
+  const habia = S.tinta?.trazos(n) || [];
+  if (!S.tinta?.limpiarPagina(n)) return;
+  /* Se funde en t-2 en vez de irse de un cuadro al otro mientras el menú
+     todavía se está yendo (lector-33, tinta-13). */
+  V.editores.get(n)?.fundir({ salen: habia });
   actualizarBarraTinta();
 }
 
@@ -1676,8 +1760,14 @@ async function borrarTodaLaTinta() {
   });
   if (!ok) return;
 
-  await S.tinta.borrarTodo();
-  for (const ed of V.editores.values()) ed.redibujar();
+  /* Lo que tenía cada hoja montada, antes de borrar: es lo que se funde. Al
+     confirmar, las anotaciones a la vista se iban de golpe mientras el cartel
+     todavía se esfumaba (lector-33). */
+  const capa = S.tinta;
+  const habia = new Map([...V.editores.keys()].map((n) => [n, capa.trazos(n)]));
+  await capa.borrarTodo();
+  if (S.tinta !== capa) return;
+  for (const [n, ed] of V.editores) ed.fundir({ salen: habia.get(n) || [] });
   actualizarBarraTinta();
   Toast.show({ title: 'Tinta borrada', icon: 'borrador' });
 }
@@ -1699,21 +1789,41 @@ function actualizarBarraTinta() {
   document.getElementById('qr-tinta-limpiar')?.toggleAttribute('disabled', S.tinta.vacia);
 }
 
+/* deshacer() y rehacer() devuelven la operación con su página (tinta-12): se
+   redibuja SOLO ese editor, y no todos los montados, y lo que cambia se
+   funde en vez de aparecer o desaparecer de un cuadro al otro (tinta-13). */
 function deshacerTinta() {
-  // La operación se lee ANTES: después de deshacer, ya no está arriba.
-  const op = S.tinta?.historial.at(-1);
-  if (!S.tinta?.deshacer()) return;
-  for (const ed of V.editores.values()) ed.redibujar();
+  const op = S.tinta?.deshacer();
+  if (!op) return;
+  fundirOperacion(op, false);
   actualizarBarraTinta();
   avisarSiNoSeVe(op, false);
 }
 
 function rehacerTinta() {
-  const op = S.tinta?.deshechos.at(-1);
-  if (!S.tinta?.rehacer()) return;
-  for (const ed of V.editores.values()) ed.redibujar();
+  const op = S.tinta?.rehacer();
+  if (!op) return;
+  fundirOperacion(op, true);
   actualizarBarraTinta();
   avisarSiNoSeVe(op, true);
+}
+
+/* Qué se va y qué llega con cada operación del historial. La goma es la
+   rara: deshacerla devuelve los trazos enteros donde hoy hay pedazos, y los
+   pedazos van `debajo` para que lo único que se funda sea el tramo borrado
+   (ver fundir() en editor.js). */
+function fundirOperacion(op, rehace) {
+  const ed = V.editores.get(op.pagina);
+  if (!ed?.vivo) return;
+  if (op.tipo === 'recortar') {
+    const originales = op.cortes.map((c) => c.original);
+    const pedazos = op.cortes.flatMap((c) => c.piezas);
+    ed.fundir(rehace ? { salen: originales, debajo: pedazos } : { entran: originales, debajo: pedazos });
+    return;
+  }
+  // Deshacer un trazo lo saca; deshacer un borrado lo trae. Rehacer, al revés.
+  const sale = (op.tipo === 'agregar') !== rehace;
+  ed.fundir(sale ? { salen: op.trazos } : { entran: op.trazos });
 }
 
 /* Qué hizo el Ctrl+Z, dicho por el tipo de la operación. Decía «Se deshizo
@@ -2047,11 +2157,17 @@ function terminarGiro() {
   if (!g || !V.visor) return;
   clearTimeout(g.reloj);
   const ancla = anclaCentro();
-  /* Lo de la geometría vieja se vacía mientras no se ve: la tinta vuelve con
-     su editor (montarTinta) y las marcas con la capa de texto nueva. */
+  /* Las marcas de la geometría vieja se vacían mientras no se ven: vuelven
+     con la capa de texto nueva.
+     La tinta NO se vacía a mano. Los editores siguen (tinta-04) y reescalar()
+     les da el viewport girado: actualizar() rehace sus bitmaps en la misma
+     tarea. Vaciarlos acá rompía el giro que termina donde empezó (izquierda y
+     derecha seguidas, o cuatro del mismo lado): el viewport era el mismo,
+     nadie llamaba a actualizar() y la tinta no volvía hasta el próximo trazo
+     en esa hoja (revisión del paquete 3A). Mientras tanto no se ve nada
+     deformado: la tinta está apagada hasta que su hoja vuelve a ser
+     is-pintada, y para eso el render girado ya terminó. */
   for (const el of V.visor.querySelectorAll('.qr-pliego')) {
-    const tinta = el.querySelector('.qr-tinta');
-    if (tinta?.width) { tinta.width = 0; tinta.height = 0; }
     const capa = el.querySelector('.qr-marcas');
     if (capa?.firstChild) { capa.classList.remove('is-visible'); capa.replaceChildren(); capa.style.transform = ''; marcasPintadas.delete(capa); }
   }
@@ -2207,6 +2323,152 @@ function soltarEstirado() {
   pista.classList.remove('is-escalando');
 }
 
+/* ── El inicio: sin documento, los recientes (ux-21) ───────────────────────────
+   El main lleva una lista de recientes, con un chequeo de si cada archivo
+   sigue existiendo (src/documentos.cjs), y el preload la publica desde
+   siempre, pero el renderer no la usaba en ningún lado: con «Reabrir» apagado
+   o después de cerrar todo, para volver al apunte de ayer había que buscarlo
+   de nuevo en el explorador. Ahora el vacío del lector los lista debajo de
+   «Abrir un PDF»: hasta 8, con la carpeta en mono, hace cuánto, y apagados
+   los que ya no están.
+
+   La lista es de reconcile(): entra fila por fila la primera vez y después se
+   pone al día por ruta. La última que se pintó queda acá, y el repintado (un
+   'cargando' que no llegó a nada, volver de otra vista) la pone en el mismo
+   tick que paint(): así no vuelve a entrar ni empuja el vacío cuando llega la
+   respuesta del main. */
+const RECIENTES_MAX = 8;
+let recientesVistos = null;
+let genRecientes = 0;
+
+const carpetaDe = (ruta) => String(ruta || '').replace(/[\\/][^\\/]*$/, '');
+
+function filaReciente(r) {
+  const existe = r.existe !== false;
+  return {
+    key: r.ruta,
+    html: `
+      <button class="ox-listitem qr-reciente${existe ? '' : ' is-perdido'}" data-ruta="${esc(r.ruta)}"${existe ? '' : ' aria-disabled="true"'}>
+        ${Icons.svg('file')}
+        <span class="ox-listitem__main">
+          <span class="ox-listitem__title">${esc(r.nombre || r.ruta)}</span>
+          <span class="ox-listitem__sub qr-reciente__carpeta">${esc(carpetaDe(r.ruta))}</span>
+        </span>
+        <span class="ox-listitem__aside ox-meta">${existe ? esc(relTime(r.abierto)) : 'ya no está'}</span>
+      </button>`,
+  };
+}
+
+function pintarInicio() {
+  const hay = !!recientesVistos?.length;
+  paint(head({ title: 'Documento' }) + `
+    <div class="ox-grow ox-scroll qr-inicio">
+      <div class="ox-empty">${Icons.svg('quire')}
+        <div class="ox-empty__title">No hay ningún PDF abierto</div>
+        <div class="ox-empty__text">Abrí uno con el botón de arriba, arrastralo a la ventana, o apretá Ctrl+O. Quire no toca el archivo original: lo que anotes y lo que impongas para imprimir se guardan aparte.</div>
+        <div class="ox-row" style="gap:8px;margin-top:6px">
+          <button class="ox-btn ox-btn--primary ox-flashable" data-action="abrir"><i data-icon="folder"></i> Abrir un PDF</button>
+        </div>
+      </div>
+      <!-- Nace plegado si todavía no se sabe si hay recientes: se despliega
+           cuando el main contesta, en vez de aparecer de golpe. -->
+      <section class="qr-recientes ox-plegable" id="qr-recientes"${hay ? '' : ' hidden'}>
+        <div class="qr-recientes__cabeza">
+          <span class="ox-label">Recientes</span>
+          <div class="ox-spacer"></div>
+          <button class="ox-btn ox-btn--ghost ox-btn--sm" id="qr-olvidar-recientes">Olvidar recientes</button>
+        </div>
+        <div class="ox-list qr-recientes__lista" id="qr-recientes-lista"></div>
+      </section>
+    </div>`);
+
+  const caja = document.getElementById('qr-recientes');
+  const lista = document.getElementById('qr-recientes-lista');
+  // Lo que ya se había visto, asentado y en esta misma tarea.
+  if (hay) {
+    reconcile(lista, recientesVistos.map(filaReciente), { enter: false });
+    asentarPlegables(caja);
+  }
+
+  lista.addEventListener('click', (e) => {
+    const fila = e.target.closest('.qr-reciente');
+    if (fila && !fila.classList.contains('is-perdido')) abrirReciente(fila.dataset.ruta);
+  });
+  document.getElementById('qr-olvidar-recientes')?.addEventListener('click', olvidarRecientes);
+
+  const gen = ++genRecientes;
+  Promise.resolve(window.onyx?.docs?.recientes?.()).then((todos) => {
+    if (gen !== genRecientes || !lista.isConnected) return;
+    ponerRecientes((Array.isArray(todos) ? todos : []).slice(0, RECIENTES_MAX));
+  }).catch((err) => console.error('[recientes]', err));
+}
+
+function ponerRecientes(l) {
+  const caja = document.getElementById('qr-recientes');
+  const lista = document.getElementById('qr-recientes-lista');
+  if (!caja || !lista) return;
+  recientesVistos = l;
+  if (!l.length) { plegarRecientes(caja, lista); return; }
+  caja.hidden = false;
+  reconcile(lista, l.map(filaReciente), { update: ponerReciente });
+}
+
+/* Una fila que ya se ve se pone al día en el lugar, sin el parpadeo de la
+   fila entera que reconcile() hace por defecto. Ese parpadeo era una WAAPI de
+   1 a 0 y otra de 0 a 1 sin fill: al terminar, la opacidad de una fila que
+   pasaba a «ya no está» caía en seco de 1 a .45, y la de una que volvía
+   saltaba de .45 a 1 al arrancar (revisión del paquete 3A). Ahora la clase
+   cambia sola y la opacidad viaja con su transición (.qr-reciente en
+   lector.css), y cada texto que cambió pasa por frase(): «hace 2 min» a
+   «hace 3 min» es un destello en el lugar, «ya no está» un relevo. */
+function ponerReciente(el, it) {
+  const t = document.createElement('template');
+  t.innerHTML = it.html.trim();
+  const nu = t.content.firstElementChild;
+  el.classList.toggle('is-perdido', nu.classList.contains('is-perdido'));
+  if (nu.hasAttribute('aria-disabled')) el.setAttribute('aria-disabled', 'true');
+  else el.removeAttribute('aria-disabled');
+  el.dataset.ruta = nu.dataset.ruta;
+  for (const sel of ['.ox-listitem__title', '.qr-reciente__carpeta', '.ox-listitem__aside']) {
+    const viejo = el.querySelector(sel);
+    const nuevo = nu.querySelector(sel);
+    if (viejo && nuevo) frase(viejo, nuevo.innerHTML);
+  }
+}
+
+/* Se va la caja entera, plegándose: el alto baja con in-out y la opacidad con
+   cubic-out (.ox-plegable), así lo de adentro ya casi no se ve cuando la caja
+   empieza a cerrarse de verdad. Las filas se sueltan cuando terminó, ya sin
+   nadie que las mire. Sacarlas antes por reconcile() las dejaba absolutas y
+   la lista se achicaba de un cuadro al otro: el vacío, que va centrado,
+   saltaba para arriba. */
+function plegarRecientes(caja, lista) {
+  if (caja.hidden) { lista.replaceChildren(); return; }
+  caja.hidden = true;
+  setTimeout(() => { if (caja.hidden) lista.replaceChildren(); }, 400);
+}
+
+async function olvidarRecientes() {
+  const boton = document.getElementById('qr-olvidar-recientes');
+  if (boton) boton.disabled = true;
+  const ok = await attempt(() => window.onyx.docs.olvidarRecientes(), { errorTitle: 'No se pudieron olvidar los recientes' });
+  if (boton) boton.disabled = false;
+  if (!ok) return;
+  genRecientes++;                    // una respuesta vieja que llegue tarde no los trae de vuelta
+  ponerRecientes([]);
+}
+
+/* Un clic abre como el diálogo: por la fila de aperturas del shell (app.js,
+   auditoría 2F), con el mismo evento que usa Convertir. Abrir por su cuenta
+   (docs.leer + abrir acá mismo) se salteaba esa fila: mientras se leía el
+   archivo no salía «Abriendo…», un segundo clic en otro reciente corría en
+   paralelo con el primero o con la sesión del arranque, y no pasaba por
+   hayLugar() ni daba el aviso de abierto (revisión del paquete 3A). */
+function abrirReciente(ruta) {
+  if (!ruta) return;
+  window.dispatchEvent(new CustomEvent('quire:abrir-ruta', { detail: { ruta } }));
+}
+
 /* ── La vista ────────────────────────────────────────────────────────────── */
 
 export function viewLector() {
@@ -2242,12 +2504,7 @@ export function viewLector() {
   }
 
   if (!S.doc) {
-    paint(head({ title: 'Documento' }) + empty({
-      icon: 'quire',
-      title: 'No hay ningún PDF abierto',
-      text: 'Abrí uno con el botón de arriba, arrastralo a la ventana, o apretá Ctrl+O. Quire no toca el archivo original: lo que anotes y lo que impongas para imprimir se guardan aparte.',
-      actions: '<button class="ox-btn ox-btn--primary ox-flashable" data-action="abrir"><i data-icon="folder"></i> Abrir un PDF</button>',
-    }));
+    pintarInicio();
     return;
   }
 

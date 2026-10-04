@@ -23,16 +23,47 @@ import { Toast } from '../overlays.js';
 
 const api = window.onyx;
 
+/* ── El amarillo del resaltador vive en UN lugar ─────────────────────────────
+   Estaba tres veces: como `241 196 15` en las marcas de la búsqueda
+   (lector.css) y como #f1c40f acá y en el lector. Cambiarlo en uno dejaba a
+   los otros con el viejo sin que nada avisara (css-23). Ahora la fuente es
+   `--qr-resaltador-rgb`, en lector.css, que también tiñe las marcas, y acá se
+   lee al cargar el módulo: los <link> del index.html van antes que el script,
+   así que la hoja ya está aplicada. El #f1c40f de abajo es solo el respaldo
+   para cuando no hay hoja (la página de prueba de tinta.cjs). */
+function amarilloDeLaHoja() {
+  try {
+    const crudo = getComputedStyle(document.documentElement).getPropertyValue('--qr-resaltador-rgb').trim();
+    const rgb = crudo.split(/[\s,]+/).map(Number);
+    if (rgb.length === 3 && rgb.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) {
+      return `#${rgb.map((n) => n.toString(16).padStart(2, '0')).join('')}`;
+    }
+  } catch { /* sin documento: el respaldo */ }
+  return '#f1c40f';
+}
+const AMARILLO = amarilloDeLaHoja();
+
 export const HERRAMIENTAS = {
   pluma: { etiqueta: 'Pluma', icono: 'tinta', ancho: 1.8, color: '#1a1a1a', opacidad: 1, sensible: true },
   fibra: { etiqueta: 'Fibra', icono: 'edit', ancho: 4.5, color: '#c0392b', opacidad: 1, sensible: true },
-  resaltador: { etiqueta: 'Resaltador', icono: 'resaltador', ancho: 14, color: '#f1c40f', opacidad: 0.34, sensible: false },
+  resaltador: { etiqueta: 'Resaltador', icono: 'resaltador', ancho: 14, color: AMARILLO, opacidad: 0.34, sensible: false },
   borrador: { etiqueta: 'Borrador', icono: 'borrador', ancho: 16, color: null, opacidad: 1, sensible: false },
 };
 
 /* Tinta, no interfaz: acá el color lo elige el usuario y no compite con el
-   acento de la app. El primero de cada fila es el que viene por defecto. */
-export const COLORES = ['#1a1a1a', '#c0392b', '#1f6fb2', '#1e8449', '#8e44ad', '#f1c40f'];
+   acento de la app. El primero de cada fila es el que viene por defecto.
+   Con nombre: el tooltip de cada pastilla decía «#c0392b» (tinta-24, ux-19). */
+export const COLORES = [
+  { hex: '#1a1a1a', nombre: 'Negro' },
+  { hex: '#c0392b', nombre: 'Rojo' },
+  { hex: '#1f6fb2', nombre: 'Azul' },
+  { hex: '#1e8449', nombre: 'Verde' },
+  { hex: '#8e44ad', nombre: 'Violeta' },
+  { hex: AMARILLO, nombre: 'Amarillo' },
+];
+
+/** El resaltador va en su propia capa y se mezcla con multiply (tinta-07). */
+export const esResaltador = (t) => t.herramienta === 'resaltador';
 
 /** Id estable del documento: la ruta y el tamaño, en un hash corto. */
 export function idDocumento(doc) {
@@ -352,40 +383,89 @@ export class CapaDeTinta {
 
 /* ── Dibujo ──────────────────────────────────────────────────────────────── */
 
+/* El Path2D de cada trazo, hecho una vez. Antes cada redibujo recalculaba el
+   contorno, el string y el Path2D de TODOS los trazos de la página, y el
+   resaltador redibujaba la página entera en cada cuadro del trazo en curso
+   (tinta-10). Por objeto y en un WeakMap: un trazo guardado no se modifica
+   nunca —la goma deja pedazos que son objetos nuevos, y deshacer devuelve los
+   mismos objetos de antes—, así que su camino sigue valiendo, y cuando el
+   trazo se va de la capa el camino se va con él. */
+const caminos = new WeakMap();
+
+/** El Path2D de un trazo guardado (en coordenadas de página), o null si no tiene forma. */
+export function caminoDe(t) {
+  let p = caminos.get(t);
+  if (p === undefined) {
+    const d = pathDeTrazo(t);
+    p = d ? new Path2D(d) : null;
+    caminos.set(t, p);
+  }
+  return p;
+}
+
+/* Los resaltadores van primero y todos juntos: si se intercalaran con la
+   tinta opaca, un trazo de pluma anterior quedaría lavado por el amarillo. */
+const enOrden = (trazos) => [...trazos.filter(esResaltador), ...trazos.filter((t) => !esResaltador(t))];
+
+function rellenar(ctx, t) {
+  const p = caminoDe(t);
+  if (!p) return false;
+  ctx.globalAlpha = t.opacidad ?? 1;
+  ctx.fillStyle = t.color || '#000';
+  ctx.fill(p);
+  return true;
+}
+
 /**
  * Pinta los trazos de una página en un canvas.
  *
  * La transformación sale del viewport de pdf.js, así que el mismo path en
  * coordenadas de página cae exactamente donde va con cualquier zoom y con la
  * página rotada. Y es el MISMO path que después se escribe en el PDF.
+ *
+ * `solo` elige una de las dos capas del lector: 'resaltador' (la de abajo,
+ * que la hoja mezcla con multiply) o 'tinta' (todo lo demás). Sin `solo`,
+ * todo junto, con los resaltadores primero.
  */
-export function dibujarTrazos(ctx, trazos, viewport, { dpr = 1, resaltar = null } = {}) {
+export function dibujarTrazos(ctx, trazos, viewport, { dpr = 1, resaltar = null, solo = null } = {}) {
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width / dpr, ctx.canvas.height / dpr);
   ctx.transform(...viewport.transform);
 
-  /* Los resaltadores van primero y todos juntos: si se intercalaran con la
-     tinta opaca, un trazo de pluma anterior quedaría lavado por el amarillo. */
-  const orden = [
-    ...trazos.filter((t) => t.herramienta === 'resaltador'),
-    ...trazos.filter((t) => t.herramienta !== 'resaltador'),
-  ];
+  const lista = solo === 'resaltador' ? trazos.filter(esResaltador)
+    : solo === 'tinta' ? trazos.filter((t) => !esResaltador(t))
+      : enOrden(trazos);
 
-  for (const t of orden) {
-    const d = pathDeTrazo(t);
-    if (!d) continue;
-    ctx.globalAlpha = t.opacidad ?? 1;
-    ctx.fillStyle = t.color || '#000';
-    ctx.fill(new Path2D(d));
-
+  for (const t of lista) {
+    if (!rellenar(ctx, t)) continue;
     if (resaltar && resaltar.has(t.id)) {
       ctx.globalAlpha = 1;
       ctx.strokeStyle = '#ff3b30';
       ctx.lineWidth = 1 / Math.abs(viewport.scale || 1);
-      ctx.stroke(new Path2D(d));
+      ctx.stroke(caminoDe(t));
     }
   }
 
+  ctx.restore();
+}
+
+/**
+ * Pinta la tinta ENCIMA de lo que el canvas ya tiene (la página rasterizada),
+ * sin borrar nada: los resaltadores con multiply y el resto normal. Es lo que
+ * usa exportar a imagen, para que salga igual que en pantalla y que en el PDF
+ * aplanado (tinta-07): con alfa a secas, el amarillo encima de una letra negra
+ * la dejaba oliva; con multiply, amarillo por blanco da amarillo y amarillo
+ * por negro sigue dando negro. Sobre un canvas de página opaco no hace falta
+ * un lienzo aparte: nada se borra.
+ */
+export function componerTinta(ctx, trazos, viewport, { dpr = 1 } = {}) {
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.transform(...viewport.transform);
+  ctx.globalCompositeOperation = 'multiply';
+  for (const t of trazos.filter(esResaltador)) rellenar(ctx, t);
+  ctx.globalCompositeOperation = 'source-over';
+  for (const t of trazos.filter((t) => !esResaltador(t))) rellenar(ctx, t);
   ctx.restore();
 }

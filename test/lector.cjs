@@ -72,6 +72,10 @@ const reloj = setTimeout(() => morir('se colgó', new Error('pasaron 240 s')), 2
    una hoja en blanco. */
 const CON_CLAVE = 'JVBERi0xLjMKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPDM3YzhmZTlmOGI+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbIDQgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKPj4KL01lZGlhQm94IFsgMC4wIDAuMCAyMDAgMjAwIF0KL1BhcmVudCAyIDAgUgo+PgplbmRvYmoKNSAwIG9iago8PAovViAxCi9SIDIKL0xlbmd0aCA0MAovUCA0Mjk0OTY3MjkyCi9GaWx0ZXIgL1N0YW5kYXJkCi9PIDxjNzI4ODNjN2M5OWQzYzcwODU3NjE3NDBhNTBiYmE4YjdlOGJjYjg5NGViZTUzNGY5YzlhOTUxMDhmY2JkNWIyPgovVSA8M2FhODUyYWRiZWNhY2ZiOWJkNDdlZWFhMDliYmRjMTU2NDg4MDk5Nzc3YzUwM2Y0YWIzNGMxZTQ4ZDJhNjY4MT4KPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxNSAwMDAwMCBuIAowMDAwMDAwMDU5IDAwMDAwIG4gCjAwMDAwMDAxMTggMDAwMDAgbiAKMDAwMDAwMDE2NyAwMDAwMCBuIAowMDAwMDAwMjYxIDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgNgovUm9vdCAzIDAgUgovSW5mbyAxIDAgUgovSUQgWyA8MzUzOTYzMzIzMDYyNjI2MTY1NjMzODMyNjUzMTYyMzU2MzM2MzM2MzYxNjI2NTY2MzU2MTY2NjE2NTY2MzEzMT4gPDM1Mzk2MzMyMzA2MjYyNjE2NTYzMzgzMjY1MzE2MjM1NjMzNjMzNjM2MTYyNjU2NjM1NjE2NjYxNjU2NjMxMzE+IF0KL0VuY3J5cHQgNSAwIFIKPj4Kc3RhcnR4cmVmCjQ3NQolJUVPRgo=';
 
+/* Uno con contraseña solo de PROPIETARIO (restricciones de imprimir; pypdf):
+   pdf.js lo abre sin preguntar, pero sus bytes están cifrados igual. */
+const SOLO_DUENO = 'JVBERi0xLjMKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPDEyNGViMWI1OWQ+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbIDQgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKPj4KL01lZGlhQm94IFsgMC4wIDAuMCAyMDAgMjAwIF0KL1BhcmVudCAyIDAgUgo+PgplbmRvYmoKNSAwIG9iago8PAovViAyCi9SIDMKL0xlbmd0aCAxMjgKL1AgNDI5NDk2NzI5MgovRmlsdGVyIC9TdGFuZGFyZAovTyA8ZGNiOWJkNzg3ZDcwYjE2NmQxNzc4MTZiYTY3NWNlMzFhYjQyMDFkMzIzOWRkOGYwZmRmNGJmM2UyYjhjNmVjZT4KL1UgPDExMDIxYmIyNGI4YmIwNWY1ZGM1MzAyNmY2ODA1NmI2MjhiZjRlNWU0ZTc1OGE0MTY0MDA0ZTU2ZmZmYTAxMDg+Cj4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDAgbiAKMDAwMDAwMDA1OSAwMDAwMCBuIAowMDAwMDAwMTE4IDAwMDAwIG4gCjAwMDAwMDAxNjcgMDAwMDAgbiAKMDAwMDAwMDI2MSAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDYKL1Jvb3QgMyAwIFIKL0luZm8gMSAwIFIKL0lEIFsgPDM1Mzk2MzMyMzA2MjYyNjE2NTYzMzgzMjY1MzE2MjM1NjMzNjMzNjM2MTYyNjU2NjM1NjE2NjYxNjU2NjMxMzE+IDwzNTM5NjMzMjMwNjI2MjYxNjU2MzM4MzI2NTMxNjIzNTYzMzYzMzYzNjE2MjY1NjYzNTYxNjY2MTY1NjYzMTMxPiBdCi9FbmNyeXB0IDUgMCBSCj4+CnN0YXJ0eHJlZgo0NzYKJSVFT0YK';
+
 /* ── Los cobayos ──────────────────────────────────────────────────────────────
    El grande: cuarenta A4 con veinte renglones cada una, y la palabra
    «palabra» tres veces por hoja (para las marcas de la búsqueda). El chico:
@@ -1278,10 +1282,16 @@ app.whenReady().then(async () => {
        dice, para que Imprimir y Exportar puedan avisar (ver «afuera»). */
     const marcas = await js(`(async () => {
       const { S } = await T.mod('estado');
-      return S.pestanas.map((p) => ({ nombre: p.doc.nombre, conClave: p.doc.conClave }));
+      const { abrirDocumento } = await T.mod('pdf/documento');
+      const dueno = await abrirDocumento(Uint8Array.from(atob('${SOLO_DUENO}'), (c) => c.charCodeAt(0)), { nombre: 'solo-dueno.pdf' });
+      const soloDueno = { conClave: dueno.conClave, cifrado: dueno.cifrado };
+      dueno.destruir();
+      return { soloDueno, pestanas: S.pestanas.map((p) => ({ nombre: p.doc.nombre, conClave: p.doc.conClave, cifrado: p.doc.cifrado })) };
     })()`);
+    const pest = marcas.pestanas;
     ok('el documento abierto con contraseña queda marcado, y los demás no',
-      marcas.find((m) => m.nombre === 'con-clave.pdf')?.conClave === true && marcas.filter((m) => m.nombre !== 'con-clave.pdf').every((m) => m.conClave === false), JSON.stringify(marcas));
+      pest.find((m) => m.nombre === 'con-clave.pdf')?.conClave === true && pest.filter((m) => m.nombre !== 'con-clave.pdf').every((m) => m.conClave === false && m.cifrado === false), JSON.stringify(pest));
+    ok('uno con contraseña solo de propietario queda cifrado aunque no la pidió', marcas.soloDueno.cifrado === true && marcas.soloDueno.conClave === false, JSON.stringify(marcas.soloDueno));
     await esperar(600);
   });
 
@@ -1313,6 +1323,159 @@ app.whenReady().then(async () => {
     })()`);
     ok('sin documento y abriendo uno, el lector dice «Abriendo…» (shell-05)', abriendo.texto === 'Abriendo…', JSON.stringify(abriendo));
     ok('y si no llegó nada, vuelve al vacío', /No hay ningún PDF/.test(abriendo.despues || ''), JSON.stringify(abriendo));
+  });
+
+  await bloque('ux-21', async () => {
+    /* ux-21: el vacío del lector lista los recientes (hasta 8), con la
+       carpeta en mono y hace cuánto; los que ya no están, apagados; un clic
+       abre; «Olvidar recientes» los vacía con su salida. Leer un PDF por el
+       main lo anota en Recientes: así entra el chico aunque nadie lo abra. */
+    const rutasIguales = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+    const lista = await js(`(async () => {
+      /* auditarAnillos (bloque lector-12) deja puesto su <style> que apaga
+         todas las transiciones, y acá se mide un pliegue: se saca. */
+      document.getElementById('aud-notr')?.remove();
+      const est = await T.mod('estado');
+      for (const p of [...est.S.pestanas]) await est.cerrarPestana(p.id);
+      await window.onyx.docs.leer(${JSON.stringify(rutaChico)});
+      await new Promise((r) => setTimeout(r, 300));
+      (await T.mod('router')).default.refresh();
+      await new Promise((r) => setTimeout(r, 900));
+      const caja = document.getElementById('qr-recientes');
+      const filas = [...document.querySelectorAll('#qr-recientes-lista > .qr-reciente:not([data-state=closing])')];
+      return {
+        visible: !!caja && !caja.hidden && caja.getBoundingClientRect().height > 40,
+        filas: filas.map((f) => ({
+          ruta: f.dataset.ruta,
+          nombre: f.querySelector('.ox-listitem__title')?.textContent,
+          carpeta: f.querySelector('.qr-reciente__carpeta')?.textContent,
+          mono: getComputedStyle(f.querySelector('.qr-reciente__carpeta')).fontFamily,
+          cuando: f.querySelector('.ox-listitem__aside')?.textContent.trim(),
+        })),
+        sans: getComputedStyle(document.body).fontFamily,
+        main: (await window.onyx.docs.recientes()).length,
+      };
+    })()`);
+    const chico = lista.filas.find((f) => f.nombre === 'cobayo-chico.pdf');
+    ok('sin documentos, el lector lista los recientes debajo de Abrir (ux-21)', lista.visible && lista.filas.length === Math.min(8, lista.main) && lista.filas.length >= 2, JSON.stringify(lista));
+    ok('con el nombre, la carpeta en mono y hace cuánto', !!chico && rutasIguales(chico.carpeta, path.dirname(rutaChico))
+      && chico.mono !== lista.sans && /recién|hace|ayer/.test(chico.cuando), JSON.stringify(chico));
+
+    /* Con la ventana baja la lista no entra: el inicio se scrollea y se
+       esfuma del lado que recorta, no corta en seco (revisión del paquete 3A).
+       Se achica la caja a mano en vez de la ventana. */
+    const bajo = await js(`(async () => {
+      const inicio = document.querySelector('#view .qr-inicio');
+      const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+      const leer = () => ({
+        top: inicio.classList.contains('is-top'), bottom: inicio.classList.contains('is-bottom'),
+        mask: getComputedStyle(inicio).maskImage !== 'none',
+        vacio: Math.round(inicio.querySelector('.ox-empty').getBoundingClientRect().top - inicio.getBoundingClientRect().top),
+      });
+      inicio.style.flex = '0 0 auto'; inicio.style.height = '200px';
+      await espera(450);
+      const arriba = leer();
+      inicio.scrollTop = 1e6;
+      await espera(450);
+      const abajo = leer();
+      inicio.style.flex = ''; inicio.style.height = ''; inicio.scrollTop = 0;
+      await espera(300);
+      return { arriba, abajo, desborda: inicio.scrollHeight > 200, despues: leer() };
+    })()`);
+    ok('con la ventana baja, los recientes se esfuman donde recorta el scroll', bajo.arriba.top && !bajo.arriba.bottom && bajo.arriba.mask
+      && bajo.abajo.bottom && !bajo.abajo.top && bajo.abajo.mask, JSON.stringify(bajo));
+    ok('y el vacío de arriba se alcanza: centrado sin desbordar para arriba', bajo.arriba.vacio >= 0, JSON.stringify(bajo));
+
+    /* La fila del chico se muestrea cuadro a cuadro mientras el main contesta:
+       la opacidad tiene que VIAJAR de 1 a .45 (y de vuelta), no caer en seco
+       al terminar el parpadeo de la fila entera (revisión del paquete 3A). */
+    const muestrearChico = `(async () => {
+      (await T.mod('router')).default.refresh();
+      const antes = [...document.querySelectorAll('#qr-recientes-lista > .qr-reciente')];
+      const serie = []; const t0 = performance.now();
+      while (performance.now() - t0 < 900) {
+        const f = [...document.querySelectorAll('#qr-recientes-lista > .qr-reciente:not([data-state=closing])')]
+          .find((x) => x.querySelector('.ox-listitem__title')?.textContent === 'cobayo-chico.pdf');
+        serie.push(f ? +(+getComputedStyle(f).opacity).toFixed(3) : null);
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      const despues = [...document.querySelectorAll('#qr-recientes-lista > .qr-reciente:not([data-state=closing])')];
+      const fila = despues.find((f) => f.querySelector('.ox-listitem__title')?.textContent === 'cobayo-chico.pdf');
+      return {
+        mismas: antes.length > 0 && despues.length === antes.length && despues.every((f) => antes.includes(f)),
+        perdido: !!fila?.classList.contains('is-perdido'), opacidad: fila ? +getComputedStyle(fila).opacity : null,
+        dice: fila?.querySelector('.ox-listitem__aside')?.textContent.trim(),
+        serie,
+      };
+    })()`;
+    // El salto más grande entre dos cuadros seguidos.
+    const salto = (serie) => serie.reduce((m, x, i) => (i && x !== null && serie[i - 1] !== null ? Math.max(m, Math.abs(x - serie[i - 1])) : m), 0);
+    const bytesChico = fs.readFileSync(rutaChico);
+    fs.rmSync(rutaChico, { force: true });
+    const perdido = await js(muestrearChico);
+    ok('el que ya no existe queda apagado y lo dice', perdido.perdido && perdido.opacidad < 0.6 && perdido.dice === 'ya no está', JSON.stringify({ ...perdido, serie: undefined }));
+    ok('y la lista se pone al día por clave: las filas son las mismas', perdido.mismas, JSON.stringify({ ...perdido, serie: undefined }));
+    ok('al apagarse, la opacidad viaja: sin saltos de un cuadro al otro', salto(perdido.serie) <= 0.2 && perdido.serie.some((x) => x > 0.5 && x < 0.95),
+      `salto ${salto(perdido.serie).toFixed(2)} · ${JSON.stringify(perdido.serie)}`);
+    fs.writeFileSync(rutaChico, bytesChico);
+    const vuelve = await js(muestrearChico);
+    ok('y si el archivo vuelve, se prende de a poco', !vuelve.perdido && vuelve.opacidad === 1 && /recién|hace|ayer/.test(vuelve.dice || '')
+      && salto(vuelve.serie) <= 0.2 && vuelve.serie.some((x) => x > 0.5 && x < 0.95), `salto ${salto(vuelve.serie).toFixed(2)} · ${JSON.stringify(vuelve)}`);
+
+    const abre = await js(`(async () => {
+      const est = await T.mod('estado');
+      const fila = [...document.querySelectorAll('#qr-recientes-lista > .qr-reciente')].find((f) => f.querySelector('.ox-listitem__title')?.textContent === 'cobayo-lector.pdf');
+      if (!fila) return { error: 'no está el grande en la lista' };
+      document.querySelectorAll('.ox-toast').forEach((t) => t.remove());
+      fila.click();
+      for (let i = 0; i < 40 && !document.querySelector('#view .qr-pliego'); i++) await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 300));
+      /* Por la fila de aperturas del shell, como el diálogo: el aviso de
+         abierto con sus páginas es de abrirTanda (app.js). Abriendo por su
+         cuenta, el lector no lo daba. */
+      const avisos = [...document.querySelectorAll('.ox-toast:not([data-state=closing])')].map((t) => t.textContent.replace(/\\s+/g, ' ').trim());
+      const r = { nombre: est.S.doc?.nombre, hojas: document.querySelectorAll('#view .qr-pliego').length, avisos };
+      for (const p of [...est.S.pestanas]) await est.cerrarPestana(p.id);
+      await new Promise((r) => setTimeout(r, 900));
+      return r;
+    })()`);
+    ok('un clic en un reciente lo abre', abre.nombre === 'cobayo-lector.pdf' && abre.hojas === 40, JSON.stringify(abre));
+    ok('y abre por la fila del shell: el mismo aviso que el diálogo', (abre.avisos || []).some((t) => /cobayo-lector\.pdf/.test(t) && /40 páginas/.test(t)), JSON.stringify(abre));
+
+    const olvido = await js(`(async () => {
+      const caja = document.getElementById('qr-recientes');
+      const h0 = caja.getBoundingClientRect().height;
+      const serie = []; const t0 = performance.now();
+      document.getElementById('qr-olvidar-recientes').click();
+      while (performance.now() - t0 < 600) {
+        const c = document.getElementById('qr-recientes');
+        serie.push(c && !c.hidden ? Math.round(c.getBoundingClientRect().height) : (c ? Math.round(c.getBoundingClientRect().height) : null));
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return { h0: Math.round(h0), serie, oculta: caja.hidden, filas: document.querySelectorAll('#qr-recientes-lista > *').length, main: (await window.onyx.docs.recientes()).length };
+    })()`);
+    ok('«Olvidar recientes» los pliega de a poco, y el main los olvida', olvido.serie.some((h) => h > 4 && h < olvido.h0 - 4) && olvido.serie.at(-1) === 0
+      && olvido.oculta && olvido.filas === 0 && olvido.main === 0, JSON.stringify(olvido));
+
+    const entra = await js(`(async () => {
+      const est = await T.mod('estado');
+      await est.abrir(await window.onyx.docs.leer(${JSON.stringify(rutaGrande)}));
+      await new Promise((r) => setTimeout(r, 600));
+      const t0 = performance.now(); const serie = [];
+      const cierre = est.cerrarPestana(est.S.pestanas[0].id);
+      while (performance.now() - t0 < 900) {
+        const f = document.querySelector('#qr-recientes-lista > .qr-reciente');
+        const c = document.getElementById('qr-recientes');
+        serie.push({ op: f ? +(+getComputedStyle(f).opacity).toFixed(2) : null, alto: c && !c.hidden ? Math.round(c.getBoundingClientRect().height) : 0 });
+        await new Promise((r) => setTimeout(r, 16));
+      }
+      await cierre;
+      return { serie, filas: document.querySelectorAll('#qr-recientes-lista > .qr-reciente').length };
+    })()`);
+    const ops = entra.serie.map((s) => s.op).filter((x) => x !== null);
+    const altos = entra.serie.map((s) => s.alto);
+    ok('la lista entra: la fila se funde y la caja se despliega', entra.filas === 1 && ops.some((x) => x > 0.05 && x < 0.95)
+      && altos.some((h) => h > 2 && h < Math.max(...altos) - 4), JSON.stringify(entra.serie.filter((_, i) => i % 3 === 0)));
   });
 
   /* ── Cierre ──────────────────────────────────────────────────────────────── */
