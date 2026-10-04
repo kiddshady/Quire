@@ -19,6 +19,14 @@ import * as pdfjs from '../../vendor/pdfjs/pdf.mjs';
 
 const VENDOR = new URL('../../vendor/pdfjs/', import.meta.url).href;
 
+/* El tope de píxeles de un bitmap, el mismo `maxCanvasPixels` del visor de
+   pdf.js: 2^25, unos 33 Mpx (128 MB). Sin tope, una A4 a 600 % con dpr 1,25
+   eran 28 Mpx por buffer, el doble mientras dura el render con `preservar`,
+   por cada hoja de la precarga (lector-22). Pasado el tope se baja la
+   resolución del bitmap y no su tamaño en pantalla: a zoom extremo la hoja
+   se ve apenas más suave. */
+export const MAX_PIXELES = 2 ** 25;
+
 pdfjs.GlobalWorkerOptions.workerSrc = VENDOR + 'worker-shim.mjs';
 
 /**
@@ -103,10 +111,34 @@ class Documento {
        tiene parseado. Reabrir el archivo del disco sería pedirle al usuario
        que no lo haya movido mientras tanto. */
     this.bytes = meta.bytes || null;
+    /* Si se abrió con contraseña, esos bytes están CIFRADOS. pdf.js los
+       descifra para leer, pero pdf-lib no sabe (la imposición y el aplanado de
+       la tinta los cargan con ignoreEncryption): lo que arme con ellos sale
+       en blanco o roto. Antes de ux-11 estos PDF ni abrían, así que nadie lo
+       miraba; ahora Imprimir y Exportar tienen que mirarlo y avisar. */
+    this.conClave = !!meta.conClave;
 
     this._cachePaginas = new Map();
     this._cacheGeometria = new Map();
+    /* Las miniaturas del panel, ya hechas imagen: nº de página → URL de un
+       blob. Viven lo que vive el documento (destruir() las suelta), así que
+       volver al lector o a la pestaña no las vuelve a pedir. */
+    this._miniaturas = new Map();
+    this._esquema = null;      // la promesa de esquema(), una sola por documento
     this._destruido = false;
+  }
+
+  /**
+   * Suelta lo que pdf.js guarda de una página después de dibujarla: las
+   * imágenes decodificadas y la lista de operadores. El PDFPageProxy queda
+   * cacheado para siempre y sin esto cada hoja visitada se quedaba con lo suyo
+   * en memoria, aunque el lector soltara el canvas: el único que prende esa
+   * limpieza es cleanup(), y render() la apaga al empezar (lector-06). Es lo
+   * mismo que hace el visor de pdf.js al sacar una página de su buffer. Si hay
+   * un render en curso, pdf.js la deja pendiente y la hace al terminar.
+   */
+  soltar(n) {
+    this._cachePaginas.get(n)?.then((p) => p.cleanup()).catch(() => {});
   }
 
   async _pagina(n) {
@@ -139,10 +171,23 @@ class Documento {
     return g;
   }
 
-  /** La geometría de todas las páginas. La necesita el scroll para saber cuánto mide el documento. */
+  /**
+   * La geometría de todas las páginas. La necesita el scroll para saber cuánto
+   * mide el documento.
+   *
+   * En lotes de 32 en paralelo y no de a una: cada geometría es una ida y
+   * vuelta al worker, y en serie un libro de 1265 páginas eran 1265 esperas en
+   * fila antes de mostrar nada. En lotes y no todas juntas para no encolarle
+   * al worker mil pedidos de una (lector-24).
+   */
   async geometrias() {
     const out = [];
-    for (let n = 1; n <= this.paginas; n++) out.push(await this.geometria(n));
+    for (let desde = 1; desde <= this.paginas; desde += 32) {
+      const hasta = Math.min(this.paginas, desde + 31);
+      const lote = [];
+      for (let n = desde; n <= hasta; n++) lote.push(this.geometria(n));
+      out.push(...await Promise.all(lote));
+    }
     return out;
   }
 
@@ -154,7 +199,7 @@ class Documento {
    * termine. Un render cancelado rechaza con RenderingCancelledException, que
    * NO es un error que haya que mostrar.
    */
-  render(n, { canvas, escala = 1, rotacionExtra = 0, dpr = window.devicePixelRatio || 1, preservar = false }) {
+  render(n, { canvas, escala = 1, rotacionExtra = 0, dpr = window.devicePixelRatio || 1, preservar = false, tope = MAX_PIXELES }) {
     let tarea = null;
     let cancelado = false;
 
@@ -163,7 +208,12 @@ class Documento {
       if (cancelado) return null;
 
       const rotacion = ((page.rotate || 0) + rotacionExtra) % 360;
-      const viewport = page.getViewport({ scale: escala * dpr, rotation: rotacion });
+      let viewport = page.getViewport({ scale: escala * dpr, rotation: rotacion });
+      // El tope de píxeles (ver MAX_PIXELES): se baja la resolución, no el tamaño.
+      const area = viewport.width * viewport.height;
+      if (area > tope) {
+        viewport = page.getViewport({ scale: escala * dpr * Math.sqrt(tope / area) * 0.999, rotation: rotacion });
+      }
       const ancho = Math.max(1, Math.floor(viewport.width));
       const alto = Math.max(1, Math.floor(viewport.height));
 
@@ -220,8 +270,62 @@ class Documento {
    */
   async lienzo(n, { escala = 1, rotacionExtra = 0, dpr = 1 } = {}) {
     const canvas = document.createElement('canvas');
-    await this.render(n, { canvas, escala, rotacionExtra, dpr }).promesa;
+    /* Sin tope: exportar a imágenes pide los píxeles que pide, y un A3 a
+       600 ppp se pasa del de pantalla. Ahí bajar la resolución sería mentir
+       en el archivo que sale. */
+    await this.render(n, { canvas, escala, rotacionExtra, dpr, tope: Infinity }).promesa;
     return canvas;
+  }
+
+  /** La miniatura de una página, si ya está hecha: la URL, o null. */
+  miniaturaLista(n) {
+    return this._miniaturas.get(n) || null;
+  }
+
+  /**
+   * La miniatura de una página como imagen, para el panel del lector.
+   *
+   * Se dibuja una vez por documento —sin el giro del lector: lo pone el CSS—,
+   * se pasa a un blob y queda como URL. Antes cada miniatura era un canvas de
+   * unos 390 KB que no se soltaba nunca, y no había caché: leer un tratado con
+   * el panel abierto juntaba cientos de MB y cada vuelta al lector las volvía
+   * a renderizar todas (lector-11). Una imagen fuera de pantalla, además,
+   * Chromium la puede descartar decodificada y volver a decodificar.
+   *
+   * Mismo contrato que render(): `promesa` (con la URL, o null si se canceló)
+   * y `cancelar()`. Quien la pide la cancela si deja de importarle: al
+   * cambiar de pestaña con miniaturas en vuelo, el bucle seguía pintando
+   * páginas del documento anterior (lector-29).
+   */
+  miniatura(n, { ancho = 132, dpr = 2 } = {}) {
+    let tarea = null;
+    let cancelado = false;
+    const promesa = (async () => {
+      if (this._miniaturas.has(n)) return this._miniaturas.get(n);
+      const g = await this.geometria(n);
+      if (cancelado || this._destruido) return null;
+      const canvas = document.createElement('canvas');
+      tarea = this.render(n, { canvas, escala: ancho / g.anchoPt, dpr });
+      const r = await tarea.promesa;
+      if (!r || cancelado || this._destruido) { canvas.width = 0; canvas.height = 0; return null; }
+      const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/webp', 0.9));
+      canvas.width = 0;
+      canvas.height = 0;
+      this.soltar(n);
+      if (!blob || this._destruido) return null;
+      // Otra pedida de la misma página pudo llegar primero: gana la que ya está.
+      if (this._miniaturas.has(n)) return this._miniaturas.get(n);
+      const url = URL.createObjectURL(blob);
+      this._miniaturas.set(n, url);
+      return url;
+    })();
+    return {
+      promesa,
+      cancelar() {
+        cancelado = true;
+        tarea?.cancelar();
+      },
+    };
   }
 
   /**
@@ -371,27 +475,56 @@ class Documento {
     };
   }
 
-  /** Marcadores del documento, aplanados con su nivel. */
-  async esquema() {
+  /**
+   * Marcadores del documento, aplanados con su nivel.
+   *
+   * La promesa queda guardada: el lector los pide recién al abrir la pestaña
+   * Marcadores (lector-24), y mientras llegan se puede ir y volver a esa
+   * pestaña varias veces. Sin esto, cada vuelta salía a resolverlos todos de
+   * nuevo al worker.
+   */
+  esquema() {
+    this._esquema ??= this._leerEsquema();
+    return this._esquema;
+  }
+
+  async _leerEsquema() {
     const crudo = await this._pdf.getOutline().catch(() => null);
     if (!crudo?.length) return [];
 
-    const salida = [];
-    const recorrer = async (nodos, nivel) => {
+    /* Primero se aplana el árbol, en orden, y después se resuelven los
+       destinos en tandas. Antes iban de a uno —una o dos idas y vueltas al
+       worker por marcador, en fila— y en un tratado con cientos de
+       marcadores eso se pagaba entero antes de mostrar el documento
+       (lector-24). El orden de salida es el del árbol igual. */
+    const planos = [];
+    const aplanar = (nodos, nivel) => {
       for (const nodo of nodos) {
-        let pagina = null;
-        try {
-          const destino = typeof nodo.dest === 'string'
-            ? await this._pdf.getDestination(nodo.dest)
-            : nodo.dest;
-          if (destino?.[0]) pagina = (await this._pdf.getPageIndex(destino[0])) + 1;
-        } catch { /* un destino roto no invalida el resto del esquema */ }
-        salida.push({ titulo: nodo.title, nivel, pagina });
-        if (nodo.items?.length) await recorrer(nodo.items, nivel + 1);
+        planos.push({ nodo, nivel });
+        if (nodo.items?.length) aplanar(nodo.items, nivel + 1);
       }
     };
-    await recorrer(crudo, 0);
-    return salida;
+    aplanar(crudo, 0);
+
+    const paginaDe = async (nodo) => {
+      try {
+        const destino = typeof nodo.dest === 'string'
+          ? await this._pdf.getDestination(nodo.dest)
+          : nodo.dest;
+        if (destino?.[0]) return (await this._pdf.getPageIndex(destino[0])) + 1;
+      } catch { /* un destino roto no invalida el resto del esquema */ }
+      return null;
+    };
+    /* En lotes de 32, como geometrias(): todos juntos, un tratado con miles
+       de marcadores le encolaba al worker miles de pedidos de una. Cada lote
+       sale en orden, así que el resultado sigue el orden del árbol. */
+    const paginas = [];
+    for (let desde = 0; desde < planos.length; desde += 32) {
+      const lote = planos.slice(desde, desde + 32);
+      paginas.push(...await Promise.all(lote.map(({ nodo }) => paginaDe(nodo))));
+      if (this._destruido) return [];
+    }
+    return planos.map(({ nodo, nivel }, i) => ({ titulo: nodo.title, nivel, pagina: paginas[i] }));
   }
 
   /** Título, autor, fechas. Lo que el PDF diga de sí mismo. */
@@ -410,10 +543,37 @@ class Documento {
   destruir() {
     if (this._destruido) return;
     this._destruido = true;
+    for (const url of this._miniaturas.values()) URL.revokeObjectURL(url);
+    this._miniaturas.clear();
     this._cachePaginas.clear();
     this._cacheGeometria.clear();
     this._pdf.destroy().catch(() => {});
   }
+}
+
+/* Quién pide la contraseña de un PDF protegido. Este archivo no sabe de
+   carteles: el lector se anota con un Modal (ver pedirClave en lector.js).
+   La función recibe { incorrecta, nombre } y devuelve la contraseña, o null
+   si el usuario se arrepiente. */
+let pedirClave = null;
+
+/** Anota quién pide la contraseña de los PDF protegidos. */
+export function alPedirClave(fn) {
+  pedirClave = fn;
+}
+
+/* Lo que pdf.js tira al abrir, dicho en castellano. Antes llegaba tal cual al
+   toast: «No password given», «Invalid PDF structure.» (ux-11). */
+function traducirError(err, { cancelada }) {
+  const nombre = err?.name || '';
+  let mensaje = null;
+  if (cancelada || nombre === 'PasswordException') mensaje = 'El PDF tiene contraseña y no se escribió la que lo abre.';
+  else if (nombre === 'InvalidPDFException') mensaje = 'El archivo está dañado o no es un PDF.';
+  else if (nombre === 'MissingPDFException') mensaje = 'No se encontró el archivo.';
+  if (!mensaje) return err;
+  const traducido = new Error(mensaje);
+  traducido.cause = err;
+  return traducido;
 }
 
 /**
@@ -437,8 +597,29 @@ export async function abrirDocumento(bytes, meta = {}) {
     isEvalSupported: false,
   });
 
-  const pdf = await tarea.promise;
-  return new Documento(pdf, { ...meta, bytes: origen });
+  /* Con contraseña de apertura, pdf.js pregunta acá (y vuelve a preguntar si
+     la que se le dio no sirve: motivo 2). Sin nadie que pregunte, o si el
+     usuario cancela, se le devuelve un error y la apertura falla con el
+     mensaje de traducirError(). Los PDF que solo tienen contraseña de
+     propietario (restricciones de imprimir o copiar) no pasan por acá. */
+  let cancelada = false;
+  let conClave = false;
+  tarea.onPassword = (responder, motivo) => {
+    conClave = true;
+    const no = () => { cancelada = true; responder(new Error('Se canceló la contraseña')); };
+    if (!pedirClave) { no(); return; }
+    Promise.resolve(pedirClave({ incorrecta: motivo === 2, nombre: meta.nombre || '' }))
+      .then((clave) => (clave == null ? no() : responder(String(clave))), no);
+  };
+
+  let pdf;
+  try {
+    pdf = await tarea.promise;
+  } catch (err) {
+    tarea.destroy().catch(() => {});
+    throw traducirError(err, { cancelada });
+  }
+  return new Documento(pdf, { ...meta, bytes: origen, conClave });
 }
 
 export { Documento };

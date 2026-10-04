@@ -80,6 +80,10 @@ async function armarCobayo() {
 
   escribir(pdf.addPage([595, 842]), [[60, 760, 'palabra final']]);
 
+  /* 5 · treinta renglones con «fila»: una lista de resultados más larga que el
+     panel, para ver que la fila actual se trae a la vista. */
+  escribir(pdf.addPage([595, 842]), Array.from({ length: 30 }, (_, i) => [60, 800 - i * 24, `fila ${i + 1} de la lista`]));
+
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'quire-buscar-'));
   const ruta = path.join(dir, 'cobayo-buscar.pdf');
   fs.writeFileSync(ruta, await pdf.save());
@@ -153,6 +157,15 @@ app.whenReady().then(async () => {
         const p = window.T.pliego(n);
         return p ? [...p.querySelectorAll('.qr-texto span')].map(window.T.caja) : [];
       },
+      /* Lo que se lee de lo que pasa por un relevo o por reconcile(): la
+         cuenta va por frase() y lo que sale queda en el DOM unos 150-350 ms
+         (en un calco, o absoluto con data-state=closing). Se lee lo vivo. */
+      cuenta() {
+        const el = document.getElementById('qr-buscar-cuenta');
+        return [...el.childNodes].filter((n) => !(n.nodeType === 1 && n.classList.contains('ox-swap-out')))
+          .map((n) => n.textContent).join('').trim();
+      },
+      filas: () => [...document.querySelectorAll('#qr-buscar-lista > .qr-hit:not([data-state=closing])')],
     };
     return true;
   })()`);
@@ -211,10 +224,10 @@ app.whenReady().then(async () => {
   await esperar(900);
 
   const buscada = await js(`(() => ({
-    filas: document.querySelectorAll('.qr-hit').length,
-    cuenta: document.getElementById('qr-buscar-cuenta').textContent,
-    paginas: [...document.querySelectorAll('.qr-hit__pag')].map((e) => +e.textContent),
-    marcadas: [...document.querySelectorAll('.qr-hit mark')].map((e) => e.textContent),
+    filas: window.T.filas().length,
+    cuenta: window.T.cuenta(),
+    paginas: window.T.filas().map((f) => f.querySelector('.qr-hit__pag')).map((e) => +e.textContent),
+    marcadas: window.T.filas().map((f) => f.querySelector('mark')).map((e) => e.textContent),
   }))()`);
 
   ok('encuentra las cuatro', buscada.filas === 4, `(${buscada.filas})`);
@@ -256,7 +269,7 @@ app.whenReady().then(async () => {
   /* La que cruza el renglón tiene que pintarse en DOS pedazos, uno por línea. */
   await js(`window.T.tipear('estado del')`);
   await esperar(900);
-  const cruzada = await js(`({ marcas: window.T.marcas(1), filas: document.querySelectorAll('.qr-hit').length })`);
+  const cruzada = await js(`({ marcas: window.T.marcas(1), filas: window.T.filas().length })`);
   ok('la coincidencia que cruza el renglón se encuentra', cruzada.filas === 1, `(${cruzada.filas} filas)`);
   ok('y se pinta en dos pedazos, uno por renglón', cruzada.marcas.length === 2,
     `(${cruzada.marcas.length})`);
@@ -266,11 +279,11 @@ app.whenReady().then(async () => {
   await js(`window.T.tipear('compensación')`);
   await esperar(900);
   ok('la palabra partida con guion se encuentra escribiéndola entera',
-    await js(`document.querySelectorAll('.qr-hit').length`) === 1);
+    await js(`window.T.filas().length`) === 1);
   await js(`window.T.tipear('compensacion')`);
   await esperar(900);
   ok('y también sin la tilde',
-    await js(`document.querySelectorAll('.qr-hit').length`) === 1);
+    await js(`window.T.filas().length`) === 1);
 
   /* ── 4 · Navegar ─────────────────────────────────────────────────────── */
   console.log('\n4. Navegar entre resultados');
@@ -281,8 +294,8 @@ app.whenReady().then(async () => {
   await esperar(700);
 
   const primera = await js(`(() => ({
-    cuenta: document.getElementById('qr-buscar-cuenta').textContent,
-    fila: document.querySelector('.qr-hit.is-actual')?.dataset.i,
+    cuenta: window.T.cuenta(),
+    fila: window.T.filas().find((f) => f.classList.contains('is-actual'))?.dataset.i,
     pagina: document.getElementById('qr-pagina-input').value,
     vivas: document.querySelectorAll('.qr-marca.is-actual').length,
   }))()`);
@@ -297,7 +310,7 @@ app.whenReady().then(async () => {
     const m = viva?.getBoundingClientRect();
     const v = document.getElementById('qr-visor').getBoundingClientRect();
     return {
-      cuenta: document.getElementById('qr-buscar-cuenta').textContent,
+      cuenta: window.T.cuenta(),
       marca: m && { y: Math.round(m.top), alto: Math.round(m.height) },
       aLaVista: !!m && m.top >= v.top && m.bottom <= v.bottom,
       vivasEn2: document.querySelectorAll('.qr-pliego[data-pagina="2"] .qr-marca.is-actual').length,
@@ -320,7 +333,7 @@ app.whenReady().then(async () => {
   await js(`(() => { const b = document.getElementById('qr-buscar-prev'); b.click(); b.click(); })()`);
   await esperar(900);
   ok('desde la primera, anterior da la vuelta al final',
-    (await js(`document.getElementById('qr-buscar-cuenta').textContent`)).startsWith('4 de'));
+    (await js(`window.T.cuenta()`)).startsWith('4 de'));
 
   /* ── 5 · Nada que encontrar ──────────────────────────────────────────── */
   console.log('\n5. Cuando no hay nada');
@@ -328,10 +341,10 @@ app.whenReady().then(async () => {
   await js(`window.T.tipear('zutano')`);
   await esperar(1000);
   const sin = await js(`(() => ({
-    filas: document.querySelectorAll('.qr-hit').length,
+    filas: window.T.filas().length,
     dice: document.querySelector('.qr-panel__vacio .ox-meta')?.textContent || '',
     marcas: document.querySelectorAll('.qr-marca').length,
-    cuenta: document.getElementById('qr-buscar-cuenta').textContent,
+    cuenta: window.T.cuenta(),
   }))()`);
   ok('no lista nada', sin.filas === 0);
   ok('lo dice con todas las letras', /Sin coincidencias/.test(sin.dice), `("${sin.dice}")`);
@@ -425,6 +438,68 @@ app.whenReady().then(async () => {
   })()`);
   await esperar(1500);
   ok('al volver, se vuelven a pintar', await js(`window.T.marcas(1).length`) === 1);
+
+  /* ── 9 · Lo que se pone al día sin rehacerse ─────────────────────────── */
+  console.log('\n9. Las marcas y la lista se ponen al día, no se rehacen');
+
+  await js(`window.T.tipear('palabra')`);
+  await esperar(900);
+  /* lector-05, css-11: pasar de una coincidencia a la otra de la misma hoja
+     mueve is-actual sobre las MISMAS marcas, sin rehacerlas. */
+  const marcasEnter = await js(`(async () => {
+    const { irA } = await import('./js/views/lector.js');
+    irA(2, { suave: false });
+    await new Promise((r) => setTimeout(r, 900));
+    const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+    const antes = [...window.T.pliego(2).querySelectorAll('.qr-marca')];
+    document.getElementById('qr-buscar-next').click();
+    await esperar(700);
+    const medio = [...window.T.pliego(2).querySelectorAll('.qr-marca')];
+    const vivaMedio = medio.findIndex((m) => m.classList.contains('is-actual'));
+    document.getElementById('qr-buscar-next').click();
+    await esperar(700);
+    const despues = [...window.T.pliego(2).querySelectorAll('.qr-marca')];
+    const vivaDespues = despues.findIndex((m) => m.classList.contains('is-actual'));
+    return {
+      n: antes.length,
+      mismas: antes.length > 1 && antes.every((m, i) => m === medio[i] && m === despues[i]),
+      vivaMedio, vivaDespues,
+      transicion: getComputedStyle(antes[0]).transitionProperty,
+    };
+  })()`);
+  ok('Enter mueve el foco entre las mismas marcas, sin rehacerlas (lector-05)', marcasEnter.mismas, JSON.stringify(marcasEnter));
+  ok('y la marca viva pasa de una a la otra', marcasEnter.vivaMedio >= 0 && marcasEnter.vivaDespues >= 0 && marcasEnter.vivaMedio !== marcasEnter.vivaDespues, JSON.stringify(marcasEnter));
+  ok('con transición de color (css-11)', /background-color/.test(marcasEnter.transicion), marcasEnter.transicion);
+
+  /* lector-08: buscar de nuevo lo mismo deja las MISMAS filas. */
+  const filasMismas = await js(`(async () => {
+    const antes = window.T.filas();
+    window.T.tipear('palabr');
+    await new Promise((r) => setTimeout(r, 700));
+    window.T.tipear('palabra');
+    await new Promise((r) => setTimeout(r, 900));
+    const despues = window.T.filas();
+    return { n: antes.length, mismas: antes.length > 0 && antes.length === despues.length && antes.every((f, i) => f === despues[i]) };
+  })()`);
+  ok('volver a buscar deja las mismas filas, no las rehace (lector-08)', filasMismas.mismas, JSON.stringify(filasMismas));
+
+  /* lector-09: retrocediendo con Shift+Enter, la fila actual queda a la vista. */
+  await js(`window.T.tipear('fila')`);
+  await esperar(1000);
+  const enLista = await js(`(async () => {
+    const campo = document.getElementById('qr-buscar-campo');
+    const enter = (shift) => campo.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: shift, bubbles: true }));
+    document.getElementById('qr-buscar-prev').click();      // desde la primera: la última
+    await new Promise((r) => setTimeout(r, 600));
+    for (let i = 0; i < 12; i++) { enter(true); await new Promise((r) => setTimeout(r, 120)); }
+    await new Promise((r) => setTimeout(r, 700));
+    const lista = document.getElementById('qr-buscar-lista');
+    const fila = window.T.filas().find((f) => f.classList.contains('is-actual'));
+    const l = lista.getBoundingClientRect(); const r = fila?.getBoundingClientRect();
+    return { total: window.T.filas().length, i: fila?.dataset.i, adentro: !!r && r.top >= l.top - 1 && r.bottom <= l.bottom + 1, scroll: lista.scrollTop, fila: r && { top: Math.round(r.top), bottom: Math.round(r.bottom) }, lista: { top: Math.round(l.top), bottom: Math.round(l.bottom) } };
+  })()`);
+  ok('hay más resultados de los que entran en la lista', enLista.total === 30, JSON.stringify(enLista));
+  ok('después de Shift+Enter, la fila actual está dentro de la lista (lector-09)', enLista.adentro, JSON.stringify(enLista));
 
   console.log(`\n----- errores de consola: ${errores.length} -----`);
   for (const e of errores.slice(0, 6)) console.log('   ', e);

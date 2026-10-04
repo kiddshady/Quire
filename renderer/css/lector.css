@@ -147,7 +147,7 @@
      sobra. Como el texto va centrado, el padding lateral no se ve — lo único
      que hace es decidir a partir de qué ancho la palabra se recorta. */
   padding: var(--ox-2) var(--ox-1);
-  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  border-radius: var(--ox-r-sm);
   font-size: var(--ox-fs-11);
   font-weight: var(--ox-w-medium);
   color: var(--ox-text-3);
@@ -169,6 +169,12 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--ox-3);
+  /* Que sea el offsetParent de sus filas. Sin esto lo era .qr-panel (el
+     absoluto de arriba), y el offsetTop de una miniatura o de un resultado
+     venía inflado con lo que hay encima del scroller —las pestañas, y en
+     Buscar el campo y su barra—: la fila actual se creía visible estando
+     135 px por encima del borde y el centrado quedaba corrido (lector-09). */
+  position: relative;
 }
 
 .qr-panel__vacio {
@@ -183,6 +189,11 @@
 
 .qr-panel__vacio svg { width: 22px; height: 22px; }
 
+/* El calco del fundido del panel (ponerPanel en lector.js) vive adentro del
+   cuerpo, que scrollea: recorta lo suyo y conserva su scroll, así lo que se va
+   se ve donde estaba y no estira el área de scroll de lo nuevo. */
+.qr-panel__cuerpo > .ox-swap-out--over { overflow: hidden; }
+
 /* ── Miniaturas ──────────────────────────────────────────────────────────── */
 
 .qr-mini {
@@ -195,7 +206,7 @@
   margin-bottom: var(--ox-2);
   background: transparent;
   border: 0;
-  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  border-radius: var(--ox-r-sm);
   cursor: pointer;
   transition: var(--tr-color);
 }
@@ -205,6 +216,8 @@
 
 .qr-mini__hoja {
   display: block;
+  /* El ancla de la imagen girada (ver estiloGiro en lector.js). */
+  position: relative;
   width: 100%;
   background: var(--ox-sunken);
   border-radius: 2px;
@@ -217,13 +230,19 @@
 
 .qr-mini:hover .qr-mini__hoja { box-shadow: var(--ox-e2); }
 
+/* La miniatura es una imagen (ver Documento.miniatura). Entra con un fundido
+   solo la que llega mientras se mira (.is-entrando); la que ya estaba en la
+   caché nace en el HTML, entera y quieta (lector-11). Y sin `opacity: 0` ni
+   fill: si la animación no corre, la imagen se ve igual, en vez de quedar
+   invisible para siempre (css-26). */
 .qr-mini__lienzo {
   display: block;
   width: 100%;
   height: auto;
-  opacity: 0;
-  animation: qr-aparecer var(--ox-t-3) var(--ox-ease) forwards;
+  max-width: none;
+  user-select: none;
 }
+.qr-mini__lienzo.is-entrando { animation: ox-fade-in var(--ox-t-3) var(--ox-ease); }
 
 .qr-mini__num {
   font-size: var(--ox-fs-10);
@@ -246,7 +265,7 @@
   text-align: left;
   padding: var(--ox-2);
   /* El nivel se ve en la sangría, no en un ícono de árbol. */
-  padding-left: calc(var(--ox-2) + var(--nivel, 0) * 12px);
+  padding-left: calc(var(--ox-2) + var(--nivel, 0) * var(--ox-3));
   background: transparent;
   border: 0;
   border-radius: var(--ox-r-xs);
@@ -257,9 +276,13 @@
 }
 
 .qr-esquema__item:hover:not(:disabled) { background: var(--ox-wash-1); color: var(--ox-text); }
+/* El capítulo en el que estás (marcarEsquema, lector-38): el mismo encendido
+   que la miniatura actual. */
+.qr-esquema__item.is-actual { background: var(--ox-wash-2); color: var(--ox-text); }
 .qr-esquema__item:disabled { color: var(--ox-text-4); cursor: default; }
 .qr-esquema__titulo { flex: 1; min-width: 0; }
-.qr-esquema__pag { font-size: var(--ox-fs-10); color: var(--ox-text-4); }
+.qr-esquema__pag { font-size: var(--ox-fs-10); color: var(--ox-text-4); transition: var(--tr-color); }
+.qr-esquema__item.is-actual .qr-esquema__pag { color: var(--ox-text-3); }
 
 /* ── El visor ────────────────────────────────────────────────────────────── */
 
@@ -311,6 +334,9 @@
 .qr-buscar__lista {
   flex: 1 1 auto;
   min-height: 0;
+  /* El offsetParent de las filas (ver .qr-panel__cuerpo), y el ancla de las
+     que reconcile() deja saliendo en absoluto. */
+  position: relative;
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--ox-2) var(--ox-3) var(--ox-3);
@@ -380,6 +406,9 @@
   font-size: var(--ox-fs-10);
   color: var(--ox-text-4);
   font-variant-numeric: tabular-nums;
+  /* Cambia con el hover y con is-actual, igual que su fila: sin transición
+     la fila se fundía y el número saltaba (css-22). */
+  transition: var(--tr-color);
 }
 .qr-hit:hover .qr-hit__pag,
 .qr-hit.is-actual .qr-hit__pag { color: var(--ox-text-3); }
@@ -478,6 +507,28 @@
   inset: 0;
   box-shadow: inset 0 0 0 1px var(--ox-danger-dim);
 }
+
+/* La hoja que no se pudo dibujar lo dice y ofrece reintentar (ux-22). Va
+   encima de todo lo de la hoja, tinta incluida: es lo único que hay para
+   tocar en una página en blanco. Sobre el papel, así que en grises oscuros
+   y el ícono en el rojo de las fallas. */
+.qr-pliego__falla {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ox-3);
+  padding: var(--ox-6);
+  text-align: center;
+  color: rgb(0 0 0 / .62);
+  user-select: none;
+  animation: ox-fade-in var(--ox-t-2) var(--ox-ease-soft);
+}
+.qr-pliego__falla > svg { width: 22px; height: 22px; color: var(--ox-danger); }
+.qr-pliego__falla[data-state='closing'] { animation: ox-desvanecer var(--ox-t-1) var(--ox-ease-both) both; }
 
 /* ── La capa de texto ────────────────────────────────────────────────────────
    Un span TRANSPARENTE por cada fragmento de texto del PDF, posicionado justo
@@ -644,6 +695,10 @@
      que hay atrás de la hoja. */
   mix-blend-mode: multiply;
   animation: qr-marca-entra var(--ox-t-2) var(--ox-ease-soft) both;
+  /* Pasar de una coincidencia a otra mueve is-actual sobre las MISMAS marcas
+     (ver marcarPagina): la anterior baja a amarillo suave y la nueva sube,
+     en vez de saltar (lector-05, css-11). */
+  transition: background-color var(--ox-t-1) var(--ox-ease-soft), box-shadow var(--ox-t-1) var(--ox-ease-soft);
 }
 
 /* La coincidencia en la que estás. El borde no es decoración: con veinte
@@ -670,7 +725,14 @@
   width: 100%;
   height: 100%;
   pointer-events: none;
+  transition: opacity var(--ox-t-2) var(--ox-ease-soft);
 }
+
+/* Girando (ver girar en lector.js): la tinta y las marcas se apagan junto con
+   la hoja, y recién apagadas cambia la geometría. Ningún cuadro muestra la
+   hoja vieja recortada ni aplastada en la forma nueva (lector-07). */
+.qr-visor.is-girando .qr-tinta,
+.qr-visor.is-girando .qr-marcas { opacity: 0; }
 
 .qr-visor.is-anotando .qr-tinta {
   pointer-events: auto;
@@ -805,6 +867,10 @@
   display: flex;
   align-items: center;
   gap: var(--ox-3);
+  /* El pliegue de los colores (ox-plegable--ancho) se come el gap de la
+     fila mientras se cierra: sin decirle cuánto, el resto saltaba ese hueco
+     justo al final. */
+  --ox-plegable-gap: var(--ox-3);
   padding: var(--ox-2) var(--ox-4);
   background: var(--ox-s2);
   box-shadow: inset 0 -1px 0 var(--ox-line);
@@ -821,11 +887,37 @@
   gap: var(--ox-2);
 }
 
-/* El botón de la herramienta activa queda encendido, igual que el de anotar. */
-.ox-iconbtn.is-on {
+/* El botón de la herramienta activa queda encendido, igual que el de anotar.
+   Con clase propia: escrito sobre .ox-iconbtn era un estado de la app sobre
+   una clase del framework, y un Onyx nuevo con su propio .is-on chocaría
+   (css-25). */
+.qr-tool.is-on {
   background: var(--ox-wash-2);
   color: var(--ox-text);
   box-shadow: inset 0 0 0 1px var(--ox-ring);
+}
+
+/* Los colores y su divisor, en un solo pliegue a lo ancho (ver
+   armarBarraTinta): con el borrador se cierran y lo de la derecha los
+   acompaña, en vez de saltar 170 px de un cuadro al otro (lector-12). */
+.qr-colores-pliegue {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-3);
+  /* El pliegue recorta (overflow: clip, es lo que lo deja cerrarse), y el
+     anillo del color elegido sale 3 px por fuera del botón, el de foco 3,5:
+     los dos quedaban cortados arriba, abajo y en el primer color. Se les da
+     aire adentro y el margen negativo lo devuelve, así la fila no se mueve.
+     A la derecha no hace falta: el último es el divisor. */
+  padding: var(--ox-1) 0 var(--ox-1) var(--ox-1);
+  margin: calc(-1 * var(--ox-1)) 0 calc(-1 * var(--ox-1)) calc(-1 * var(--ox-1));
+}
+/* Plegado, el relleno de la izquierda se va (lo saca .ox-plegable--ancho) y
+   su margen tiene que irse con él, en la misma transición: si no, cerrado le
+   come 4 px de más a la fila y lo de la derecha queda corrido. */
+.qr-colores-pliegue[hidden] { margin-inline-start: 0; }
+@starting-style {
+  .qr-colores-pliegue:not([hidden]) { margin-inline-start: 0; }
 }
 
 .qr-colores { gap: var(--ox-1); }
@@ -840,14 +932,14 @@
   cursor: pointer;
   /* Hairline propio: sobre el fondo oscuro, una tinta oscura necesita borde
      para no desaparecer. Va como inset para no crecer al seleccionarse. */
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16);
+  box-shadow: inset 0 0 0 1px var(--ox-line-3);
   transition: transform var(--ox-t-2) var(--ox-ease), box-shadow var(--ox-t-2) var(--ox-ease);
 }
 
 .qr-color:hover { transform: scale(1.12); }
 
 .qr-color.is-on {
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .3),
+  box-shadow: inset 0 0 0 1px var(--ox-line-3),
               0 0 0 2px var(--ox-bg),
               0 0 0 3px var(--ox-accent);
 }
@@ -882,3 +974,12 @@
 .qr-pliego:hover .qr-pliego__num { opacity: 1; }
 
 @keyframes qr-aparecer { to { opacity: 1; } }
+
+/* «Abriendo…»: lo que dice el lector mientras se abre el primer documento,
+   en vez del vacío con su botón de abrir (shell-05). */
+.qr-abriendo { display: grid; place-items: center; }
+.qr-abriendo .ox-empty > svg { width: 22px; height: 22px; }
+
+/* El cartel de la contraseña (pedirClave, ux-11). */
+.qr-clave { display: flex; flex-direction: column; gap: var(--ox-2); }
+.qr-clave__error { color: var(--ox-danger); }

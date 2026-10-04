@@ -18,12 +18,21 @@ import { Icons } from '../icons.js';
 import { Toast, Menu, Modal } from '../overlays.js';
 import Router from '../router.js';
 import { paint, head, empty, esc } from '../ui.js';
-import { raf2 } from '../motion.js';
+import { exit, swap, frase, valor, reconcile, deslizarAncho, asentarPlegables } from '../motion.js';
+import { fmtDec } from '../format.js';
 import { HERRAMIENTAS, COLORES } from '../tinta/capa.js';
 import { cablearTinta } from '../tinta/editor.js';
 import { montarPuck } from '../puck.js';
 import { registrar as registrarSeleccion, olvidar as olvidarSeleccion, olvidarTodo as olvidarSelecciones } from '../pdf/seleccion.js';
 import { buscadorDe, ubicar } from '../pdf/buscador.js';
+import { alPedirClave } from '../pdf/documento.js';
+
+/* Los tokens de motion.css que se usan desde acá (t-2, t-3 y la curva de
+   entrada): el giro espera a que la hoja termine de apagarse y el pliegue del
+   panel acompaña al cajón con su misma duración y curva. */
+const T2 = 180;
+const T3 = 280;
+const EASE = 'cubic-bezier(.16, 1, .3, 1)';
 
 /* Cuánto se pinta fuera de la ventana, en pantallas. Con 0.6 el scroll rápido
    alcanza a mostrar el hueco; con 2 se pinta de más y en documentos pesados se
@@ -69,6 +78,20 @@ const V = {
   actual: -1,              // índice en buscador.resultados, o -1 si ninguno
   pendiente: null,         // página cuyo resultado hay que centrar cuando monte
   divsTexto: new Map(),    // nº de página → los spans de su capa de texto
+
+  raiz: null,              // .qr-lector del montaje de ahora
+  destino: null,           // la página a la que va un irA() suave, hasta que llegue
+  relojDestino: 0,
+  fija: null,              // { n, st }: una hoja que irA() no pudo subir al tope (ver irA)
+  observadorMini: null,    // las miniaturas que faltan pintar (ver vigilarMiniaturas)
+  tareasMini: new Set(),   // las miniaturas en vuelo, para cancelarlas
+  genMini: 0,              // sube cada vez que el panel cambia: corta el bucle viejo
+  rueda: null,             // el zoom de Ctrl+rueda en curso (ver zoomRueda)
+  relojRueda: 0,
+  giro: null,              // un giro apagando lo pintado (ver girar)
+  pliegue: null,           // el FLIP del panel que se pliega (ver alternarPanel)
+  estirado: false,         // la pista estirada mientras cambia el tamaño (ver vigilarTamano)
+  reescalados: 0,          // cuántos reescalar() hubo: lo cuentan las pruebas
 };
 
 /** La herramienta activa, ya resuelta con su color y grosor. */
@@ -147,9 +170,31 @@ function pintar(contenedor) {
       // Cancelar un render es normal al hacer scroll: no es un error a mostrar.
       if (err?.name === 'RenderingCancelledException') return;
       console.error(`[lector] página ${n}:`, err);
-      contenedor.classList.add('is-fallida');
+      marcarFallida(contenedor);
     })
-    .finally(() => V.renders.delete(n));
+    .finally(() => { if (V.renders.get(n) === tarea) V.renders.delete(n); });
+}
+
+/* Una hoja que pdf.js no pudo dibujar lo dice, y ofrece volver a probar.
+   Antes quedaba en blanco con un hairline rojo casi invisible: no se sabía si
+   estaba cargando, rota o si era así (ux-22). */
+function marcarFallida(contenedor) {
+  contenedor.classList.add('is-fallida');
+  if (contenedor.querySelector(':scope > .qr-pliego__falla:not([data-state])')) return;
+  const aviso = document.createElement('div');
+  aviso.className = 'qr-pliego__falla';
+  aviso.innerHTML = `${Icons.svg('alert')}
+    <span class="ox-meta">No se pudo dibujar esta página.</span>
+    <button class="ox-btn ox-btn--secondary ox-btn--sm" data-reintentar>${Icons.svg('retry')} Reintentar</button>`;
+  contenedor.append(aviso);
+}
+
+/** Saca el aviso de falla (con su salida si se ve) y la marca. */
+function quitarFallida(contenedor, { animar = true } = {}) {
+  contenedor.classList.remove('is-fallida');
+  for (const aviso of contenedor.querySelectorAll(':scope > .qr-pliego__falla')) {
+    if (animar) exit(aviso, { fallback: 200 }); else aviso.remove();
+  }
 }
 
 /**
@@ -246,6 +291,27 @@ async function montarTinta(contenedor, n) {
 
 function liberar(contenedor) {
   const n = Number(contenedor.dataset.pagina);
+  /* Un salto a un resultado que esperaba que esta página montara su texto ya
+     no tiene sentido si la página se fue: sin esto, minutos después, al volver
+     a pasar por ella, la vista se iba sola al resultado (lector-34). */
+  if (V.pendiente === n) V.pendiente = null;
+
+  /* Nada que soltar, nada que hacer. Cada IntersectionObserver nuevo (al
+     construir y en cada reescalado) avisa una vez por pliego, y los que no se
+     ven llegan acá: en un libro de 1265 páginas eran más de mil vueltas de
+     querySelector, replaceChildren y canvas a 0 por cada paso de zoom, sobre
+     hojas que nunca se habían pintado (lector-35).
+     El bitmap se mira aparte, por su ancho, y no por is-pintada: girar() le
+     saca la clase a todas las hojas para apagarlas, y en un escaneo (sin capa
+     de texto que delate a la hoja) las que quedaban fuera de vista después del
+     giro se quedaban con su bitmap para siempre. */
+  const texto = contenedor.querySelector('.qr-texto');
+  const marcas = contenedor.querySelector('.qr-marcas');
+  const conBitmap = [...contenedor.querySelectorAll('canvas')].some((c) => c.width);
+  if (!contenedor.classList.contains('is-pintada') && !contenedor.classList.contains('is-fallida')
+      && !V.renders.has(n) && !V.textos.has(n) && !V.editores.has(n)
+      && !conBitmap && !texto?.firstChild && !marcas?.firstChild) return;
+
   V.renders.get(n)?.cancelar();
   V.renders.delete(n);
   V.pintadas.delete(n);
@@ -254,18 +320,26 @@ function liberar(contenedor) {
   V.textos.get(n)?.cancelar();
   V.textos.delete(n);
   contenedor.classList.remove('is-pintada');
+  /* La falla también se va: si al volver la página se pinta bien, quedaba
+     dibujada y con el borde rojo encima (ux-22). Fuera de pantalla, sin salida. */
+  quitarFallida(contenedor, { animar: false });
+  /* Lo que pdf.js guarda de la página (las imágenes decodificadas y la lista
+     de operadores) se suelta también: el PDFPageProxy queda cacheado para
+     siempre, y sin esto cada hoja que pasaba por pantalla se quedaba con lo
+     suyo en memoria aunque se soltara el canvas (lector-06). Va DESPUÉS de
+     cancelar: con un render en curso, pdf.js deja la limpieza para cuando
+     termine. */
+  S.doc?.soltar?.(n);
 
   /* Los spans se van con la página. Vaciar el div a mano y no dejar que el
      próximo render lo pise: mientras la página está fuera de pantalla, miles de
      spans invisibles siguen siendo miles de nodos en el árbol. */
-  const texto = contenedor.querySelector('.qr-texto');
   if (texto) { olvidarSeleccion(texto); texto.replaceChildren(); }
 
   /* Las marcas de la búsqueda se van con los spans sobre los que estaban
      medidas: sin esto quedarían pintadas sobre una capa vacía, y al volver la
      página se sumarían a las nuevas. */
   V.divsTexto.delete(n);
-  const marcas = contenedor.querySelector('.qr-marcas');
   if (marcas) {
     /* Se apaga ADEMÁS de vaciarse. Vaciar y dejarla prendida deja una capa
        visible sin nada adentro, y esa combinación es un agujero: remarcarTodo()
@@ -273,6 +347,8 @@ function liberar(contenedor) {
        vuelve a tocar nadie y se queda prendida para siempre. */
     marcas.classList.remove('is-visible');
     marcas.replaceChildren();
+    marcas.style.transform = '';
+    marcasPintadas.delete(marcas);
   }
 
   // Poner width en 0 libera el bitmap. Sin esto los canvas siguen ocupando su
@@ -302,17 +378,35 @@ function construirPaginas() {
   const escala = escalaActual();
   V.escalaHecha = escala;
   const pista = V.visor.querySelector('.qr-pista');
+  /* Los canvas nacen en 0×0 y no en los 300×150 de fábrica: así «tiene
+     bitmap» se lee de su ancho (ver liberar), y una hoja que todavía no se
+     pintó no reserva nada. */
   pista.innerHTML = S.geometrias.map((g) => {
     const { ancho, alto } = medida(g, escala);
     return `
       <div class="qr-pliego" data-pagina="${g.numero}" style="width:${ancho}px;height:${alto}px">
-        <canvas class="qr-hoja"></canvas>
+        <canvas class="qr-hoja" width="0" height="0"></canvas>
         <div class="qr-marcas"></div>
         <div class="qr-texto"></div>
-        <canvas class="qr-tinta"></canvas>
+        <canvas class="qr-tinta" width="0" height="0"></canvas>
         <span class="qr-pliego__num">${g.numero}</span>
       </div>`;
   }).join('');
+
+  /* La escala de recién se midió con la pista VACÍA, sin la barra de scroll
+     que aparece apenas entran las hojas: en ancho las hojas salían unos
+     píxeles más anchas, y el ResizeObserver reescalaba al cuadro siguiente
+     (y corría lo que se acababa de devolver con devolverLugar). Medida de
+     nuevo con las hojas puestas, en la misma tarea, no la ve nadie. */
+  const ahora = escalaActual();
+  if (Math.abs(ahora - escala) > 1e-4) {
+    V.escalaHecha = ahora;
+    for (const el of pista.children) {
+      const { ancho, alto } = medida(S.geometrias[Number(el.dataset.pagina) - 1], ahora);
+      el.style.width = `${ancho}px`;
+      el.style.height = `${alto}px`;
+    }
+  }
 
   V.observador = new IntersectionObserver((entradas) => {
     for (const e of entradas) {
@@ -327,11 +421,54 @@ function construirPaginas() {
   pista.querySelectorAll('.qr-pliego').forEach((el) => V.observador.observe(el));
 }
 
-/** Recalcula tamaños sin desarmar el DOM, y vuelve a pintar lo que se ve. */
-function reescalar({ anclarEn = null } = {}) {
-  if (!V.visor || !S.doc) return;
+/* ── El ancla: qué punto del papel tiene que quedar dónde ────────────────────
+   Cambiar la escala por cualquier camino (Ctrl+rueda, los botones, el menú,
+   ajustar, el ResizeObserver) mandaba al tope de la página: reescalar()
+   terminaba en irA() y la posición dentro de la hoja se perdía (lector-03).
+   Ahora se fotografía qué punto del papel hay bajo un punto del visor —el
+   puntero para la rueda, el centro para todo lo demás— y después de cambiar
+   los tamaños se corrige el scroll para que ese punto siga ahí. Es la cuenta
+   que ya hacía asentarZoom() para el puck, sacada para que la usen todos.
 
-  const ancla = anclarEn ?? S.pagina;
+   Por rectángulos y no por offsetTop: así vale también con la pista escalada
+   en vivo (el puck, la rueda, el estirado del resize), que es lo que se ve. */
+function fotoAncla(x, y) {
+  if (!V.visor) return null;
+  const vr = V.visor.getBoundingClientRect();
+  let ancla = null;
+  for (const el of V.visor.querySelectorAll('.qr-pliego')) {
+    const r = el.getBoundingClientRect();
+    const top = r.top - vr.top;
+    if (ancla && y < top) break;
+    ancla = { el, x, y, fx: (x - (r.left - vr.left)) / r.width, fy: (y - top) / r.height };
+  }
+  return ancla;
+}
+
+const anclaCentro = () => (V.visor ? fotoAncla(V.visor.clientWidth / 2, V.visor.clientHeight / 2) : null);
+
+/** Corre el scroll para que el punto del papel de `ancla` vuelva a caer donde estaba. */
+function ponerAncla(ancla) {
+  if (!ancla?.el?.isConnected || !V.visor) return;
+  const vr = V.visor.getBoundingClientRect();
+  const r = ancla.el.getBoundingClientRect();
+  V.visor.scrollTop += (r.top - vr.top) + ancla.fy * r.height - ancla.y;
+  V.visor.scrollLeft += (r.left - vr.left) + ancla.fx * r.width - ancla.x;
+}
+
+/**
+ * Recalcula tamaños sin desarmar el DOM, y vuelve a pintar lo que se ve.
+ *
+ * `ancla` es el punto del papel que tiene que quedar quieto (de fotoAncla());
+ * sin pasarla, el del centro del visor. Con `null`, no se toca el scroll.
+ */
+function reescalar({ ancla } = {}) {
+  if (!V.visor || !S.doc) return;
+  V.reescalados += 1;
+  // Con otra escala, el scroll donde irA() dejó una hoja fija ya es otro lugar.
+  V.fija = null;
+
+  const punto = ancla === undefined ? anclaCentro() : ancla;
   const escala = escalaActual();
   V.escalaHecha = escala;
 
@@ -360,8 +497,20 @@ function reescalar({ anclarEn = null } = {}) {
     const { ancho, alto } = medida(g, escala);
     el.style.width = `${ancho}px`;
     el.style.height = `${alto}px`;
-    el.classList.remove('is-fallida');
-    // is-pintada se MANTIENE: el canvas sigue teniendo la imagen anterior.
+    if (el.classList.contains('is-fallida')) quitarFallida(el);
+    // is-pintada se MANTIENE: el canvas sigue teniendo la imagen anterior, y
+    // la hoja (100 % del pliego, ver render()) se estira con él desde ya.
+    /* Las marcas de la búsqueda están en px de la escala vieja y no se
+       vuelven a medir hasta que la capa de texto nueva monte: sin esto
+       quedaban sobre otras palabras entre 100 y 500 ms y después saltaban.
+       Se estiran con la hoja, y marcarPagina() saca el estirado al volver a
+       medirlas (lector-04). */
+    const capa = el.querySelector('.qr-marcas');
+    const memo = capa && marcasPintadas.get(capa);
+    if (memo && capa.firstChild) {
+      capa.style.transformOrigin = '0 0';
+      capa.style.transform = `scale(${escala / memo.escala})`;
+    }
   });
 
   V.observador = new IntersectionObserver((entradas) => {
@@ -373,112 +522,330 @@ function reescalar({ anclarEn = null } = {}) {
 
   V.visor.querySelectorAll('.qr-pliego').forEach((el) => V.observador.observe(el));
 
-  // Volver a donde estabas: cambiar el zoom no debería perderte de página.
-  irA(ancla, { suave: false });
+  // El mismo punto del papel donde estaba (ver fotoAncla). Antes: el tope de la página.
+  if (punto) ponerAncla(punto);
   actualizarBarra();
 }
 
+/* Dónde arranca una hoja dentro del área de scroll del visor. El offsetParent
+   de un pliego es el cuerpo del lector y no el visor, así que se descuenta lo
+   que el visor tenga por encima dentro del cuerpo (hoy 0, pero no se apuesta). */
+const topeDe = (el) => el.offsetTop - V.visor.offsetTop;
+
 function irA(n, { suave = true } = {}) {
-  const destino = V.visor?.querySelector(`.qr-pliego[data-pagina="${n}"]`);
+  const visor = V.visor;
+  const destino = visor?.querySelector(`.qr-pliego[data-pagina="${n}"]`);
   if (!destino) return;
-  V.visor.scrollTo({ top: destino.offsetTop - 24, behavior: suave ? 'smooth' : 'auto' });
+  const deseado = topeDe(destino) - 24;
+  /* El top se acota a lo que el scroll puede dar. Las últimas hojas no
+     llegan al borde de arriba (a 25 % entran varias en el último visor), y
+     comparar contra el top sin acotar fijaba un destino hacia un lugar al que
+     el scroll no iba a ir nunca. */
+  const top = Math.min(Math.max(0, visor.scrollHeight - visor.clientHeight), Math.max(0, deseado));
+  /* Mientras dura el viaje, la página es la de destino y no la que vaya
+     cruzando el tercio de arriba. A zoom chico la línea del tercio ya cae en
+     la hoja siguiente apenas se llega, alScrollear pisaba S.pagina con n+1 y
+     el próximo «siguiente» saltaba a n+2: el contador iba 3, 5, 7 (lector-32).
+     Si el scroll no se va a mover no hay viaje que esperar —salvo que haya
+     otro en curso, que este scrollTo corta: ese destino pasa a ser n—. */
+  if (suave && (Math.abs(visor.scrollTop - top) > 1 || V.destino != null)) fijarDestino(n);
+  /* Y si la hoja no puede quedar arriba, al llegar tampoco manda
+     paginaEnPantalla(): la hoja de tope más cercano al borde es una ANTERIOR,
+     y S.pagina volvía a ella a los 1200 ms. A 25 %, irA(40) mostraba 40 y
+     volvía a 38, y tres «siguiente» daban 38, 38, 38: no se llegaba más a
+     las últimas. La de destino queda fija mientras el scroll siga donde la
+     dejó; el primer movimiento del usuario la suelta (ver fijaVigente). */
+  V.fija = top < deseado - 1 ? { n, st: top } : null;
+  visor.scrollTo({ top, behavior: suave ? 'smooth' : 'auto' });
+  const cambia = S.pagina !== n;
   S.pagina = n;
   actualizarBarra();
+  /* alScrollear marca el panel solo si la página cambió, y acá ya cambió: sin
+     esto, saltar con el campo o con un marcador dejaba la miniatura (o el
+     capítulo) de antes marcada. */
+  if (cambia) marcarMiniatura();
+}
+
+/**
+ * Espacio y AvPág (con `dir` 1) bajan UNA PANTALLA antes de pasar de hoja;
+ * Shift+Espacio y RePág suben. Saltar derecho a la siguiente se comía la
+ * mitad de abajo de cada página en «Ajustar al ancho», que es el zoom de
+ * arranque: una A4 vertical mide casi el doble que el visor (lector-18, ux-15;
+ * decisión de Fran). El paso es una pantalla menos 48 px de respiro, para no
+ * perder el renglón que estaba en el borde, y nunca se pasa de la hoja: llega
+ * justo a su final (o a su tope, subiendo) y el toque siguiente cruza.
+ */
+function bajarPantalla(dir) {
+  const visor = V.visor;
+  const el = visor?.querySelector(`.qr-pliego[data-pagina="${S.pagina}"]`);
+  if (!el) return;
+  const alto = visor.clientHeight;
+  const paso = Math.max(48, alto - 48);
+  const tope = topeDe(el) - visor.scrollTop;         // el tope de la hoja, en px del visor
+  if (dir > 0) {
+    const fondo = tope + el.offsetHeight;
+    if (fondo > alto + 1) {
+      visor.scrollBy({ top: Math.min(paso, fondo - alto + 24), behavior: 'smooth' });
+    } else if (S.pagina < S.doc.paginas) irA(S.pagina + 1);
+    /* En la última, con su final ya a la vista, no hay a dónde ir. Antes
+       caía en irA() a la MISMA hoja, que sube al tope: el toque de más al
+       terminar de leer te tiraba media página para arriba. */
+    return;
+  }
+  if (tope < 23) {
+    visor.scrollBy({ top: -Math.min(paso, 24 - tope), behavior: 'smooth' });
+    return;
+  }
+  // Ya en el tope de esta hoja: la anterior, desde su final.
+  const previa = el.previousElementSibling;
+  if (!previa) return;
+  const falta = 24 - (topeDe(previa) - visor.scrollTop);
+  if (falta <= paso) irA(S.pagina - 1);
+  else visor.scrollBy({ top: -paso, behavior: 'smooth' });
+}
+
+/* El destino se suelta cuando el scroll termina (scrollend). El tope es por
+   si no llega: un scroll que el usuario corta con la rueda igual dispara
+   scrollend, pero uno que no se movió no dispara nada. */
+function fijarDestino(n) {
+  clearTimeout(V.relojDestino);
+  V.destino = n;
+  V.relojDestino = setTimeout(soltarDestino, 1200);
+}
+function soltarDestino() {
+  clearTimeout(V.relojDestino);
+  if (V.destino == null) return;
+  V.destino = null;
+  // Llegado, se mira de nuevo dónde quedó: con la regla de la hoja baja de
+  // paginaEnPantalla(), la de destino sigue siendo la de destino (y si no
+  // pudo subir al tope, la sostiene V.fija).
+  alScrollear();
+}
+
+/* La hoja que irA() dejó fija porque no podía subir al tope, mientras el
+   scroll siga exactamente donde la dejó. Si se movió, la soltó el usuario. */
+function fijaVigente() {
+  const f = V.fija;
+  if (!f) return null;
+  if (Math.abs(V.visor.scrollTop - f.st) <= 1) return f.n;
+  V.fija = null;
+  return null;
 }
 
 /* ── Qué página estoy mirando ────────────────────────────────────────────── */
 
 let tickScroll = null;
 
+/**
+ * La página que se está leyendo, según dónde está el scroll.
+ *
+ * Es la que cruza el tercio superior del visor: la que uno está leyendo, no
+ * la que ocupa más pantalla. Con hojas más bajas que ese tercio (25 % de zoom
+ * en una ventana alta) la línea cruza varias, y ahí manda la que tiene el
+ * tope más cerca del borde de arriba —donde irA() deja la hoja—: si no,
+ * llegar a la n la contaba como n+1 (lector-32).
+ */
+function paginaEnPantalla() {
+  const st = V.visor.scrollTop;
+  const linea = st + V.visor.clientHeight * 0.33;
+  let actual = 1;
+  const arriba = [];
+  for (const el of V.visor.querySelectorAll('.qr-pliego')) {
+    const t = topeDe(el);
+    if (t > linea) break;
+    actual = Number(el.dataset.pagina);
+    if (t >= st - 1) arriba.push({ n: actual, d: Math.abs(t - (st + 24)) });
+  }
+  if (arriba.length > 1) actual = arriba.reduce((a, b) => (b.d < a.d ? b : a)).n;
+  return actual;
+}
+
 function alScrollear() {
   if (tickScroll) return;
   tickScroll = requestAnimationFrame(() => {
     tickScroll = null;
     if (!V.visor) return;
-
-    // La página "actual" es la que cruza el tercio superior del visor: es la
-    // que uno está leyendo, no la que ocupa más pantalla.
-    const linea = V.visor.scrollTop + V.visor.clientHeight * 0.33;
-    let actual = 1;
-    for (const el of V.visor.querySelectorAll('.qr-pliego')) {
-      if (el.offsetTop <= linea) actual = Number(el.dataset.pagina);
-      else break;
-    }
+    const actual = V.destino ?? fijaVigente() ?? paginaEnPantalla();
     if (actual !== S.pagina) {
       S.pagina = actual;
       actualizarBarra();
       marcarMiniatura();
     }
+    anotarLugar();
   });
 }
 
 /* ── Barra y chrome ──────────────────────────────────────────────────────── */
 
+/* Lo que la barra y la statusbar escriben con la app andando. Ninguno con
+   textContent: cambiaban de un cuadro al otro (lector-27, fw-09).
+   · El zoom va SIEMPRE por valor(): en el gesto del puck y de la rueda cambia
+     en cada cuadro, y mezclarlo con frase() o textContent desfasaba la memoria
+     de cada uno (§1.8 del plan). Nace vacío y el montaje escribe el primero.
+   · La página cambia con cada hoja que pasa: en su lugar y sin destello
+     (swap sin opciones). Un destello por hoja sería un parpadeo constante.
+   · La medida, con frase(): cuando cambia el tamaño de la hoja, relevo, y el
+     ítem de la statusbar viaja de ancho en vez de empujar de golpe a los de
+     al lado (deslizarAncho).
+   El chrome (app.js) escribe lo mismo fuera del lector: con el mismo texto,
+   swap() y frase() no hacen nada, así que dos escritores no se pisan. */
+const textoPagina = () => `${S.pagina} / ${S.doc.paginas}`;
+const textoZoom = (escala) => `${Math.round(escala * 100)}%`;
+
 function actualizarBarra() {
   const campo = document.getElementById('qr-pagina-input');
   if (campo && document.activeElement !== campo) campo.value = S.pagina;
 
-  const total = document.getElementById('qr-pagina-total');
-  if (total) total.textContent = S.doc ? S.doc.paginas : '—';
-
-  const z = document.getElementById('qr-zoom-valor');
-  if (z) z.textContent = `${Math.round(escalaActual() * 100)}%`;
+  valor(document.getElementById('qr-zoom-valor'), textoZoom(escalaActual()));
 
   const g = S.geometrias[S.pagina - 1];
   const medidaStat = document.getElementById('stat-medida');
   const medidaVal = document.getElementById('stat-medida-value');
   if (medidaStat && medidaVal && g) {
-    medidaStat.hidden = false;
-    medidaVal.textContent = g.etiqueta;
+    const html = esc(g.etiqueta);
+    if (medidaStat.hidden) { medidaStat.hidden = false; frase(medidaVal, html); }
+    else deslizarAncho(medidaStat, () => frase(medidaVal, html));
   }
 
   const pagStat = document.getElementById('stat-pagina');
   const pagVal = document.getElementById('stat-pagina-value');
   if (pagStat && pagVal && S.doc) {
     pagStat.hidden = false;
-    pagVal.textContent = `${S.pagina} / ${S.doc.paginas}`;
+    swap(pagVal, textoPagina());
   }
 }
 
-function marcarMiniatura() {
+/** Lleva una fila a la vista dentro de su scroller, centrada, si no se ve entera. */
+function traerALaVista(scroller, fila, { suave = true } = {}) {
+  const arriba = fila.offsetTop;
+  const visible = arriba >= scroller.scrollTop
+    && arriba + fila.offsetHeight <= scroller.scrollTop + scroller.clientHeight;
+  if (visible) return;
+  const top = Math.max(0, arriba - scroller.clientHeight / 2 + fila.offsetHeight / 2);
+  scroller.scrollTo({ top, behavior: suave ? 'smooth' : 'auto' });
+}
+
+/**
+ * Marca en el panel dónde estás: la miniatura de la página, o el marcador del
+ * capítulo. `suave: false` al montar, que no es un movimiento: aparecer
+ * parado en la 200 con la columna en la 1 obligaba a buscarse a mano
+ * (lector-10).
+ */
+function marcarMiniatura({ suave = true } = {}) {
   const panel = document.getElementById('qr-panel-cuerpo');
-  if (!panel || V.panel !== 'miniaturas') return;
-  panel.querySelectorAll('.qr-mini').forEach((m) => {
-    m.classList.toggle('is-actual', Number(m.dataset.pagina) === S.pagina);
-  });
-  const activa = panel.querySelector('.qr-mini.is-actual');
-  if (activa) {
-    const arriba = activa.offsetTop;
-    const visible = arriba >= panel.scrollTop && arriba + activa.offsetHeight <= panel.scrollTop + panel.clientHeight;
-    if (!visible) panel.scrollTo({ top: arriba - panel.clientHeight / 2 + activa.offsetHeight / 2, behavior: 'smooth' });
+  if (!panel) return;
+  if (V.panel === 'esquema') { marcarEsquema(panel, { suave }); return; }
+  if (V.panel !== 'miniaturas') return;
+  // Solo lo vivo: el calco del fundido del panel también tiene miniaturas.
+  let activa = null;
+  for (const m of panel.querySelectorAll(':scope > .qr-mini')) {
+    const es = Number(m.dataset.pagina) === S.pagina;
+    m.classList.toggle('is-actual', es);
+    if (es) activa = m;
   }
+  if (activa) traerALaVista(panel, activa, { suave });
 }
 
-/* ── Panel lateral ───────────────────────────────────────────────────────── */
+/* Marcadores dice en qué capítulo estás: el último cuya página no pasó de la
+   que estás leyendo. Antes no marcaba nada y había que buscarlo a ojo
+   (lector-38). */
+function marcarEsquema(panel, { suave = true } = {}) {
+  let actual = null;
+  const items = panel.querySelectorAll(':scope > .qr-esquema > .qr-esquema__item');
+  for (const it of items) {
+    const p = Number(it.dataset.pagina);
+    if (p && p <= S.pagina) actual = it;
+  }
+  for (const it of items) it.classList.toggle('is-actual', it === actual);
+  if (actual) traerALaVista(panel, actual, { suave });
+}
 
-async function pintarMiniaturas() {
-  const cuerpo = document.getElementById('qr-panel-cuerpo');
-  if (!cuerpo || !S.doc) return;
+/* ── Panel lateral ───────────────────────────────────────────────────────────
+   Tres cosas en el mismo cuerpo (Miniaturas, Marcadores, Buscar). Cambiar de
+   una a otra era un innerHTML: lo viejo se iba y lo nuevo aparecía en el mismo
+   cuadro (lector-14). Ahora es un fundido —el panel es una superficie, con su
+   fondo opaco—: lo viejo pasa a un calco encima y se esfuma, lo nuevo está
+   entero y quieto debajo desde el primer cuadro. */
 
-  cuerpo.innerHTML = S.geometrias.map((g) => `
-    <button class="qr-mini${g.numero === S.pagina ? ' is-actual' : ''}" data-pagina="${g.numero}">
-      <span class="qr-mini__hoja" style="aspect-ratio:${g.anchoPt} / ${g.altoPt}"></span>
+const girado = () => S.rotacion === 90 || S.rotacion === 270;
+
+/* La miniatura se dibuja SIN el giro del lector y se gira por CSS: así la
+   misma imagen cacheada sirve para las cuatro orientaciones, y girar no vuelve
+   a pedirle nada a pdf.js (lector-30). Con 90 o 270, la caja de la hoja ya
+   tiene la proporción girada y la imagen va centrada adentro, con el ancho y
+   el alto cambiados, para que al girar llene la caja. */
+function estiloGiro(g) {
+  const r = S.rotacion;
+  if (!r) return '';
+  if (r === 180) return 'transform:rotate(180deg)';
+  const w = ((g.anchoPt / g.altoPt) * 100).toFixed(3);
+  const h = ((g.altoPt / g.anchoPt) * 100).toFixed(3);
+  return `position:absolute;left:50%;top:50%;width:${w}%;height:${h}%;transform:translate(-50%, -50%) rotate(${r}deg)`;
+}
+
+const imgMini = (url, g, { entra = false } = {}) =>
+  `<img class="qr-mini__lienzo${entra ? ' is-entrando' : ''}" src="${url}" alt="" draggable="false" style="${estiloGiro(g)}">`;
+
+/* Las que ya están en la caché del documento van derecho en el HTML, ya
+   listas y sin entrada: volver al lector (de Imprimir, de otra pestaña) las
+   mostraba de a una con su fundido, como si fuera la primera vez (lector-11). */
+function htmlMiniaturas() {
+  const doc = S.doc;
+  return S.geometrias.map((g) => {
+    const url = doc.miniaturaLista?.(g.numero);
+    const [w, h] = girado() ? [g.altoPt, g.anchoPt] : [g.anchoPt, g.altoPt];
+    return `
+    <button class="qr-mini${g.numero === S.pagina ? ' is-actual' : ''}${url ? ' is-lista' : ''}" data-pagina="${g.numero}">
+      <span class="qr-mini__hoja" style="aspect-ratio:${w} / ${h}">${url ? imgMini(url, g) : ''}</span>
       <span class="qr-mini__num">${g.numero}</span>
-    </button>`).join('');
+    </button>`;
+  }).join('');
+}
 
-  /* Las miniaturas también se pintan bajo demanda: en un documento largo,
-     generar 400 de una tarda más que abrir el archivo. */
+/**
+ * Las miniaturas se pintan bajo demanda: en un documento largo, generar 400
+ * de una tarda más que abrir el archivo.
+ *
+ * Cada una se dibuja una vez por documento y queda como imagen (ver
+ * Documento.miniatura): antes era un canvas de ~390 KB que no se soltaba
+ * nunca, y leer un tratado de corrido con el panel abierto iba juntando
+ * cientos de MB (lector-11).
+ *
+ * El bucle se corta si el panel cambió o si el documento ya es otro. Antes
+ * seguía después de un Ctrl+Tab, leyendo S.geometrias y S.doc del documento
+ * NUEVO después de cada await: con uno más corto llenaba la consola de
+ * TypeError, con uno más largo pintaba páginas ajenas en nodos que ya no
+ * estaban (lector-29). Por eso el documento y su geometría se fijan acá.
+ */
+function vigilarMiniaturas(cuerpo) {
+  soltarMiniaturas();
+  const doc = S.doc;
+  const geos = S.geometrias;
+  const gen = V.genMini;
+  const sigue = (el) => V.genMini === gen && S.doc === doc && el.isConnected;
+
   const obs = new IntersectionObserver(async (entradas, self) => {
     for (const e of entradas) {
       if (!e.isIntersecting) continue;
       self.unobserve(e.target);
+      if (!sigue(e.target)) return;
       const n = Number(e.target.dataset.pagina);
-      const hoja = e.target.querySelector('.qr-mini__hoja');
+      const g = geos[n - 1];
       try {
-        const g = S.geometrias[n - 1];
-        const canvas = await S.doc.lienzo(n, { escala: 132 / g.anchoPt, dpr: 2 });
-        canvas.className = 'qr-mini__lienzo';
-        hoja.replaceChildren(canvas);
+        /* En un Set y no en una sola variable: cada scroll del panel vuelve a
+           disparar este callback mientras el anterior sigue en su await, así
+           que puede haber varias en vuelo, y soltarMiniaturas() cancelaba
+           solo la última. */
+        const tarea = doc.miniatura(n, { ancho: 132, dpr: 2 });
+        V.tareasMini.add(tarea);
+        const url = await tarea.promesa.finally(() => V.tareasMini.delete(tarea));
+        if (!url || !sigue(e.target)) { if (V.genMini !== gen) return; continue; }
+        const img = document.createElement('img');
+        img.src = url;
+        // Decodificada antes de entrar: si no, el fundido arranca con la caja vacía.
+        await img.decode().catch(() => {});
+        if (!sigue(e.target)) { if (V.genMini !== gen) return; continue; }
+        e.target.querySelector('.qr-mini__hoja')?.insertAdjacentHTML('beforeend', imgMini(url, g, { entra: true }));
         e.target.classList.add('is-lista');
       } catch (err) {
         if (err?.name !== 'RenderingCancelledException') console.error(`[miniatura ${n}]`, err);
@@ -486,24 +853,46 @@ async function pintarMiniaturas() {
     }
   }, { root: cuerpo, rootMargin: '200% 0px' });
 
-  cuerpo.querySelectorAll('.qr-mini').forEach((m) => obs.observe(m));
+  cuerpo.querySelectorAll(':scope > .qr-mini:not(.is-lista)').forEach((m) => obs.observe(m));
   V.observadorMini = obs;
 }
 
-function pintarEsquema() {
-  const cuerpo = document.getElementById('qr-panel-cuerpo');
-  if (!cuerpo) return;
+/* Corta lo que estaba pintando miniaturas: el observador, las que estaban en
+   vuelo (se cancelan en pdf.js) y el bucle (por la generación). */
+function soltarMiniaturas() {
+  V.observadorMini?.disconnect();
+  V.observadorMini = null;
+  for (const t of V.tareasMini) t.cancelar();
+  V.tareasMini.clear();
+  V.genMini += 1;
+}
 
+function htmlEsquema() {
+  /* Los marcadores pueden llegar después que el documento: resolverlos todos
+     es una ida y vuelta al worker por destino, y en un tratado son cientos.
+     Si el estado todavía no los trae, se piden acá, la primera vez que se
+     abre la pestaña (lector-24). */
+  if (!Array.isArray(S.esquema)) {
+    const doc = S.doc;
+    doc.esquema().then((lista) => {
+      if (S.doc !== doc) return;
+      S.esquema = lista;
+      if (V.panel === 'esquema') ponerPanel('esquema', { fundir: true });
+    }).catch((err) => console.error('[marcadores]', err));
+    return `
+      <div class="qr-panel__vacio">
+        ${Icons.spinner()}
+        <span class="ox-meta">Leyendo los marcadores…</span>
+      </div>`;
+  }
   if (!S.esquema.length) {
-    cuerpo.innerHTML = `
+    return `
       <div class="qr-panel__vacio">
         ${Icons.svg('marcador')}
         <span class="ox-meta">Este PDF no trae marcadores.</span>
       </div>`;
-    return;
   }
-
-  cuerpo.innerHTML = `<div class="qr-esquema">${S.esquema.map((e) => `
+  return `<div class="qr-esquema">${S.esquema.map((e) => `
     <button class="qr-esquema__item" data-pagina="${e.pagina || ''}" style="--nivel:${e.nivel}"
             ${e.pagina ? '' : 'disabled'}>
       <span class="qr-esquema__titulo ox-truncate">${esc(e.titulo)}</span>
@@ -511,19 +900,63 @@ function pintarEsquema() {
     </button>`).join('')}</div>`;
 }
 
+/**
+ * Pone en el cuerpo del panel lo de `cual`. Al montar la vista, derecho (el
+ * primer llenado no es un cambio); al cambiar de pestaña del panel o al girar,
+ * con fundido.
+ *
+ * El calco del fundido vive ADENTRO del cuerpo, que scrollea: se lo deja en el
+ * borde de arriba (scroll a 0 antes de calcar) y se le devuelve a él el
+ * scroll que tenía la lista, así lo que se va se ve donde estaba. Y se le
+ * clava el acomodo viejo: .es-buscar cambia el display y el relleno del
+ * cuerpo, y el calco los hereda en vivo —sin esto, las miniaturas que se iban
+ * se corrían 12 px al pasar a Buscar—. Un absoluto adentro de un scroller se
+ * va con el scroll: cuando lo nuevo se acomoda en su lugar (la miniatura
+ * actual, centrada), el calco se corre lo mismo, así sigue tapando el panel
+ * en vez de irse de vista en el primer cuadro.
+ */
+function ponerPanel(cual, { fundir = false } = {}) {
+  const cuerpo = document.getElementById('qr-panel-cuerpo');
+  if (!cuerpo || !S.doc) return;
+  soltarMiniaturas();
+  const html = cual === 'miniaturas' ? htmlMiniaturas() : cual === 'esquema' ? htmlEsquema() : htmlBuscar();
+  /* Buscar no es una lista más: el cuerpo pasa a ser campo fijo arriba y lista
+     con scroll propio abajo. Sin la clase, el campo scrollearía junto con los
+     resultados y se iría de pantalla apenas hay unos cuantos. */
+  const esBuscar = cual === 'buscar';
+
+  let calco = null;
+  if (!fundir) {
+    cuerpo.classList.toggle('es-buscar', esBuscar);
+    cuerpo.innerHTML = html;
+  } else {
+    const cs = getComputedStyle(cuerpo);
+    const acomodo = { display: cs.display, flexDirection: cs.flexDirection, padding: cs.padding };
+    const scroll = cuerpo.scrollTop;
+    cuerpo.scrollTop = 0;
+    cuerpo.classList.toggle('es-buscar', esBuscar);
+    swap(cuerpo, html, { fundido: true });
+    calco = cuerpo.firstElementChild?.classList.contains('ox-swap-out--fundido') ? cuerpo.firstElementChild : null;
+    if (calco) {
+      Object.assign(calco.style, acomodo, { overflow: 'hidden' });
+      calco.scrollTop = scroll;
+    }
+  }
+  Icons.mount(cuerpo);
+
+  if (cual === 'miniaturas') vigilarMiniaturas(cuerpo);
+  else if (cual === 'buscar') { cablearBuscar(); pintarResultados(); marcarLista({ suave: false }); }
+  marcarMiniatura({ suave: false });
+  if (calco && cuerpo.scrollTop) calco.style.top = `${(parseFloat(calco.style.top) || 0) + cuerpo.scrollTop}px`;
+}
+
 function cambiarPanel(cual) {
+  if (cual === V.panel && document.getElementById('qr-panel-cuerpo')?.firstElementChild) return;
   V.panel = cual;
   document.querySelectorAll('.qr-panel__tab').forEach((t) => {
     t.classList.toggle('is-active', t.dataset.panel === cual);
   });
-  V.observadorMini?.disconnect();
-  /* Buscar no es una lista más: el cuerpo pasa a ser campo fijo arriba y lista
-     con scroll propio abajo. Sin la clase, el campo scrollearía junto con los
-     resultados y se iría de pantalla apenas hay unos cuantos. */
-  document.getElementById('qr-panel-cuerpo')?.classList.toggle('es-buscar', cual === 'buscar');
-  if (cual === 'miniaturas') pintarMiniaturas();
-  else if (cual === 'esquema') pintarEsquema();
-  else pintarBuscar();
+  ponerPanel(cual, { fundir: true });
 }
 
 /* ── Buscar ──────────────────────────────────────────────────────────────────
@@ -544,6 +977,15 @@ function cambiarPanel(cual) {
    virtualización, así que lo que se le cuelgue encima también. */
 const apagados = new WeakMap();
 
+/* Con qué se pintó cada capa: los hits, los spans y la escala. Si al volver a
+   marcarla nada de eso cambió (un Enter, F3, la flecha del panel, el
+   repintado de una búsqueda en curso), no se rehace: solo se mueve
+   `is-actual` de una marca a otra, y la transición de color de .qr-marca lleva
+   el foco de una a la otra. Antes se recreaban TODAS con su entrada en cada
+   Enter y en cada repintado de la búsqueda —seis por segundo—: los veinte
+   resaltados de la hoja latían (lector-05, css-11). */
+const marcasPintadas = new WeakMap();
+
 /**
  * Apaga las marcas de una capa y recién después la vacía.
  *
@@ -556,6 +998,7 @@ const apagados = new WeakMap();
  * preguntando justamente por los hijos y no la vuelve a tocar nunca más.
  */
 function limpiarMarcas(capa) {
+  marcasPintadas.delete(capa);
   capa.classList.remove('is-visible');
   if (!capa.firstChild) return;
   clearTimeout(apagados.get(capa));
@@ -597,10 +1040,22 @@ function marcarPagina(contenedor, n) {
   const res = V.buscador.resultados[V.actual];
   const enfocada = res && res.pagina === n ? res.enPagina : -1;
 
+  const memo = marcasPintadas.get(capa);
+  if (memo && memo.hits === hits && memo.divs === divs && memo.escala === V.escalaHecha && capa.firstChild) {
+    if (memo.actual !== enfocada) {
+      for (const m of capa.children) m.classList.toggle('is-actual', Number(m.dataset.k) === enfocada);
+      memo.actual = enfocada;
+    }
+    clearTimeout(apagados.get(capa));
+    capa.classList.add('is-visible');
+    return memo.focos.get(enfocada) ?? null;
+  }
+
   const base = contenedor.getBoundingClientRect();
   const rango = document.createRange();
   const frag = document.createDocumentFragment();
-  let foco = null;
+  // Dónde cae cada coincidencia (su primer pedazo), para centrarla sin volver a medir.
+  const focos = new Map();
 
   for (let k = 0; k < hits.length; k++) {
     const esta = k === enfocada;
@@ -616,6 +1071,7 @@ function marcarPagina(contenedor, n) {
         if (r.width < 0.5 || r.height < 0.5) continue;
         const marca = document.createElement('div');
         marca.className = esta ? 'qr-marca is-actual' : 'qr-marca';
+        marca.dataset.k = k;
         marca.style.left = `${r.left - base.left}px`;
         marca.style.top = `${r.top - base.top}px`;
         marca.style.width = `${r.width}px`;
@@ -624,15 +1080,18 @@ function marcarPagina(contenedor, n) {
         /* Relativa al PLIEGO y no a la pantalla: así centrarEn() no necesita
            saber por dónde va el scroll, que mientras hay una animación suave en
            curso es un número que se mueve. */
-        if (esta && !foco) foco = { top: r.top - base.top, alto: r.height };
+        if (!focos.has(k)) focos.set(k, { top: r.top - base.top, alto: r.height });
       }
     }
   }
 
   clearTimeout(apagados.get(capa));
   capa.replaceChildren(frag);
+  // Medidas de nuevo: el estirado que les puso reescalar() ya no hace falta.
+  capa.style.transform = '';
   capa.classList.add('is-visible');
-  return foco;
+  marcasPintadas.set(capa, { hits, divs, escala: V.escalaHecha, actual: enfocada, focos });
+  return focos.get(enfocada) ?? null;
 }
 
 /**
@@ -730,16 +1189,16 @@ function irAlResultado(i) {
 
 /* ── El panel de búsqueda ────────────────────────────────────────────────── */
 
-function pintarBuscar() {
-  const cuerpo = document.getElementById('qr-panel-cuerpo');
-  if (!cuerpo) return;
-
+function htmlBuscar() {
   /* Dos renglones, y los dos SIEMPRE puestos. La fila de abajo podría
      aparecer recién cuando hay resultados, pero entonces el campo se movería
      de lugar justo mientras se escribe en él — y un campo que se corre bajo el
      cursor es de las pocas cosas que se sienten rotas aunque estén animadas.
-     Sin nada buscado dice "—" y los botones no sirven, que es la verdad. */
-  cuerpo.innerHTML = `
+     Sin nada buscado dice "—" y los botones no sirven, que es la verdad.
+
+     La cuenta nace VACÍA y la llena actualizarCuenta() con frase(): con el
+     «—» en el HTML, el primer dato contaba como cambio (lector-26). */
+  return `
     <div class="qr-buscar">
       <div class="ox-inputwrap qr-buscar__campo">
         ${Icons.svg('search')}
@@ -747,7 +1206,7 @@ function pintarBuscar() {
                spellcheck="false" autocomplete="off" value="${esc(V.consulta)}">
       </div>
       <div class="qr-buscar__barra">
-        <span class="ox-meta qr-buscar__cuenta" id="qr-buscar-cuenta">—</span>
+        <span class="ox-meta qr-buscar__cuenta" id="qr-buscar-cuenta"></span>
         <div class="ox-spacer"></div>
         <button class="ox-iconbtn ox-iconbtn--sm" id="qr-buscar-prev" disabled
                 data-tip="Anterior" data-tip-key="Shift Enter"><i data-icon="chevronUp"></i></button>
@@ -756,13 +1215,9 @@ function pintarBuscar() {
       </div>
     </div>
     <div class="qr-buscar__lista" id="qr-buscar-lista"></div>`;
-
-  Icons.mount(cuerpo);
-  cablearBuscar();
-  pintarResultados();
 }
 
-/** El "3/47" del campo, y los botones que dejan de servir sin resultados. */
+/** El "3 de 47" del campo, y los botones que dejan de servir sin resultados. */
 function actualizarCuenta() {
   const cuenta = document.getElementById('qr-buscar-cuenta');
   const b = V.buscador;
@@ -771,17 +1226,45 @@ function actualizarCuenta() {
   if (cuenta) {
     /* Antes de pararse en una, el contador dice CUÁNTAS hay; parado en una,
        dice en cuál. "— de 30" era gramaticalmente correcto y se leía como un
-       hueco, que es justo lo que un contador no puede parecer. */
+       hueco, que es justo lo que un contador no puede parecer.
+
+       Con frase(): de «2 de 47» a «3 de 47» cambia solo la cifra y destella en
+       su lugar; de «47 coincidencias» a «1 de 47» cambia la frase y se releva.
+       Con textContent las dos cosas eran un corte (lector-26). */
     const plural = b && b.total === 1 ? 'coincidencia' : 'coincidencias';
-    cuenta.textContent = !hay ? '—'
+    frase(cuenta, !hay ? '—'
       : V.actual >= 0 ? `${V.actual + 1} de ${b.total}`
-        : `${b.total} ${plural}`;
+        : `${b.total} ${plural}`);
     cuenta.classList.toggle('is-vacia', !hay);
   }
   document.getElementById('qr-buscar-prev')?.toggleAttribute('disabled', !hay);
   document.getElementById('qr-buscar-next')?.toggleAttribute('disabled', !hay);
 }
 
+/* El texto de la pista, con su plural: «las 1 páginas» con un PDF de una
+   hoja (ux-26). */
+const textoPista = (paginas) => (paginas === 1
+  ? 'Escribí para buscar en la página.'
+  : `Escribí para buscar en las ${paginas} páginas.`);
+
+/**
+ * La lista de resultados, puesta al día POR CLAVE con reconcile().
+ *
+ * Antes era un innerHTML en cada letra y en cada repintado de la búsqueda en
+ * curso (hasta seis por segundo): los estados se cortaban de un cuadro al
+ * otro, pasado el tope cada aviso rearmaba 2000 filas iguales, y un clic que
+ * empezaba sobre una fila reemplazada antes del pointerup se perdía
+ * (lector-08). Ahora:
+ * · cada resultado es `${pagina}:${enPagina}` y sigue siendo el MISMO nodo
+ *   mientras siga en la lista;
+ * · los vacíos son piezas con su texto en la clave (`vacio:sin:<consulta>`),
+ *   así «sin coincidencias» para dos consultas distintas se relevan;
+ * · lo que cambia seguido (el «Leyendo la página N…», el pie con el avance)
+ *   es una pieza de clave fija cuyo texto va por frase(): una clave con el
+ *   número se iría y volvería en cada aviso;
+ * · si no cambió ni la consulta, ni la cantidad, ni si hay pie, las filas no
+ *   se tocan: solo el pie.
+ */
 function pintarResultados() {
   const lista = document.getElementById('qr-buscar-lista');
   if (!lista) return;
@@ -789,67 +1272,86 @@ function pintarResultados() {
 
   const b = V.buscador;
   const paginas = S.doc?.paginas ?? 0;
+  const consulta = V.consulta.trim();
+  const textos = new Map();     // clave → lo que va por frase() adentro de la pieza
 
-  if (!V.consulta.trim()) {
-    lista.innerHTML = `
+  let items;
+  if (!consulta) {
+    items = [{ key: 'vacio:pista', html: `
       <div class="qr-panel__vacio">
         ${Icons.svg('search')}
-        <span class="ox-meta">Escribí para buscar en las ${paginas} páginas.</span>
+        <span class="ox-meta">${textoPista(paginas)}</span>
         <span class="ox-meta qr-buscar__nota">Encuentra el texto de verdad del PDF, el mismo que se
         puede seleccionar con el mouse. Si el archivo es un escaneo —una foto de la hoja— no hay
         texto que buscar.</span>
-      </div>`;
-    return;
-  }
-
-  if (!b?.resultados.length) {
+      </div>` }];
+  } else if (!b?.resultados.length) {
     /* Mientras recorre dice por dónde va. Sin esto, buscar en un tratado de
        mil páginas se ve igual que buscar algo que no está: vacío y quieto. */
-    const texto = b?.terminada
-      ? `Sin coincidencias para «${esc(V.consulta.trim())}».`
-      : `Leyendo la página ${b?.leidas ?? 0} de ${paginas}…`;
-    lista.innerHTML = `
-      <div class="qr-panel__vacio">
-        ${Icons.svg(b?.terminada ? 'search' : 'clock')}
-        <span class="ox-meta">${texto}</span>
-      </div>`;
-    return;
+    if (b?.terminada) {
+      items = [{ key: `vacio:sin:${consulta}`, html: `
+        <div class="qr-panel__vacio">
+          ${Icons.svg('search')}
+          <span class="ox-meta">Sin coincidencias para «${esc(consulta)}».</span>
+        </div>` }];
+    } else {
+      items = [{ key: 'vacio:leyendo', html: `
+        <div class="qr-panel__vacio">
+          ${Icons.svg('clock')}
+          <span class="ox-meta" data-frase></span>
+        </div>` }];
+      textos.set('vacio:leyendo', `Leyendo la página ${b?.leidas ?? 0} de ${paginas}…`);
+    }
+  } else {
+    /* Los dos pies dicen lo que la lista NO muestra: que todavía falta
+       recorrer, o que hay más coincidencias de las que entraron. Una lista
+       recortada en silencio se lee como una lista completa. */
+    const pie = !b.terminada
+      ? `Buscando… ${b.leidas} de ${paginas} páginas`
+      : b.recortada ? `Se listan ${b.resultados.length} de ${b.total}. Las demás se resaltan igual en la hoja.` : '';
+
+    const memo = lista.__pintada;
+    const igual = memo && memo.buscador === b && memo.consulta === consulta
+      && memo.n === b.resultados.length && memo.conPie === !!pie;
+    if (igual) {
+      const el = lista.querySelector(':scope > [data-key="pie"]');
+      if (el && pie) frase(el, esc(pie));
+      return;
+    }
+
+    items = b.resultados.map((r, i) => ({ key: `${r.pagina}:${r.enPagina}`, html: `
+      <button class="qr-hit${i === V.actual ? ' is-actual' : ''}" data-i="${i}">
+        <span class="qr-hit__texto">${esc(r.antes)}<mark>${esc(r.medio)}</mark>${esc(r.despues)}</span>
+        <span class="qr-hit__pag ox-num">${r.pagina}</span>
+      </button>` }));
+    if (pie) {
+      items.push({ key: 'pie', html: '<div class="qr-buscar__pie ox-meta"></div>' });
+      textos.set('pie', pie);
+    }
+    lista.__pintada = { buscador: b, consulta, n: b.resultados.length, conPie: !!pie };
   }
+  if (!b?.resultados.length) lista.__pintada = null;
 
-  const filas = b.resultados.map((r, i) => `
-    <button class="qr-hit${i === V.actual ? ' is-actual' : ''}" data-i="${i}">
-      <span class="qr-hit__texto">${esc(r.antes)}<mark>${esc(r.medio)}</mark>${esc(r.despues)}</span>
-      <span class="qr-hit__pag ox-num">${r.pagina}</span>
-    </button>`).join('');
-
-  /* Los dos pies dicen lo que la lista NO muestra: que todavía falta recorrer,
-     o que hay más coincidencias de las que entraron. Una lista recortada en
-     silencio se lee como una lista completa. */
-  const pie = !b.terminada
-    ? `<div class="qr-buscar__pie ox-meta">Buscando… ${b.leidas} de ${paginas} páginas</div>`
-    : b.recortada
-      ? `<div class="qr-buscar__pie ox-meta">Se listan ${b.resultados.length} de ${b.total}. Las demás se resaltan igual en la hoja.</div>`
-      : '';
-
-  lista.innerHTML = filas + pie;
+  reconcile(lista, items);
+  for (const [clave, texto] of textos) {
+    const pieza = lista.querySelector(`:scope > [data-key="${CSS.escape(clave)}"]:not([data-state=closing])`);
+    const destino = pieza?.matches('[data-frase]') || clave === 'pie' ? pieza : pieza?.querySelector('[data-frase]');
+    if (destino) frase(destino, esc(texto));
+  }
 }
 
 /** Deja marcado en la lista el resultado en el que estás, y lo trae a la vista. */
-function marcarLista() {
+function marcarLista({ suave = true } = {}) {
   const lista = document.getElementById('qr-buscar-lista');
   if (!lista) return;
-  lista.querySelectorAll('.qr-hit').forEach((f) => {
-    f.classList.toggle('is-actual', Number(f.dataset.i) === V.actual);
-  });
-
-  const fila = lista.querySelector('.qr-hit.is-actual');
-  if (!fila) return;
-  const arriba = fila.offsetTop;
-  const visible = arriba >= lista.scrollTop
-    && arriba + fila.offsetHeight <= lista.scrollTop + lista.clientHeight;
-  if (!visible) {
-    lista.scrollTo({ top: arriba - lista.clientHeight / 2 + fila.offsetHeight / 2, behavior: 'smooth' });
+  let fila = null;
+  // Las que reconcile() deja saliendo no cuentan: siguen en el DOM un rato.
+  for (const f of lista.querySelectorAll(':scope > .qr-hit:not([data-state=closing])')) {
+    const es = Number(f.dataset.i) === V.actual;
+    f.classList.toggle('is-actual', es);
+    if (es) fila = f;
   }
+  if (fila) traerALaVista(lista, fila, { suave });
 }
 
 /**
@@ -959,44 +1461,76 @@ function alternarTinta(forzar = null) {
   V.tintaActiva = forzar ?? !V.tintaActiva;
   document.getElementById('qr-tinta-toggle')?.classList.toggle('is-on', V.tintaActiva);
   const barra = document.getElementById('qr-tintabarra');
+  /* Se arma ANTES de prenderse: así se despliega ya con su alto final, en vez
+     de crecer vacía y volver a crecer al llenarse. */
+  if (V.tintaActiva) armarBarraTinta();
   if (barra) barra.hidden = !V.tintaActiva;
+  /* La barra se despliega; los colores de adentro, no: nacen con su ancho.
+     Hasta recién estaban en una caja con display:none, y su primer estilo
+     disparaba el @starting-style del pliegue (crecían de 0 a lo ancho
+     mientras la barra crecía de alto). */
+  if (V.tintaActiva) asentarPlegables(document.getElementById('qr-colores-pliegue'));
   /* Mientras se anota, el canvas de tinta captura el puntero. La clase va en
      el visor y no en cada pliego para que un solo toggle alcance. */
   V.visor?.classList.toggle('is-anotando', V.tintaActiva);
-  if (V.tintaActiva) pintarBarraTinta();
-  else if (V.navegando) salirNav();
+  if (!V.tintaActiva && V.navegando) salirNav();
 }
 
-function pintarBarraTinta() {
+const textoAncho = (v) => `${fmtDec(v, 1)} pt`;
+const textoCuenta = (n) => (n ? `${n} ${n === 1 ? 'trazo' : 'trazos'}` : 'sin trazos');
+
+/**
+ * Arma la barra de tinta, UNA vez por montaje de la vista. Después, elegir
+ * herramienta, color o tamaño la pone al día en su lugar
+ * (sincronizarBarraTinta).
+ *
+ * Antes cada clic (y cada tecla 1 a 4) rehacía la barra entera con innerHTML:
+ * el anillo del seleccionado saltaba de un botón al otro en vez de pasar por
+ * su transición, el grupo de colores aparecía y desaparecía de golpe al ir y
+ * volver del borrador y corría todo lo de la derecha unos 170 px, el rótulo y
+ * el slider cambiaban en seco, y el botón con foco se perdía (lector-12,
+ * tinta-08).
+ *
+ * Nace con los valores ya escritos (rótulo, eco y cuenta): así el primer
+ * llenado no cuenta como cambio para swap(), valor() y frase(), y nada
+ * destella al montar.
+ */
+function armarBarraTinta() {
   const barra = document.getElementById('qr-tintabarra');
   if (!barra || !S.tinta) return;
+  /* Ya armada (se apagó y se vuelve a prender en el mismo montaje): se pone
+     al día también la cuenta y lo que se puede deshacer, que con la barra
+     apagada el evento 'tinta' no toca. */
+  if (barra.__armada) { sincronizarBarraTinta(); actualizarBarraTinta(); return; }
+  barra.__armada = true;
 
   const h = herramientaActual();
   const esBorrador = V.herramienta === 'borrador';
 
   barra.innerHTML = `
     <div class="qr-tintabarra__grupo">
-      ${Object.entries(HERRAMIENTAS).map(([id, t]) => `
+      ${Object.entries(HERRAMIENTAS).map(([id, t], i) => `
         <button class="ox-iconbtn ox-iconbtn--sm qr-tool${V.herramienta === id ? ' is-on' : ''}"
-                data-tinta-tool="${id}" data-tip="${t.etiqueta}"><i data-icon="${t.icono}"></i></button>`).join('')}
+                data-tinta-tool="${id}" data-tip="${t.etiqueta}" data-tip-key="${i + 1}"><i data-icon="${t.icono}"></i></button>`).join('')}
     </div>
 
     <div class="ox-vr"></div>
 
-    ${esBorrador ? '' : `
+    <!-- Los colores no tienen sentido con el borrador: se pliegan a lo ancho
+         (y lo de la derecha los acompaña) en vez de desaparecer de golpe. -->
+    <div class="qr-colores-pliegue ox-plegable--ancho" id="qr-colores-pliegue"${esBorrador ? ' hidden' : ''}>
       <div class="qr-tintabarra__grupo qr-colores">
         ${COLORES.map((c) => `
           <button class="qr-color${h.color === c ? ' is-on' : ''}" data-tinta-color="${c}"
                   style="--tinta:${c}" data-tip="${c}"></button>`).join('')}
       </div>
-      <div class="ox-vr"></div>`}
+      <div class="ox-vr"></div>
+    </div>
 
     <div class="qr-tintabarra__grupo qr-grosor">
-      <span class="ox-meta">${esBorrador ? 'Tamaño' : 'Grosor'}</span>
-      <input class="ox-slider" id="qr-tinta-ancho" type="range"
-             min="${esBorrador ? 6 : 0.5}" max="${esBorrador ? 48 : 24}" step="0.5" value="${h.ancho}"
-             style="--ox-pct:${porcentajeAncho(h.ancho, esBorrador)}%">
-      <span class="ox-chip ox-chip--mono" id="qr-tinta-ancho-eco">${h.ancho} pt</span>
+      <span class="ox-meta qr-grosor__rotulo" id="qr-tinta-rotulo">${esBorrador ? 'Tamaño' : 'Grosor'}</span>
+      <input class="ox-slider" id="qr-tinta-ancho" type="range" step="0.5">
+      <span class="ox-chip ox-chip--mono" id="qr-tinta-ancho-eco">${textoAncho(h.ancho)}</span>
     </div>
 
     <div class="ox-spacer"></div>
@@ -1015,11 +1549,45 @@ function pintarBarraTinta() {
               data-tip="Más opciones"><i data-icon="more"></i></button>
     </div>
 
-    <span class="ox-chip qr-tinta-cuenta" id="qr-tinta-cuenta"></span>`;
+    <span class="ox-chip qr-tinta-cuenta${S.tinta.cuenta ? '' : ' is-vacia'}" id="qr-tinta-cuenta">${textoCuenta(S.tinta.cuenta)}</span>`;
 
   Icons.mount(barra);
+  // Las memorias de swap() y valor() arrancan en lo que ya dice: no es un cambio.
+  swap(document.getElementById('qr-tinta-rotulo'), esBorrador ? 'Tamaño' : 'Grosor');
+  valor(document.getElementById('qr-tinta-ancho-eco'), textoAncho(h.ancho));
+  /* El pliegue de los colores nace en su lugar: si la barra ya está a la
+     vista, desplegarse desde 0 sería un movimiento que nadie pidió. */
+  asentarPlegables(document.getElementById('qr-colores-pliegue'));
   cablearBarraTinta();
+  sincronizarBarraTinta();
   actualizarBarraTinta();
+}
+
+/** Pone la barra al día con la herramienta, el color y el tamaño, sin rehacerla. */
+function sincronizarBarraTinta() {
+  const barra = document.getElementById('qr-tintabarra');
+  if (!barra?.__armada) return;
+  const h = herramientaActual();
+  const esBorrador = V.herramienta === 'borrador';
+
+  // Los encendidos se mueven con su transición (--tr-color, el anillo del color).
+  barra.querySelectorAll('[data-tinta-tool]').forEach((b) => b.classList.toggle('is-on', b.dataset.tintaTool === V.herramienta));
+  barra.querySelectorAll('[data-tinta-color]').forEach((b) => b.classList.toggle('is-on', b.dataset.tintaColor === h.color));
+  const pliegue = document.getElementById('qr-colores-pliegue');
+  if (pliegue) pliegue.hidden = esBorrador;
+
+  // «Grosor» y «Tamaño» son dos palabras: relevo, no un cambio en seco.
+  swap(document.getElementById('qr-tinta-rotulo'), esBorrador ? 'Tamaño' : 'Grosor', { relevo: true });
+
+  const slider = document.getElementById('qr-tinta-ancho');
+  if (slider) {
+    const [min, max] = esBorrador ? [6, 48] : [0.5, 24];
+    slider.min = min;
+    slider.max = max;
+    slider.value = h.ancho;
+    slider.style.setProperty('--ox-pct', `${porcentajeAncho(h.ancho, esBorrador)}%`);
+  }
+  valor(document.getElementById('qr-tinta-ancho-eco'), textoAncho(h.ancho));
 }
 
 const porcentajeAncho = (v, esBorrador) => {
@@ -1032,13 +1600,13 @@ function cablearBarraTinta() {
   if (!barra) return;
 
   barra.querySelectorAll('[data-tinta-tool]').forEach((b) => {
-    b.addEventListener('click', () => { V.herramienta = b.dataset.tintaTool; pintarBarraTinta(); });
+    b.addEventListener('click', () => { V.herramienta = b.dataset.tintaTool; sincronizarBarraTinta(); });
   });
 
   barra.querySelectorAll('[data-tinta-color]').forEach((b) => {
     b.addEventListener('click', () => {
       V.colores[V.herramienta] = b.dataset.tintaColor;
-      pintarBarraTinta();
+      sincronizarBarraTinta();
     });
   });
 
@@ -1047,7 +1615,8 @@ function cablearBarraTinta() {
     const v = +slider.value;
     V.anchos[V.herramienta] = v;
     slider.style.setProperty('--ox-pct', `${porcentajeAncho(v, V.herramienta === 'borrador')}%`);
-    document.getElementById('qr-tinta-ancho-eco').textContent = `${v} pt`;
+    // Con coma, como el resto de la app (tinta-25, ux-25), y en su lugar.
+    valor(document.getElementById('qr-tinta-ancho-eco'), textoAncho(v));
   });
 
   document.getElementById('qr-tinta-deshacer')?.addEventListener('click', deshacerTinta);
@@ -1118,7 +1687,10 @@ function actualizarBarraTinta() {
   const cuenta = document.getElementById('qr-tinta-cuenta');
   if (cuenta) {
     const n = S.tinta.cuenta;
-    cuenta.textContent = n ? `${n} ${n === 1 ? 'trazo' : 'trazos'}` : 'sin trazos';
+    /* frase(): de «3 trazos» a «4 trazos» destella la cifra en su lugar; de
+       «sin trazos» a «1 trazo», relevo. Con textContent cambiaba de golpe, y
+       con la goma varias veces seguidas (tinta-18). */
+    frase(cuenta, textoCuenta(n));
     cuenta.classList.toggle('is-vacia', !n);
   }
   document.getElementById('qr-tinta-deshacer')?.toggleAttribute('disabled', !S.tinta.historial.length);
@@ -1128,15 +1700,52 @@ function actualizarBarraTinta() {
 }
 
 function deshacerTinta() {
+  // La operación se lee ANTES: después de deshacer, ya no está arriba.
+  const op = S.tinta?.historial.at(-1);
   if (!S.tinta?.deshacer()) return;
   for (const ed of V.editores.values()) ed.redibujar();
   actualizarBarraTinta();
+  avisarSiNoSeVe(op, false);
 }
 
 function rehacerTinta() {
+  const op = S.tinta?.deshechos.at(-1);
   if (!S.tinta?.rehacer()) return;
   for (const ed of V.editores.values()) ed.redibujar();
   actualizarBarraTinta();
+  avisarSiNoSeVe(op, true);
+}
+
+/* Qué hizo el Ctrl+Z, dicho por el tipo de la operación. Decía «Se deshizo
+   un trazo» para todo, también al devolver la tinta de una página entera,
+   que son muchos trazos. */
+function textoHistorial(op, rehace) {
+  if (op.tipo === 'recortar') return rehace ? 'Se rehízo la goma' : 'Se deshizo la goma';
+  if (op.tipo === 'borrar') {
+    if (rehace) return 'Se volvió a borrar la tinta';
+    const n = op.trazos?.length || 0;
+    return n === 1 ? 'Volvió un trazo' : `Volvieron ${n} trazos`;
+  }
+  return rehace ? 'Se rehízo un trazo' : 'Se deshizo un trazo';
+}
+
+/** ¿Algo de esa hoja está dentro del visor ahora? */
+function seVe(n) {
+  const el = V.visor?.querySelector(`.qr-pliego[data-pagina="${n}"]`);
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  const v = V.visor.getBoundingClientRect();
+  return r.bottom > v.top && r.top < v.bottom && r.right > v.left && r.left < v.right;
+}
+
+/* El historial de la tinta es del documento, no de la página que se mira: un
+   Ctrl+Z puede sacar un trazo de la página 30 mientras leés la 5. Sin aviso
+   no se entera nadie, y ese trazo se guarda borrado a los 900 ms (decisión de
+   Fran: el Toast, junto con limitar Ctrl+Z a la tinta prendida). */
+function avisarSiNoSeVe(op, rehace) {
+  const pagina = op?.pagina;
+  if (!pagina || seVe(pagina)) return;
+  Toast.show({ title: textoHistorial(op, rehace), text: `En la página ${pagina}.`, icon: rehace ? 'redo' : 'undo' });
 }
 
 /* ── Navegar con el puck ─────────────────────────────────────────────────────
@@ -1257,8 +1866,11 @@ function cablearNavegacion() {
   const alSoltarTecla = (e) => {
     if (e.key !== ' ' || !V.tintaActiva) return;
     if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
-    e.preventDefault();
+    /* Si la barra no abrió el puck (el foco estaba en un botón al que se llegó
+       con Tab, o en un cartel), el keyup es de ese botón: prevenirlo le
+       comería el clic que Espacio le da al soltarse. */
     if (!V.navegando) return;
+    e.preventDefault();
     V.navegando = false;
     if (!V.gesto) salirNav();
   };
@@ -1334,47 +1946,35 @@ function prepararZoomVivo(g) {
 
 function zoomVivo(g) {
   g.pista.style.transform = `scale(${g.k})`;
-  // el porcentaje de la barra sigue al gesto: es el único número que importa
-  const z = document.getElementById('qr-zoom-valor');
-  if (z) z.textContent = `${Math.round(g.escala * g.k * 100)}%`;
+  // el porcentaje de la barra sigue al gesto: es el único número que importa.
+  // Por valor(), como en los pasos: ver actualizarBarra().
+  valor(document.getElementById('qr-zoom-valor'), textoZoom(g.escala * g.k));
 }
 
-/** Al soltar el núcleo: el reescalado de verdad, con el mismo punto del papel bajo el disco. */
+/** Al soltar el núcleo (o al parar la rueda): el reescalado de verdad, con el
+    mismo punto del papel bajo el disco. */
 function asentarZoom(g) {
-  const visor = V.visor;
+  /* Qué punto del papel hay bajo el disco, con la pista todavía escalada: es
+     lo que se ve, y lo que tiene que seguir bajo el disco cuando las hojas
+     cambien de tamaño (ver fotoAncla). */
+  const ancla = V.visor ? fotoAncla(g.ax, g.ay) : null;
   g.pista.classList.remove('is-escalando');
   g.pista.style.transform = '';
   g.pista.style.transformOrigin = '';
 
   if (Math.abs(g.k - 1) < 0.01) { S.modoZoom = g.modo; actualizarBarra(); return; }
-
-  /* Qué punto del papel había bajo el disco, como página + fracción de la
-     hoja: es lo que tiene que seguir bajo el disco cuando las hojas cambien
-     de tamaño. Se busca por rectángulo y no por offsetTop porque el
-     offsetParent de un pliego es el cuerpo del lector, no el visor. */
-  const vr = visor.getBoundingClientRect();
-  let ancla = null;
-  for (const el of visor.querySelectorAll('.qr-pliego')) {
-    const r = el.getBoundingClientRect();
-    const top = r.top - vr.top;
-    if (g.ay < top) break;
-    ancla = { el, fx: (g.ax - (r.left - vr.left)) / r.width, fy: (g.ay - top) / r.height };
-  }
-
-  zoomA(g.escala * g.k);
-  if (!ancla) return;
-
-  const r = ancla.el.getBoundingClientRect();
-  visor.scrollTop += (r.top - vr.top) + ancla.fy * r.height - g.ay;
-  visor.scrollLeft += (r.left - vr.left) + ancla.fx * r.width - g.ax;
+  zoomA(g.escala * g.k, { ancla });
 }
 
 /* ── Zoom ────────────────────────────────────────────────────────────────── */
 
-function zoomA(valor, { modo = 'fijo' } = {}) {
+/* El ancla por defecto es el centro del visor: los botones, los atajos, el
+   menú y los ajustes no tienen un puntero que respetar (lector-03). */
+function zoomA(escala, { modo = 'fijo', ancla } = {}) {
+  if (V.rueda) terminarRueda();
   S.modoZoom = modo;
-  if (modo === 'fijo') S.zoom = Math.max(0.05, Math.min(8, valor));
-  reescalar();
+  if (modo === 'fijo') S.zoom = Math.max(0.05, Math.min(8, escala));
+  reescalar({ ancla });
 }
 
 function zoomPaso(direccion) {
@@ -1382,6 +1982,229 @@ function zoomPaso(direccion) {
   const lista = direccion > 0 ? ZOOMS : [...ZOOMS].reverse();
   const siguiente = lista.find((z) => (direccion > 0 ? z > actual + 0.001 : z < actual - 0.001));
   zoomA(siguiente ?? actual);
+}
+
+/* ── Ctrl+rueda: zoom continuo ────────────────────────────────────────────────
+   Cada evento era un paso entero de ZOOMS y un reescalado completo: un
+   pellizco de touchpad o una rueda libre mandan decenas de eventos chicos por
+   segundo, y pasaban de 100 % a 600 % de un tirón mientras la app rehacía
+   todo en cada paso (lector-19; Fran eligió el continuo). Ahora la rueda hace
+   lo mismo que el núcleo del puck: la pista se escala en vivo con origen en
+   el puntero, `deltaY` decide cuánto (100 px de una muesca son un poco menos
+   que un paso de ZOOMS), y el reescalado de verdad va 150 ms después del
+   último evento, con el punto del papel bajo el puntero en su lugar. */
+const RUEDA_DUPLICA = 300;    // px de deltaY que duplican (o parten) la escala
+
+function zoomRueda(e) {
+  if (V.gesto || V.giro) return;
+  const pt = enVisor(e);
+  let g = V.rueda;
+  if (!g) {
+    g = { escala: escalaActual(), k: 1, ax: pt.x, ay: pt.y };
+    V.rueda = g;
+    prepararZoomVivo(g);
+  }
+  // Líneas o páginas (deltaMode 1 y 2) en píxeles, como manda Chromium casi siempre.
+  const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * V.visor.clientHeight : e.deltaY;
+  const objetivo = Math.max(0.05, Math.min(8, g.escala * g.k * Math.pow(2, -dy / RUEDA_DUPLICA)));
+  g.k = objetivo / g.escala;
+  zoomVivo(g);
+  clearTimeout(V.relojRueda);
+  V.relojRueda = setTimeout(terminarRueda, 150);
+}
+
+function terminarRueda() {
+  clearTimeout(V.relojRueda);
+  const g = V.rueda;
+  V.rueda = null;
+  if (g && V.visor) asentarZoom(g);
+}
+
+/* ── Girar ────────────────────────────────────────────────────────────────────
+   Girar cambia la forma de cada pliego, y el bitmap viejo no tiene cómo
+   acompañarla: en el primer cuadro salía recortado dentro de la hoja
+   apaisada, y mientras llegaba el render nuevo, aplastado (lector-07). Ahora
+   lo pintado se apaga primero (la hoja con su propia transición, la tinta y
+   las marcas con .is-girando), recién apagado se cambia la geometría, y cada
+   hoja vuelve con el fundido de is-pintada cuando tiene su bitmap girado.
+   Nunca se ve un bitmap deformado. Dos clics seguidos suman. */
+function girar(paso) {
+  if (!V.visor) return;
+  if (V.giro) { V.giro.paso += paso; return; }
+  // La pestaña se anota por si la vista se va antes de terminar (ver onLeave).
+  V.giro = { paso, pestana: S.pestana, reloj: setTimeout(terminarGiro, T2 + 20) };
+  V.visor.classList.add('is-girando');
+  // Los renders en vuelo se cortan: uno que terminara ahora volvería a encender la hoja.
+  for (const t of V.renders.values()) t.cancelar();
+  V.renders.clear();
+  V.pintadas.clear();
+  for (const el of V.visor.querySelectorAll('.qr-pliego.is-pintada')) el.classList.remove('is-pintada');
+}
+
+function terminarGiro() {
+  const g = V.giro;
+  V.giro = null;
+  if (!g || !V.visor) return;
+  clearTimeout(g.reloj);
+  const ancla = anclaCentro();
+  /* Lo de la geometría vieja se vacía mientras no se ve: la tinta vuelve con
+     su editor (montarTinta) y las marcas con la capa de texto nueva. */
+  for (const el of V.visor.querySelectorAll('.qr-pliego')) {
+    const tinta = el.querySelector('.qr-tinta');
+    if (tinta?.width) { tinta.width = 0; tinta.height = 0; }
+    const capa = el.querySelector('.qr-marcas');
+    if (capa?.firstChild) { capa.classList.remove('is-visible'); capa.replaceChildren(); capa.style.transform = ''; marcasPintadas.delete(capa); }
+  }
+  S.rotacion = (((S.rotacion + g.paso * 90) % 360) + 360) % 360;
+  reescalar({ ancla });
+  V.visor.classList.remove('is-girando');
+  // Las miniaturas se giran por CSS: el panel se rearma con fundido (lector-30).
+  if (V.panel === 'miniaturas') ponerPanel('miniaturas', { fundir: true });
+}
+
+/* ── Plegar el panel ──────────────────────────────────────────────────────────
+   El hueco del panel se libera de un saque y SIN transición: si el padding
+   transicionara, el visor remaquetaría en cada cuadro y las hojas
+   parpadearían (ver .qr-panel en lector.css). Pero las hojas están centradas,
+   y en ese mismo cuadro saltaban media panel hacia el costado mientras el
+   cajón todavía se deslizaba; en ancho o en página, encima, cambiaban de
+   escala de golpe un cuadro después (lector-15, css-28).
+
+   Ahora es un FLIP sobre la pista, que va por el compositor y no le dice nada
+   al ResizeObserver: se mide dónde estaba la primera hoja visible, se cambia
+   el hueco, y la pista arranca corrida a donde estaba y viaja a su lugar con
+   la misma duración y curva que el cajón. En ancho o en página la escala
+   viaja en el mismo transform, con origen en el centro del visor nuevo (el
+   punto que reescalar() va a dejar quieto), y el reescalado de verdad va UNA
+   vez, al terminar. */
+function alternarPanel() {
+  terminarPliegue();
+  V.panelAbierto = !V.panelAbierto;
+  const panel = document.getElementById('qr-panel');
+  const cuerpo = document.querySelector('.qr-lector__cuerpo');
+  const pista = V.visor?.querySelector('.qr-pista');
+  const ref = pista && primeraVisible();
+  const r0 = ref?.getBoundingClientRect();
+
+  panel?.classList.toggle('is-collapsed', !V.panelAbierto);
+  cuerpo?.classList.toggle('sin-panel', !V.panelAbierto);
+  if (!ref || !V.visor) return;
+
+  const r1 = ref.getBoundingClientRect();      // ya con el hueco nuevo
+  const dx = r0.left - r1.left;
+  const k = S.modoZoom === 'fijo' ? 1 : escalaActual() / V.escalaHecha;
+  if (Math.abs(dx) < 0.5 && Math.abs(k - 1) < 1e-4) return;
+
+  pista.style.transformOrigin = `${V.visor.scrollLeft + V.visor.clientWidth / 2}px ${V.visor.scrollTop + V.visor.clientHeight / 2}px`;
+  pista.classList.add('is-escalando');
+  const anim = pista.animate(
+    [{ transform: `translateX(${dx}px)` }, { transform: Math.abs(k - 1) < 1e-4 ? 'none' : `scale(${k})` }],
+    { duration: T3, easing: EASE, fill: 'forwards' },
+  );
+  V.pliegue = { anim, pista, k, reloj: setTimeout(terminarPliegue, T3 + 200) };
+  anim.finished.then(() => terminarPliegue(), () => {});
+}
+
+/** La primera hoja que asoma en el visor: la referencia del FLIP. */
+function primeraVisible() {
+  const v = V.visor.getBoundingClientRect();
+  for (const el of V.visor.querySelectorAll('.qr-pliego')) {
+    const r = el.getBoundingClientRect();
+    if (r.bottom > v.top) return r.top < v.bottom ? el : null;
+  }
+  return null;
+}
+
+/* Termina el pliegue: con la pista todavía en su estado final se toma el
+   ancla, y en la misma tarea se suelta el transform y se reescala. Ningún
+   cuadro ve la pista sin escalar con las hojas viejas. */
+function terminarPliegue() {
+  const p = V.pliegue;
+  if (!p) return;
+  V.pliegue = null;
+  clearTimeout(p.reloj);
+  const reescala = V.visor && S.modoZoom !== 'fijo' && Math.abs(escalaActual() - V.escalaHecha) > 1e-4;
+  const ancla = reescala ? anclaCentro() : null;
+  p.anim.cancel();
+  p.pista.style.transformOrigin = '';
+  p.pista.classList.remove('is-escalando');
+  if (reescala) reescalar({ ancla });
+}
+
+/* ── El tamaño del visor ──────────────────────────────────────────────────────
+   El ancho disponible cambia con la ventana, con el panel y con la franja de
+   pestañas: en modo ajustado, el zoom tiene que seguirlo. Pero reescalar es
+   caro —cancela renders, rehace la capa de texto y los editores—, y en ancho
+   cada cuadro del arrastre del borde de la ventana cambiaba la escala: las
+   hojas nunca llegaban a nitidizarse y la CPU se disparaba (lector-16).
+
+   Mientras el tamaño se mueve, la pista solo se ESTIRA (un transform, como el
+   zoom en vivo, con origen en el centro del visor), y el reescalado de verdad
+   va 150 ms después del último aviso, UNA vez, con el punto del centro en su
+   lugar. Si algo del chasis todavía se está moviendo (la barra de tinta que
+   se pliega, la franja de pestañas que aparece) se espera a que termine: la
+   guarda miraba solo la barra, y en «Página entera» abrir un segundo
+   documento reescalaba en cada cuadro del pliegue de la franja (css-15).
+
+   El estirado va al cuadro siguiente y no adentro del callback: cambia el
+   área de scroll, y hacerlo adentro es el "ResizeObserver loop" que Chromium
+   reporta como error de consola. */
+function vigilarTamano() {
+  let cuadro = 0;
+  let reloj = 0;
+  const moviendose = () => ['qr-tintabarra', 'qr-tabs']
+    .some((id) => document.getElementById(id)?.getAnimations().length);
+
+  const asentar = () => {
+    reloj = 0;
+    if (!V.visor || V.pliegue || V.giro) return;
+    if (moviendose()) { reloj = setTimeout(asentar, 60); return; }
+    const estirado = !!V.estirado;
+    const cambia = S.modoZoom !== 'fijo' && Math.abs(escalaActual() - V.escalaHecha) > 1e-4;
+    // El ancla con el estirado todavía puesto: es lo que se ve.
+    const ancla = cambia ? anclaCentro() : null;
+    if (estirado) soltarEstirado();
+    if (cambia) reescalar({ ancla });
+  };
+
+  const ro = new ResizeObserver(() => {
+    if (S.modoZoom === 'fijo' || V.pliegue || V.giro) return;
+    cancelAnimationFrame(cuadro);
+    cuadro = requestAnimationFrame(() => {
+      if (!V.visor || V.pliegue || V.giro || S.modoZoom === 'fijo') return;
+      estirar();
+      clearTimeout(reloj);
+      reloj = setTimeout(asentar, 150);
+    });
+  });
+  ro.observe(V.visor);
+
+  Router.onLeave(() => {
+    ro.disconnect();
+    cancelAnimationFrame(cuadro);
+    clearTimeout(reloj);
+  });
+}
+
+/** Estira la pista a la escala que pide el tamaño de ahora, sin reescalar. */
+function estirar() {
+  const pista = V.visor?.querySelector('.qr-pista');
+  if (!pista) return;
+  const k = escalaActual() / V.escalaHecha;
+  if (Math.abs(k - 1) < 1e-4) { if (V.estirado) soltarEstirado(); return; }
+  V.estirado = true;
+  pista.classList.add('is-escalando');
+  pista.style.transformOrigin = `${V.visor.scrollLeft + V.visor.clientWidth / 2}px ${V.visor.scrollTop + V.visor.clientHeight / 2}px`;
+  pista.style.transform = `scale(${k})`;
+}
+
+function soltarEstirado() {
+  V.estirado = false;
+  const pista = V.visor?.querySelector('.qr-pista');
+  if (!pista) return;
+  pista.style.transform = '';
+  pista.style.transformOrigin = '';
+  pista.classList.remove('is-escalando');
 }
 
 /* ── La vista ────────────────────────────────────────────────────────────── */
@@ -1392,10 +2215,31 @@ export function viewLector() {
      uno. Suscribiéndose después del return, abrir un PDF estando parado acá
      no repintaba nada —Router.go('lector') es un no-op si ya estás en
      'lector'— y el documento recién se veía al cambiar de vista y volver. */
+  /* Se repinta solo si de verdad cambió el documento que se mira. 'documento'
+     llegaba también sin cambio (cerrar una pestaña de fondo, la sesión
+     abriendo las demás) y el lector se fundía sobre el mismo PDF: rehacía
+     todas las hojas y miniaturas y borraba la búsqueda (lector-20). Desde 1B
+     el estado lo emite menos; esto lo cuida de este lado igual. */
+  const docPintado = S.doc;
+  const cargandoPintado = S.cargando > 0;
   Router.onLeave(alCambiar((que) => {
-    if (que === 'documento') { reiniciarBusqueda(); Router.refresh(); }
+    if (que === 'documento' && S.doc !== docPintado) { reiniciarBusqueda(); Router.refresh(); }
+    /* Sin documento, el lector dice «Abriendo…» mientras algo se abre, en vez
+       de «No hay ningún PDF abierto» con su botón (shell-05). */
+    else if (que === 'cargando' && !S.doc && (S.cargando > 0) !== cargandoPintado) Router.refresh();
     else if (que === 'tinta' && V.tintaActiva) actualizarBarraTinta();
   }));
+
+
+  if (!S.doc && S.cargando > 0) {
+    paint(head({ title: 'Documento' }) + `
+      <div class="ox-grow qr-abriendo">
+        <div class="ox-empty">${Icons.spinner()}
+          <div class="ox-empty__title">Abriendo…</div>
+        </div>
+      </div>`);
+    return;
+  }
 
   if (!S.doc) {
     paint(head({ title: 'Documento' }) + empty({
@@ -1416,21 +2260,25 @@ export function viewLector() {
 
         <div class="ox-vr"></div>
 
-        <button class="ox-iconbtn ox-iconbtn--sm" id="qr-prev" data-tip="Página anterior"><i data-icon="chevronUp"></i></button>
+        <button class="ox-iconbtn ox-iconbtn--sm" id="qr-prev" data-tip="Página anterior" data-tip-key="RePág"><i data-icon="chevronUp"></i></button>
         <div class="qr-paginador">
           <input class="ox-input qr-paginador__campo ox-num" id="qr-pagina-input"
                  value="${S.pagina}" spellcheck="false" aria-label="Página">
           <span class="ox-meta">de</span>
           <span class="ox-num qr-paginador__total" id="qr-pagina-total">${S.doc.paginas}</span>
         </div>
-        <button class="ox-iconbtn ox-iconbtn--sm" id="qr-next" data-tip="Página siguiente"><i data-icon="chevronDown"></i></button>
+        <button class="ox-iconbtn ox-iconbtn--sm" id="qr-next" data-tip="Página siguiente" data-tip-key="AvPág"><i data-icon="chevronDown"></i></button>
 
         <!-- Este divisor no es solo un divisor: el borde derecho del panel
              lateral cae justo acá. Ver --qr-panel-w en lector.css. -->
         <div class="ox-vr" id="qr-vr-zoom"></div>
 
-        <button class="ox-iconbtn ox-iconbtn--sm" id="qr-zoom-menos" data-tip="Alejar" data-tip-key="Ctrl −"><i data-icon="zoomOut"></i></button>
-        <button class="ox-btn ox-btn--ghost ox-btn--sm qr-zoom-valor" id="qr-zoom-valor" data-tip="Nivel de zoom">100%</button>
+        <!-- El nivel nace vacío: lo escribe el montaje cuando el visor ya se
+             puede medir (en ancho o en página la escala depende de él). Con
+             un «100%» de relleno, el primer valor real destellaba como si
+             hubiera cambiado (lector-27). -->
+        <button class="ox-iconbtn ox-iconbtn--sm" id="qr-zoom-menos" data-tip="Alejar" data-tip-key="Ctrl -"><i data-icon="zoomOut"></i></button>
+        <button class="ox-btn ox-btn--ghost ox-btn--sm qr-zoom-valor" id="qr-zoom-valor" data-tip="Nivel de zoom" data-tip-key="Ctrl 0"></button>
         <button class="ox-iconbtn ox-iconbtn--sm" id="qr-zoom-mas" data-tip="Acercar" data-tip-key="Ctrl +"><i data-icon="zoomIn"></i></button>
         <button class="ox-iconbtn ox-iconbtn--sm" id="qr-fit-ancho" data-tip="Ajustar al ancho"><i data-icon="ancho"></i></button>
         <button class="ox-iconbtn ox-iconbtn--sm" id="qr-fit-pagina" data-tip="Ajustar a la página"><i data-icon="fit"></i></button>
@@ -1442,24 +2290,37 @@ export function viewLector() {
 
         <div class="ox-vr"></div>
 
-        <button class="ox-iconbtn ox-iconbtn--sm${V.tintaActiva ? ' is-on' : ''}" id="qr-tinta-toggle"
+        <button class="ox-iconbtn ox-iconbtn--sm qr-tool${V.tintaActiva ? ' is-on' : ''}" id="qr-tinta-toggle"
                 data-tip="Anotar con la tablet" data-tip-key="Ctrl E"><i data-icon="tinta"></i></button>
 
         <div class="ox-spacer"></div>
 
-        <button class="ox-btn ox-btn--primary ox-btn--sm ox-flashable" data-goto="imprimir">
+        <button class="ox-btn ox-btn--primary ox-btn--sm ox-flashable" data-goto="imprimir"
+                data-tip="Imprimir" data-tip-key="Ctrl P">
           <i data-icon="printer"></i> Imprimir
         </button>
+        <!-- Con un solo documento la franja de pestañas está plegada y su cruz
+             no se ve: sin esto, cerrarlo era Ctrl+W o nada (ux-02). La
+             plomería (data-action="cerrar") ya la atiende app.js. -->
+        <button class="ox-iconbtn ox-iconbtn--sm" data-action="cerrar"
+                data-tip="Cerrar documento" data-tip-key="Ctrl W"><i data-icon="close"></i></button>
       </div>
 
       <div class="qr-tintabarra ox-plegable" id="qr-tintabarra" ${V.tintaActiva ? '' : 'hidden'}></div>
 
-      <div class="qr-lector__cuerpo">
+      <!-- sin-panel nace puesto si el panel venía plegado: el padding del
+           hueco solo lo sacaba el botón, y al volver al lector (Imprimir,
+           Ctrl+Tab, otro PDF) quedaba una franja vacía de 236 px a la
+           izquierda y, en ancho, las hojas más chicas (lector-02). -->
+      <div class="qr-lector__cuerpo${V.panelAbierto ? '' : ' sin-panel'}">
         <aside class="qr-panel${V.panelAbierto ? '' : ' is-collapsed'}" id="qr-panel">
+          <!-- «Miniaturas» y no «Páginas»: Páginas es la vista del rail que
+               quita y gira hojas, otra cosa (ux-37). -->
           <div class="qr-panel__tabs">
-            <button class="qr-panel__tab${V.panel === 'miniaturas' ? ' is-active' : ''}" data-panel="miniaturas">Páginas</button>
+            <button class="qr-panel__tab${V.panel === 'miniaturas' ? ' is-active' : ''}" data-panel="miniaturas">Miniaturas</button>
             <button class="qr-panel__tab${V.panel === 'esquema' ? ' is-active' : ''}" data-panel="esquema">Marcadores</button>
-            <button class="qr-panel__tab${V.panel === 'buscar' ? ' is-active' : ''}" data-panel="buscar">Buscar</button>
+            <button class="qr-panel__tab${V.panel === 'buscar' ? ' is-active' : ''}" data-panel="buscar"
+                    data-tip="Buscar en el documento" data-tip-key="Ctrl F">Buscar</button>
           </div>
           <div class="qr-panel__cuerpo" id="qr-panel-cuerpo"></div>
         </aside>
@@ -1473,65 +2334,95 @@ export function viewLector() {
       </div>
     </div>`);
 
+  V.raiz = document.querySelector('.qr-lector');
   V.visor = document.getElementById('qr-visor');
   V.visor.addEventListener('scroll', alScrollear, { passive: true });
+  V.visor.addEventListener('scrollend', soltarDestino);
   /* Ojo: acá NO va scrollFade(). Las superficies de visualización de Quire son
      la excepción declarada a la regla del esfumado — el porqué está en
      lector.css, arriba de .qr-visor. */
 
+  /* El orden importa, y todo va en esta misma tarea:
+     1. La barra de tinta se arma ANTES de medir nada: su alto entra en el del
+        visor, y en «Página entera» la escala sale de ahí.
+     2. Los plegables que nacen visibles (la barra de tinta, si estaba
+        prendida) se asientan en su alto. Su @starting-style los hacía crecer
+        desde 0 en cada montaje —volver de Imprimir, cambiar de pestaña— y
+        corrían la hoja 40 px debajo del fundido del router; en página, además,
+        la escala se medía con la barra en 0 y al terminar se reescalaba
+        (lector-13, tinta-09). repintar() ya lo hace al refrescar; al navegar
+        no, así que va acá.
+     3. Las hojas, y el lugar donde estabas, sincrónico: el layout ya está y
+        offsetTop lo fuerza. Esperar dos cuadros dejaba el tope de la página
+        (no tu renglón) y arrancaba los renders de las páginas 1 a 3 para
+        cancelarlos enseguida (lector-21). */
+  if (V.tintaActiva) { armarBarraTinta(); V.visor.classList.add('is-anotando'); }
+  asentarPlegables(V.raiz);
+
   construirPaginas();
-  cambiarPanel(V.panel);
+  devolverLugar();
+  // El primer nivel de zoom, escrito en seco: es un llenado, no un cambio (ver actualizarBarra).
+  document.getElementById('qr-zoom-valor').textContent = textoZoom(escalaActual());
   actualizarBarra();
-  if (V.tintaActiva) { pintarBarraTinta(); V.visor.classList.add('is-anotando'); }
-  raf2(() => irA(S.pagina, { suave: false }));
+  ponerPanel(V.panel);
 
   cablear();
   cablearNavegacion();
-
-  /* El ancho disponible cambia con la ventana y al plegar el panel: en modo
-     ajustado, el zoom tiene que seguirlo.
-
-     El reescalado va al frame siguiente y no adentro del callback: cambia el
-     tamaño de las hojas, con eso puede aparecer o irse una barra de scroll, y
-     eso cambia el tamaño del visor que se está observando. Hacerlo adentro es
-     el "ResizeObserver loop" que Chromium reporta como error de consola; la
-     vista se veía bien igual, pero el error estaba. Diferido, además, dos
-     avisos seguidos se vuelven un solo reescalado.
-
-     La barra de tinta se pliega (.ox-plegable): el alto del visor cambia en
-     cada cuadro durante la transición. Reescalar es caro —cancela renders,
-     rehace la capa de texto y los editores y vuelve al principio de la
-     página—, así que no se hace si la escala sale igual (en modo ancho, un
-     cambio de alto no la mueve) y, si cambia, se espera a que la barra
-     termine de moverse para hacerlo una sola vez. */
-  let reescaladoPendiente = 0;
-  const reescalarSiCambio = () => {
-    if (S.modoZoom === 'fijo') return;
-    if (document.getElementById('qr-tintabarra')?.getAnimations().length) {
-      reescaladoPendiente = requestAnimationFrame(reescalarSiCambio);
-      return;
-    }
-    if (Math.abs(escalaActual() - V.escalaHecha) > 1e-4) reescalar();
-  };
-  const ro = new ResizeObserver(() => {
-    if (S.modoZoom === 'fijo') return;
-    cancelAnimationFrame(reescaladoPendiente);
-    reescaladoPendiente = requestAnimationFrame(reescalarSiCambio);
-  });
-  ro.observe(V.visor);
+  vigilarTamano();
 
   /* Un solo camino para refrescar la barra de tinta: la capa avisa que cambió
      y acá se responde. Antes también la actualizaba el editor al terminar un
      trazo, y con dos caminos el contador se desincronizaba — decía "sin
      trazos" con uno ya dibujado. */
   Router.onLeave(() => {
-    ro.disconnect();
-    cancelAnimationFrame(reescaladoPendiente);
-    V.observadorMini?.disconnect();
+    soltarMiniaturas();
+    if (V.rueda) { clearTimeout(V.relojRueda); V.rueda = null; }
+    /* Un giro a mitad de su apagado se aplica igual, sin reescalar (la vista
+       se va). Antes se tiraba: un Ctrl+P o un Ctrl+Tab dentro de los 200 ms
+       de un clic en girar perdía el clic sin aviso. Se escribe en SU pestaña
+       y no en S: con Ctrl+Tab, cuando esto corre S ya es el documento nuevo. */
+    if (V.giro) {
+      const { paso, pestana, reloj } = V.giro;
+      clearTimeout(reloj);
+      V.giro = null;
+      if (pestana && S.pestanas.includes(pestana)) pestana.rotacion = (((pestana.rotacion + paso * 90) % 360) + 360) % 360;
+    }
+    if (V.pliegue) { clearTimeout(V.pliegue.reloj); V.pliegue.anim.cancel(); V.pliegue = null; }
+    V.estirado = false;
+    soltarDestino();
+    V.fija = null;
     liberarTodo();
     V.visor?.removeEventListener('scroll', alScrollear);
+    V.visor?.removeEventListener('scrollend', soltarDestino);
     V.visor = null;
+    V.raiz = null;
   });
+}
+
+/* ── El lugar ─────────────────────────────────────────────────────────────────
+   De cada pestaña se guardaba solo la página: volver a ella (o de Imprimir)
+   te dejaba en el encabezado de la hoja y había que buscar el renglón
+   (lector-21). Ahora se guarda la fracción de la hoja que cae en el borde de
+   arriba del visor, y el corrimiento de costado. En fracción y no en píxeles:
+   en «Ajustar al ancho» la escala depende del visor, que puede haber cambiado
+   mientras tanto. */
+function anotarLugar() {
+  if (!V.visor || !S.doc || V.destino != null) return;
+  const el = V.visor.querySelector(`.qr-pliego[data-pagina="${S.pagina}"]`);
+  if (!el) return;
+  S.lugar = {
+    pagina: S.pagina,
+    fraccion: (V.visor.scrollTop - topeDe(el)) / (el.offsetHeight || 1),
+    scrollLeft: V.visor.scrollLeft,
+  };
+}
+
+function devolverLugar() {
+  const l = S.lugar;
+  const el = l && l.pagina === S.pagina && V.visor.querySelector(`.qr-pliego[data-pagina="${l.pagina}"]`);
+  if (!el) { irA(S.pagina, { suave: false }); return; }
+  V.visor.scrollTop = topeDe(el) + l.fraccion * el.offsetHeight;
+  V.visor.scrollLeft = l.scrollLeft;
 }
 
 function cablear() {
@@ -1540,14 +2431,35 @@ function cablear() {
   $('qr-prev')?.addEventListener('click', () => irA(Math.max(1, S.pagina - 1)));
   $('qr-next')?.addEventListener('click', () => irA(Math.min(S.doc.paginas, S.pagina + 1)));
 
+  /* El campo de página navega SOLO si se escribió algo. Antes cada blur
+     saltaba a lo que dijera el campo, que mientras tiene el foco no se pone al
+     día: entrar al «12», scrollear hasta la 20 con la rueda y hacer clic en la
+     hoja te devolvía a la 12; entrar y salir sin escribir te llevaba al tope
+     de la página y perdías el renglón. Y una letra suelta mandaba a la 1
+     (lector-17, ux-32). Ahora: Enter navega, Escape restaura y vuelve al
+     documento, salir sin cambios no mueve nada, y lo que no es un número no
+     se toma. */
   const campo = $('qr-pagina-input');
+  let alEntrar = '';
+  let saltado = false;
+  const restaurar = () => { campo.value = S.pagina; };
   const saltar = () => {
-    const n = Math.max(1, Math.min(S.doc.paginas, parseInt(campo.value, 10) || 1));
-    campo.value = n;
-    irA(n);
+    const n = parseInt(campo.value, 10);
+    if (!Number.isFinite(n)) { restaurar(); return; }
+    const destino = Math.max(1, Math.min(S.doc.paginas, n));
+    campo.value = destino;
+    irA(destino);
   };
-  campo?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { saltar(); campo.blur(); } });
-  campo?.addEventListener('blur', saltar);
+  campo?.addEventListener('focus', () => { alEntrar = campo.value; saltado = false; });
+  campo?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saltar(); saltado = true; V.visor?.focus({ preventScroll: true }); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); restaurar(); saltado = true; V.visor?.focus({ preventScroll: true }); }
+  });
+  campo?.addEventListener('blur', () => {
+    if (saltado) { saltado = false; return; }
+    if (campo.value.trim() === alEntrar.trim()) restaurar();
+    else saltar();
+  });
 
   $('qr-zoom-menos')?.addEventListener('click', () => zoomPaso(-1));
   $('qr-zoom-mas')?.addEventListener('click', () => zoomPaso(1));
@@ -1567,17 +2479,10 @@ function cablear() {
     ], { align: 'center' });
   });
 
-  $('qr-rotar-izq')?.addEventListener('click', () => { S.rotacion = (S.rotacion + 270) % 360; reescalar(); });
-  $('qr-rotar-der')?.addEventListener('click', () => { S.rotacion = (S.rotacion + 90) % 360; reescalar(); });
+  $('qr-rotar-izq')?.addEventListener('click', () => girar(-1));
+  $('qr-rotar-der')?.addEventListener('click', () => girar(1));
 
-  $('qr-toggle-panel')?.addEventListener('click', () => {
-    V.panelAbierto = !V.panelAbierto;
-    $('qr-panel').classList.toggle('is-collapsed', !V.panelAbierto);
-    /* El hueco se libera de una, sin animar: el panel se desliza por su cuenta
-       con transform. Si el padding también transicionara, el visor
-       remaquetaría en cada frame y las páginas parpadearían. */
-    document.querySelector('.qr-lector__cuerpo')?.classList.toggle('sin-panel', !V.panelAbierto);
-  });
+  $('qr-toggle-panel')?.addEventListener('click', alternarPanel);
 
   $('qr-tinta-toggle')?.addEventListener('click', () => alternarTinta());
 
@@ -1590,37 +2495,78 @@ function cablear() {
     if (destino?.dataset.pagina) irA(Number(destino.dataset.pagina));
   });
 
-  /* Ctrl+rueda hace zoom, como en cualquier visor. Sin passive:false el
-     navegador ya hizo su propio zoom antes de que podamos evitarlo. */
+  // «Reintentar» en una hoja que no se pudo dibujar (ux-22).
+  V.visor.addEventListener('click', (e) => {
+    const boton = e.target.closest('[data-reintentar]');
+    const pliego = boton?.closest('.qr-pliego');
+    if (!pliego) return;
+    quitarFallida(pliego);
+    pintar(pliego);
+  });
+
+  /* Ctrl+rueda hace zoom, como en cualquier visor (ver zoomRueda). Sin
+     passive:false el navegador ya hizo su propio zoom antes de que podamos
+     evitarlo. Y la rueda sin Ctrl es el usuario moviéndose: suelta un salto a
+     un resultado que esperaba su capa de texto (lector-34). */
   V.visor.addEventListener('wheel', (e) => {
-    if (!e.ctrlKey) return;
+    if (!e.ctrlKey) { V.pendiente = null; return; }
     e.preventDefault();
-    zoomPaso(e.deltaY < 0 ? 1 : -1);
+    zoomRueda(e);
   }, { passive: false });
+  // Lo mismo si arrastra la barra de scroll (el pointerdown cae en el visor mismo).
+  V.visor.addEventListener('pointerdown', (e) => { if (e.target === V.visor) V.pendiente = null; });
 }
 
 /** Atajos del lector. Se registran una vez, en app.js. */
 export function atajosLector(e) {
   if (!S.doc || Router.name !== 'lector') return false;
+  /* Con un cartel o un menú abierto, el teclado es de ellos. El onKey del
+     Modal solo ataja Escape y Tab: el resto bajaba hasta acá y movía el
+     documento de atrás —Espacio sobre «Borrar todo» sacaba el puck detrás del
+     velo en vez de apretar el botón, y AvPág corría la hoja que no se ve—
+     (lector-31). */
+  if (Modal.isOpen || Menu.isOpen) return false;
   const enCampo = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
+  /* Un botón al que se llegó con Tab se aprieta con Espacio, como en
+     cualquier ventana. Uno que quedó enfocado por un clic (el lapicito, que
+     es lo último que tocás antes de anotar) NO: ahí Espacio sigue siendo el
+     puck o la página siguiente. La diferencia la lleva focoPorTeclado, no
+     :focus-visible: en Chromium un botón enfocado con el mouse pasa a
+     cumplirlo apenas se aprieta cualquier tecla, y Espacio sobre el lapicito
+     recién tocado le daba el clic y apagaba la tinta. */
+  const espacio = e.key === ' ' && !enCampo && !(e.target.tagName === 'BUTTON' && focoPorTeclado);
 
   /* Anotando, la barra espaciadora es el puck (ver "Navegar con el puck") y
      va ANTES de la página siguiente, que es lo que sigue siendo sin tinta.
      Se traga también los repeat de Windows: mantener la barra es el gesto. */
-  if (!enCampo && e.key === ' ' && V.tintaActiva && V.puck) {
+  if (espacio && V.tintaActiva && V.puck) {
     e.preventDefault();
     if (!e.repeat && !V.navegando) entrarNav();
     return true;
   }
 
-  if (!enCampo && (e.key === 'PageDown' || (e.key === ' ' && !e.shiftKey))) {
-    e.preventDefault(); irA(Math.min(S.doc.paginas, S.pagina + 1)); return true;
+  /* AvPág, RePág, Inicio y Fin no son de ningún botón: valen siempre fuera
+     de un campo. Solo Espacio se le cede al botón al que se llegó con Tab. */
+  const navega = !enCampo
+    && (e.key === 'PageDown' || e.key === 'PageUp' || e.key === 'Home' || e.key === 'End' || espacio);
+  // Moverse con el teclado suelta un salto a un resultado que quedó esperando (lector-34).
+  if (navega) V.pendiente = null;
+
+  if (navega && (e.key === 'PageDown' || (e.key === ' ' && !e.shiftKey))) {
+    e.preventDefault(); bajarPantalla(1); return true;
   }
-  if (!enCampo && (e.key === 'PageUp' || (e.key === ' ' && e.shiftKey))) {
-    e.preventDefault(); irA(Math.max(1, S.pagina - 1)); return true;
+  if (navega && (e.key === 'PageUp' || (e.key === ' ' && e.shiftKey))) {
+    e.preventDefault(); bajarPantalla(-1); return true;
   }
-  if (!enCampo && e.key === 'Home') { e.preventDefault(); irA(1); return true; }
-  if (!enCampo && e.key === 'End') { e.preventDefault(); irA(S.doc.paginas); return true; }
+  if (navega && e.key === 'Home') { e.preventDefault(); irA(1); return true; }
+  if (navega && e.key === 'End') {
+    e.preventDefault();
+    /* Ya en la última, Fin es su final. irA() a la misma hoja subía al tope:
+       apretar Fin leyendo el pie de la última te tiraba para arriba. */
+    if (S.pagina === S.doc.paginas) V.visor?.scrollTo({ top: V.visor.scrollHeight, behavior: 'smooth' });
+    else irA(S.doc.paginas);
+    return true;
+  }
 
   if (e.ctrlKey && (e.key === '+' || e.key === '=')) { e.preventDefault(); zoomPaso(1); return true; }
   if (e.ctrlKey && e.key === '-') { e.preventDefault(); zoomPaso(-1); return true; }
@@ -1644,18 +2590,67 @@ export function atajosLector(e) {
 
   /* Tinta */
   if (e.ctrlKey && e.key.toLowerCase() === 'e') { e.preventDefault(); alternarTinta(); return true; }
-  if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); deshacerTinta(); return true; }
-  if (e.ctrlKey && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
-    e.preventDefault(); rehacerTinta(); return true;
-  }
+  /* Deshacer y rehacer son de la tinta SOLO con la tinta prendida, y nunca
+     con el foco en un campo. Antes se tomaban siempre: en Buscar, Ctrl+Z no
+     le devolvía la letra al campo (el preventDefault le sacaba su deshacer) y
+     en cambio borraba el último trazo, quizás de la página 30 mientras se
+     miraba la 5, y la capa lo guardaba en disco a los 900 ms. Un Ctrl+Z de
+     reflejo leyendo, con la barra cerrada, hacía lo mismo sin que se viera
+     nada (lector-01, tinta-06, ux-04; decisión de Fran). */
+  const deshace = e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z';
+  const rehace = e.ctrlKey && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'));
+  if ((deshace || rehace) && (enCampo || !V.tintaActiva)) return false;
+  if (deshace) { e.preventDefault(); deshacerTinta(); return true; }
+  if (rehace) { e.preventDefault(); rehacerTinta(); return true; }
   // Con el modo activo, los números eligen herramienta como en cualquier editor.
   if (V.tintaActiva && !enCampo && !e.ctrlKey && /^[1-4]$/.test(e.key)) {
     e.preventDefault();
     V.herramienta = Object.keys(HERRAMIENTAS)[+e.key - 1];
-    pintarBarraTinta();
+    sincronizarBarraTinta();
     return true;
   }
   return false;
 }
 
-export { irA, reescalar, abrirBusqueda };
+/* ── La contraseña ────────────────────────────────────────────────────────────
+   Un PDF con contraseña de apertura daba un toast rojo en inglés («No password
+   given») y no había forma de escribirla (ux-11). documento.js no sabe de
+   carteles: le pasa el pedido a quien se anotó, y el lector se anota al
+   cargarse (app.js lo importa al arrancar, antes de abrir nada). Devuelve la
+   contraseña, o null si se cancela. */
+async function pedirClave({ incorrecta = false, nombre = '' } = {}) {
+  const cuerpo = document.createElement('div');
+  cuerpo.className = 'qr-clave';
+  cuerpo.innerHTML = `
+    <div class="ox-inputwrap">
+      ${Icons.svg('lock')}
+      <input class="ox-input" type="password" autocomplete="off" spellcheck="false" aria-label="Contraseña">
+    </div>
+    ${incorrecta ? '<span class="ox-meta qr-clave__error">Esa contraseña no abre el archivo. Probá de nuevo.</span>' : ''}`;
+  const quien = nombre ? `«${nombre}»` : 'Este PDF';
+  const v = await Modal.show({
+    title: incorrecta ? 'Contraseña incorrecta' : 'Este PDF tiene contraseña',
+    sub: `${quien} está protegido. Quire la usa solo para abrirlo: no la guarda.`,
+    body: cuerpo,
+    width: 420,
+    actions: [
+      { label: 'Cancelar', value: null },
+      { label: 'Abrir', value: 'abrir', variant: 'primary' },
+    ],
+  });
+  return v === 'abrir' ? cuerpo.querySelector('input').value : null;
+}
+alPedirClave(pedirClave);
+
+/* Cómo llegó el foco, a mano: con Tab o con el puntero. Lo mira atajosLector
+   para saber si Espacio es del botón enfocado o del puck. Van en captura para
+   enterarse antes que nadie, y una sola vez por ventana (el módulo carga una). */
+let focoPorTeclado = false;
+document.addEventListener('keydown', (e) => { if (e.key === 'Tab') focoPorTeclado = true; }, true);
+document.addEventListener('pointerdown', () => { focoPorTeclado = false; }, true);
+
+/* Para las pruebas (test/lector.cjs): cuántas veces se reescaló, y en qué
+   escala están medidas las hojas. Solo lectura. */
+const diagnostico = () => ({ reescalados: V.reescalados, escalaHecha: V.escalaHecha, panel: V.panel, pendiente: V.pendiente });
+
+export { irA, reescalar, abrirBusqueda, diagnostico };

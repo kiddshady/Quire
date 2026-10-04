@@ -131,19 +131,45 @@ async function correr() {
   /* ── 1. Sin tinta, Espacio pasa de página ───────────────────────────────── */
   console.log('\n1. Sin tinta');
   {
+    /* Espacio baja UNA PANTALLA antes de pasar de hoja (lector-18, decisión
+       de Fran): en «Ajustar al ancho» la hoja mide más que el visor, y pasar
+       derecho a la siguiente se comía su mitad de abajo. */
     const antes = await estado();
+    // Una pantalla menos 48 px de respiro, sin pasarse del final de la hoja.
+    const { alto, fondo } = await js(`(async () => {
+      const { S } = await import('./js/estado.js');
+      const v = document.getElementById('qr-visor');
+      const hoja = document.querySelector('.qr-pliego[data-pagina="' + S.pagina + '"]');
+      return { alto: v.clientHeight, fondo: hoja.getBoundingClientRect().bottom - v.getBoundingClientRect().top };
+    })()`);
+    const paso = Math.min(alto - 48, fondo - alto + 24);
     tecla('keyDown', 'Space'); tecla('keyUp', 'Space');
-    await esperar(600);
+    await esperar(700);
     const despues = await estado();
-    ok('Espacio pasa a la página siguiente', despues.pagina === antes.pagina + 1, `${antes.pagina} → ${despues.pagina}`);
+    ok('Espacio baja una pantalla', paso > 48 && Math.abs((despues.scrollTop - antes.scrollTop) - paso) <= 2,
+      `${antes.scrollTop} → ${despues.scrollTop} (visor ${alto}, esperado ${paso})`);
+    ok('sin pasar de hoja todavía', despues.pagina === antes.pagina, `${antes.pagina} → ${despues.pagina}`);
     ok('y no aparece ningún disco', !despues.puck && !despues.navegando);
   }
 
   /* ── 2. Con tinta, Espacio mantenido es el puck ─────────────────────────── */
   console.log('\n2. La barra, anotando');
-  await js(`document.getElementById('qr-tinta-toggle').click()`);
+  /* Con un clic DE VERDAD, que deja el foco en el lapicito: es lo que pasa
+     en el uso real, y es justo donde Espacio se confundía. Con .click() por
+     JS el foco no se mueve, y el bug de :focus-visible (Espacio apretaba el
+     lapicito y apagaba la tinta) pasaba en verde. */
+  {
+    /* Con el foco de la ventana: sin él Chromium no aplica la regla de
+       :focus-visible que confundía al código de antes, y esto pasaba igual. */
+    win.focus(); win.webContents.focus();
+    await esperar(80);
+    ok('la ventana tiene el foco', await js('document.hasFocus()'));
+    const r = await js(`(() => { const b = document.getElementById('qr-tinta-toggle').getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
+    raton('mouseDown', r.x, r.y); raton('mouseUp', r.x, r.y);
+  }
   // que la barra de tinta termine de abrirse: el visor se mide DESPUÉS
   await esperar(600);
+  ok('el clic dejó el foco en el lapicito', await js(`document.activeElement?.id === 'qr-tinta-toggle'`));
 
   const v = (await estado()).visor;
   const centro = { x: v.x + Math.round(v.w / 2), y: v.y + Math.round(v.h / 2) };

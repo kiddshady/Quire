@@ -120,5 +120,34 @@ eq('"HMG-CoA" encuentra "HMGCoA"', coincidencias(mcgraw, plegarConsulta('HMG-CoA
    mapa: "anti-horario" plegado son 11 letras que apuntan a 12 originales. */
 eq('un guion real en el texto no corre el mapa', plegar('anti-horario', sinG).mapa, [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11]);
 
+/* El recorrido pide varias páginas a la vez (lector-37): de a una, cada página
+   era una ida y vuelta entera al worker y el worker quedaba ocioso mientras
+   se armaba el índice de la anterior. Un documento de mentira cuenta cuántas
+   tiene en vuelo; los resultados tienen que salir en el mismo orden igual. */
+console.log('\n9. El recorrido pide varias páginas a la vez');
+{
+  let enVuelo = 0;
+  let maximo = 0;
+  const falso = {
+    paginas: 12,
+    usaGuionesBlandos: async () => false,
+    async fragmentos(n) {
+      enVuelo++;
+      maximo = Math.max(maximo, enVuelo);
+      // Las pares tardan más: si el orden dependiera de quién llega primero, se vería.
+      await new Promise((r) => setTimeout(r, n % 2 ? 4 : 12));
+      enVuelo--;
+      return [{ str: n % 3 ? `palabra ${n}` : 'nada', salto: false }];
+    },
+  };
+  const { Buscador } = await import('../renderer/js/pdf/buscador.js');
+  const b = new Buscador(falso);
+  await b.buscar('palabra');
+  ok('hay más de una página en vuelo', maximo >= 3, `(máximo ${maximo})`);
+  ok('pero no todas juntas', maximo <= 4, `(máximo ${maximo})`);
+  eq('los resultados salen en el orden de las páginas', b.resultados.map((r) => r.pagina), [1, 2, 4, 5, 7, 8, 10, 11]);
+  ok('y leyó todas', b.leidas === 12 && b.terminada);
+}
+
 console.log(`\n═══ ${pass} ok · ${fail} fallas ═══\n`);
 if (fail) process.exit(1);

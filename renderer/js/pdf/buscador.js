@@ -264,6 +264,11 @@ function contexto(texto, desde, hasta) {
    es la lista. Quien muestre esto tiene que decir que la recortó. */
 const TOPE = 2000;
 
+/* Cuántas páginas se piden a la vez al recorrer (ver buscar()). Cuatro
+   alcanzan para que el worker no espere nunca; más es encolarle trabajo que
+   una consulta nueva puede tirar. */
+const EN_VUELO = 4;
+
 /**
  * El buscador de UN documento.
  *
@@ -364,6 +369,15 @@ class Buscador {
     if (!aguja) { this.terminada = true; alAvanzar?.(this); return this; }
 
     for (let n = 1; n <= this.doc.paginas; n++) {
+      /* Las tres que siguen se piden ANTES de esperar esta: así el worker
+         tiene siempre algo en la mano. De a una, cada página era una ida y
+         vuelta entera (getPage y getTextContent) y el worker quedaba ocioso
+         mientras acá se armaba el índice de la anterior (lector-37). El
+         orden de los resultados no cambia: se recorren en orden igual, y el
+         índice ya se cachea por promesa. El catch es solo para que una
+         promesa adelantada que falle no quede sin atrapar: el error se ve
+         cuando le toque su vuelta, abajo. */
+      for (let k = n + 1; k <= Math.min(this.doc.paginas, n + EN_VUELO - 1); k++) this.indice(k).catch(() => {});
       let indice;
       try {
         indice = await this.indice(n);
