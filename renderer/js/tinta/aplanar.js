@@ -22,6 +22,7 @@
 
 import { PDFDocument, rgb } from '../../vendor/pdf-lib/pdf-lib.mjs';
 import { contornoDeTrazo, pathDeContorno } from './contorno.js';
+import { contarTrazos } from './capa.js';
 
 function aRgb(hex) {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || '#000'));
@@ -70,11 +71,17 @@ export async function aplanarTinta(bytes, capa, { soloPaginas = null } = {}) {
       // Y volcada: el ancla queda en el borde superior y el path baja desde ahí.
       const d = pathDeContorno(vertices.map(([x, y]) => [x, alto - y]));
 
+      /* La opacidad va solo si es menor que 1. pdf-lib crea un ExtGState
+         nuevo en cada drawSvgPath que trae opacidad, sin reutilizar ninguno:
+         con `?? 1`, un documento con 800 trazos de pluma sumaba 800 entradas
+         en los Resources de sus páginas para decir «opaco», que es lo que ya
+         es un relleno sin nada (tinta-26). */
+      const opacidad = t.opacidad ?? 1;
       pagina.drawSvgPath(d, {
         x: 0,
         y: alto,
         color: aRgb(t.color),
-        opacity: t.opacidad ?? 1,
+        opacity: opacidad < 1 ? opacidad : undefined,
         borderWidth: 0,
       });
       escritos++;
@@ -85,13 +92,17 @@ export async function aplanarTinta(bytes, capa, { soloPaginas = null } = {}) {
   return doc.save({ useObjectStreams: true });
 }
 
-/** Cuántos trazos se van a escribir. Para avisarlo antes de imprimir. */
+/**
+ * Cuántos trazos se van a escribir. Para avisarlo antes de imprimir.
+ * Contados como los hizo Fran: un trazo que la goma partió en dos sigue
+ * siendo uno (ver contarTrazos en capa.js).
+ */
 export function contarTinta(capa, soloPaginas = null) {
   if (!capa) return 0;
   let n = 0;
   for (const p of capa.paginasConTinta()) {
     if (soloPaginas && !soloPaginas.includes(p)) continue;
-    n += capa.trazos(p).length;
+    n += contarTrazos(capa.trazos(p));
   }
   return n;
 }

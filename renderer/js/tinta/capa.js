@@ -19,13 +19,14 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 import { pathDeTrazo, trazoTocado, recortarTrazo } from './contorno.js';
+import { Toast } from '../overlays.js';
 
 const api = window.onyx;
 
 export const HERRAMIENTAS = {
   pluma: { etiqueta: 'Pluma', icono: 'tinta', ancho: 1.8, color: '#1a1a1a', opacidad: 1, sensible: true },
   fibra: { etiqueta: 'Fibra', icono: 'edit', ancho: 4.5, color: '#c0392b', opacidad: 1, sensible: true },
-  resaltador: { etiqueta: 'Resaltador', icono: 'marcador', ancho: 14, color: '#f1c40f', opacidad: 0.34, sensible: false },
+  resaltador: { etiqueta: 'Resaltador', icono: 'resaltador', ancho: 14, color: '#f1c40f', opacidad: 0.34, sensible: false },
   borrador: { etiqueta: 'Borrador', icono: 'borrador', ancho: 16, color: null, opacidad: 1, sensible: false },
 };
 
@@ -43,6 +44,20 @@ export function idDocumento(doc) {
     h = Math.imul(h, 0x01000193) >>> 0;
   }
   return `t-${h.toString(16).padStart(8, '0')}`;
+}
+
+/**
+ * Cuántos trazos hay en una lista, contados como los HIZO Fran y no como
+ * quedaron guardados. La goma parte un trazo en pedazos, y cada pedazo es un
+ * trazo en la lista: contando la lista, borrarle el medio a una línea hacía
+ * SUBIR el contador de 1 a 2, y el cartel de borrar todo decía «Se van 37
+ * trazos» después de haber borrado cosas (tinta-19). Los pedazos llevan el id
+ * del trazo del que salieron en `origen`, y se cuentan los orígenes distintos.
+ */
+export function contarTrazos(lista) {
+  const origenes = new Set();
+  for (const t of lista) origenes.add(t.origen ?? t.id);
+  return origenes.size;
 }
 
 export class CapaDeTinta {
@@ -63,6 +78,13 @@ export class CapaDeTinta {
     /* Sube con cada cambio. Sirve para saber si el PDF aplanado que hay en
        caché sigue valiendo, sin tener que comparar los trazos uno por uno. */
     this.version = 0;
+    /* Cuánto se espera después del último cambio para escribir el archivo.
+       Es un campo y no una constante para que los tests no tengan que esperar
+       casi un segundo por cada guardado. */
+    this.esperaGuardado = 900;
+    /* Si el último guardado programado falló. Mientras siga fallando se avisa
+       UNA vez, no con cada trazo (tinta-28). */
+    this._fallando = false;
   }
 
   trazos(pagina) { return this.paginas.get(pagina) || []; }
@@ -72,9 +94,10 @@ export class CapaDeTinta {
     return true;
   }
 
+  /** Los trazos del documento, como los hizo Fran: ver contarTrazos(). */
   get cuenta() {
     let n = 0;
-    for (const t of this.paginas.values()) n += t.length;
+    for (const t of this.paginas.values()) n += contarTrazos(t);
     return n;
   }
 
@@ -117,8 +140,9 @@ export class CapaDeTinta {
     const nueva = [];
     for (const t of lista) {
       if (!trazoTocado(t, x, y, radio)) { nueva.push(t); continue; }
+      // Cada pedazo recuerda de qué trazo salió: es lo que cuenta contarTrazos().
       const piezas = recortarTrazo(t.puntos, x, y, radio + t.ancho / 2)
-        .map((puntos) => ({ ...t, id: `s${++this._contador}`, puntos }));
+        .map((puntos) => ({ ...t, id: `s${++this._contador}`, origen: t.origen ?? t.id, puntos }));
       cortes.push({ original: t, piezas });
       nueva.push(...piezas);
     }
@@ -130,12 +154,26 @@ export class CapaDeTinta {
   }
 
   /** Abre el gesto de la goma: hasta terminarBorrado(), todo recorte es una sola operación. */
-  empezarBorrado() { this._borrado = { op: null }; }
-  terminarBorrado() { this._borrado = null; }
+  empezarBorrado() { this._borrado = { op: null, aviso: false }; }
+
+  /* Cierra el gesto. Si en el medio hubo recortes, recién ahora se avisa: ver
+     #anotarRecorte(). */
+  terminarBorrado() {
+    const avisar = this._borrado?.aviso;
+    this._borrado = null;
+    if (avisar) this.onCambio?.();
+  }
 
   #anotarRecorte(pagina, cortes) {
     const abierto = this._borrado;
     const op = abierto?.op;
+    /* Dentro de un gesto, cada recorte NO avisa: el editor llama a borrarEn()
+       por cada punto coalescido, y cada aviso es un emitir('tinta') que pone
+       al día la barra y el chrome, varias veces por cuadro (tinta-11). Se
+       anota que hubo cambios y se avisa una sola vez, al levantar la goma. El
+       guardado se sigue programando igual: eso es solo reponer un timer. */
+    const avisar = !abierto;
+    if (abierto) abierto.aviso = true;
     // Se suma al gesto solo si su operación sigue siendo la última: si en el
     // medio alguien deshizo, lo que viene es un gesto nuevo.
     if (op && op.pagina === pagina && this.historial.at(-1) === op) {
@@ -144,12 +182,12 @@ export class CapaDeTinta {
         if (previo) previo.piezas = previo.piezas.flatMap((p) => (p.id === c.original.id ? c.piezas : [p]));
         else op.cortes.push(c);
       }
-      this.#marcar();
+      this.#marcar(avisar);
       return;
     }
     const nueva = { tipo: 'recortar', pagina, cortes };
     if (abierto) abierto.op = nueva;
-    this.#anotar(nueva);
+    this.#anotar(nueva, avisar);
   }
 
   limpiarPagina(pagina) {
@@ -157,24 +195,29 @@ export class CapaDeTinta {
     if (!lista.length) return 0;
     this.paginas.set(pagina, []);
     this.#anotar({ tipo: 'borrar', pagina, trazos: lista });
-    return lista.length;
+    return contarTrazos(lista);
   }
 
-  #anotar(op) {
+  #anotar(op, avisar = true) {
     this.historial.push(op);
     // Una acción nueva corta la rama de rehacer: es lo que uno espera.
     this.deshechos.length = 0;
     if (this.historial.length > 200) this.historial.shift();
-    this.#marcar();
+    this.#marcar(avisar);
   }
 
+  /* deshacer() y rehacer() devuelven la operación ({ tipo, pagina, … }), o
+     false si no había nada. El historial es del documento entero: con la
+     página de la operación, el lector puede redibujar solo ese editor y avisar
+     si cayó en una hoja que no está a la vista (tinta-12). Quien solo
+     preguntaba «¿hizo algo?» sigue andando: un objeto es verdadero. */
   deshacer() {
     const op = this.historial.pop();
     if (!op) return false;
     this.#aplicarInverso(op);
     this.deshechos.push(op);
     this.#marcar();
-    return true;
+    return op;
   }
 
   rehacer() {
@@ -183,7 +226,7 @@ export class CapaDeTinta {
     this.#aplicar(op);
     this.historial.push(op);
     this.#marcar();
-    return true;
+    return op;
   }
 
   #aplicar(op) {
@@ -219,10 +262,10 @@ export class CapaDeTinta {
     this.paginas.set(op.pagina, vuelta);
   }
 
-  #marcar() {
+  #marcar(avisar = true) {
     this.sucia = true;
     this.version++;
-    this.onCambio?.();
+    if (avisar) this.onCambio?.();
     this.#programarGuardado();
   }
 
@@ -232,11 +275,32 @@ export class CapaDeTinta {
     clearTimeout(this._guardado);
     // Se guarda al parar de dibujar, no en cada trazo: anotar una página son
     // decenas de trazos y no tiene sentido reescribir el archivo en cada uno.
-    this._guardado = setTimeout(() => this.guardar().catch(() => {}), 900);
+    this._guardado = setTimeout(() => {
+      this.guardar().catch((err) => this.#avisarFallo(err));
+    }, this.esperaGuardado);
+  }
+
+  /* Antes el error se tragaba entero: con el disco lleno o sin permisos en
+     data/, Fran anotaba toda la tarde y al reabrir no había nada (tinta-28).
+     El trazo sigue en pantalla y `sucia` sigue en true, así que el próximo
+     cambio —o el cierre— lo vuelve a intentar. Por eso se avisa una sola vez
+     mientras siga fallando, y no con cada trazo. */
+  #avisarFallo(err) {
+    if (this._fallando) return;
+    this._fallando = true;
+    console.error('[tinta] no se pudo guardar', this.doc?.nombre, err?.message);
+    Toast.error('No se pudo guardar la tinta',
+      'Lo anotado sigue en pantalla, pero todavía no está en el disco. Se vuelve a intentar con el próximo trazo.');
   }
 
   async guardar() {
     if (!this.sucia) return;
+    /* La foto de los trazos se saca acá, antes del await. Si mientras se
+       escribe entra otro trazo, la versión sube y `sucia` tiene que quedar en
+       true: si no, el guardado que ese trazo programó encontraba !sucia y no
+       escribía nada, y el último trazo antes de cerrar no llegaba nunca al
+       disco (tinta-03). */
+    const version = this.version;
     const paginas = {};
     for (const [n, lista] of this.paginas) if (lista.length) paginas[n] = lista;
 
@@ -248,7 +312,9 @@ export class CapaDeTinta {
       actualizado: Date.now(),
       paginas,
     });
-    this.sucia = false;
+    if (this.version === version) this.sucia = false;
+    // Escribió: si venía fallando, el próximo fallo vuelve a avisar.
+    this._fallando = false;
     this.onCambio?.();
   }
 
@@ -259,9 +325,14 @@ export class CapaDeTinta {
       for (const [n, lista] of Object.entries(guardado.paginas)) {
         capa.paginas.set(Number(n), lista);
         for (const t of lista) {
-          // Seguir la numeración para que un id nuevo no pise uno guardado.
-          const n2 = parseInt(String(t.id).slice(1), 10);
-          if (Number.isFinite(n2) && n2 > capa._contador) capa._contador = n2;
+          /* Seguir la numeración para que un id nuevo no pise uno guardado. El
+             origen de un pedazo también cuenta: si su trazo original ya no
+             está, un id nuevo igual a ese origen sumaría el trazo nuevo a los
+             pedazos viejos en contarTrazos(). */
+          for (const id of [t.id, t.origen]) {
+            const n2 = parseInt(String(id ?? '').slice(1), 10);
+            if (Number.isFinite(n2) && n2 > capa._contador) capa._contador = n2;
+          }
         }
       }
     }

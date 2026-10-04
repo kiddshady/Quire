@@ -69,8 +69,12 @@ Icons.add({
   /* Tinta: la punta de la pluma sobre el trazo que deja. */
   tinta: '<path d="m10.9 2.7 2.4 2.4-7.3 7.3-3.2.8.8-3.2z"/><path d="m9.2 4.4 2.4 2.4"/>',
 
-  /* Resaltador: punta ancha y chanfleada, y la banda que va dejando. */
-  marcador: '<path d="m9.7 2.6 3.7 3.7-5.4 5.4H4.3V8.1z"/><path d="M2.2 13.9h11.6"/>',
+  /* Resaltador: punta ancha y chanfleada, y la banda que va dejando.
+     Se llamaba `marcador`, igual que el del esquema de más abajo, y en un
+     literal la segunda clave pisa a la primera sin aviso: el botón del
+     resaltador mostraba la cinta del esquema y este dibujo no se veía en
+     ningún lado (tinta-14, shell-32). */
+  resaltador: '<path d="m9.7 2.6 3.7 3.7-5.4 5.4H4.3V8.1z"/><path d="M2.2 13.9h11.6"/>',
 
   /* Borrador: el bloque en diagonal, apoyado sobre la línea que limpia. */
   borrador: '<path d="m7.7 3.5 4.8 4.8-4.2 4.2H4.5L2.6 10.6z"/><path d="M7.4 13.5h6.2"/>',
