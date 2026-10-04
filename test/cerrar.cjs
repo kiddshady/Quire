@@ -22,7 +22,12 @@
      de 3 s del main también "cierra", pero significa que el renderer no
      contestó y eso es una falla, no un éxito.
 
-   Ojo: la ventana de la app aparece en pantalla un segundo. Es la app real.
+   La ventana es la de la app real, pero con QUIRE_FUERA=1 nace y se queda en
+   -20000, mostrada sin tomar el foco (tests-09): esta suite y apertura, que
+   levantan main.cjs, ya no le ponen Quire encima a Fran ni le roban el foco.
+   Acá se afirman las dos, abajo. (Las suites que arman su propia ventana
+   tienen su propio cuidado: el smoke la muestra sin activarla y emula el
+   foco para los anillos; pestanas todavía la enfoca.)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const path = require('node:path');
@@ -39,11 +44,19 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'quire-cerrar-'));
 process.env.QUIRE_DATA = path.join(TMP, 'datos');
 fs.mkdirSync(process.env.QUIRE_DATA, { recursive: true });
 if (!process.argv.includes('--dev')) process.argv.push('--dev');
+process.env.QUIRE_FUERA = '1';
+
+const { hasta, esperar, vigilarConsola } = require('./_comun.cjs');
 
 const { app, BrowserWindow } = require('electron');
 require(path.join(RAIZ, 'main.cjs'));           // la app de verdad
 
 const problemas = [];
+/* Lo que el renderer escriba en la consola mientras guarda y cierra
+   (tests-10). Era la única suite con ventana que no la escuchaba: una
+   excepción durante el guardado al cerrar, si no frenaba el cierre, pasaba
+   verde. */
+const consola = [];
 let pass = 0;
 let dejarSalir = false;
 
@@ -68,10 +81,17 @@ const abandono = setTimeout(() => {
   await app.whenReady();
 
   const win = await hasta(() => BrowserWindow.getAllWindows()[0], 10000, 'la ventana no apareció');
+  vigilarConsola(win, consola);
   if (win.webContents.isLoading()) {
     await new Promise((r) => win.webContents.once('did-finish-load', r));
   }
   await esperar(1800);                          // que boot() termine de arrancar
+
+  /* main.cjs muestra la ventana en -20000 y a los 200 ms la lleva a su lugar.
+     Con QUIRE_FUERA=1 no la mueve: si esto falla, verificar le está poniendo
+     la app en el escritorio a Fran. */
+  ok('la ventana se queda fuera de pantalla (QUIRE_FUERA)', win.getPosition()[0] <= -10000, JSON.stringify(win.getPosition()));
+  ok('y no se llevó el foco del escritorio', !win.isFocused());
 
   const js = (codigo) => win.webContents.executeJavaScript(codigo, true);
 
@@ -102,9 +122,10 @@ const abandono = setTimeout(() => {
   await cerrada;
   const tardo = Date.now() - arranque;
 
-  ok('la ventana se cierra', true);
-  /* Menos que el timeout del main con margen. Si tardó 3 s, cerró por
-     abandono: el renderer no contestó y el guardado no está garantizado. */
+  /* Que cierre lo dice haber llegado acá: si no cerraba, el que avisa es el
+     abandono de 15 s. Lo que se mide es CÓMO cerró. Menos que el timeout del
+     main con margen: si tardó 3 s, cerró por abandono, el renderer no
+     contestó y el guardado no está garantizado. */
   ok('y cierra porque el renderer contestó, no por el timeout', tardo < 2500, `${tardo} ms`);
 
   /* ── Lo que quedó escrito ──────────────────────────────────────────────── */
@@ -121,6 +142,8 @@ const abandono = setTimeout(() => {
   ok('y la sesión quedó anotada', Array.isArray(sesion?.ultimosDocumentos) && sesion.ultimosDocumentos.length === 1,
     JSON.stringify(sesion?.ultimosDocumentos));
 
+  ok('y el renderer no se quejó en la consola mientras cerraba', consola.length === 0, consola.join(' | '));
+
   terminar(problemas.length ? 1 : 0);
 })().catch((err) => {
   console.log(`\n  FALLA excepción sin atajar: ${err?.stack || err}`);
@@ -136,16 +159,4 @@ function terminar(codigo) {
   app.exit(codigo || (problemas.length ? 1 : 0));
 }
 
-const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 const leerJSON = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-
-/** Espera a que algo deje de ser falsy, o se rinde. */
-async function hasta(fn, ms, mensaje) {
-  const limite = Date.now() + ms;
-  while (Date.now() < limite) {
-    const v = fn();
-    if (v) return v;
-    await esperar(120);
-  }
-  throw new Error(mensaje);
-}

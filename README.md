@@ -162,7 +162,7 @@ Sin pdf-lib de por medio se puede testear con Node pelado.
 ## Verificar
 
 ```
-npm run verificar     # las once suites
+npm run verificar     # npm test y todas las suites con Electron, en orden
 ```
 
 | | |
@@ -176,9 +176,15 @@ npm run verificar     # las once suites
 | `npm run buscar` | Genera un PDF con los casos difíciles y mide **dónde cae cada marca**: el resaltado tiene que caer sobre las mismas letras que el span de la capa de texto |
 | `npm run puck` | Prende la tinta y aprieta la barra con eventos del sistema: que el disco aparezca bajo el puntero, que el anillo mueva el scroll píxel por píxel y que el núcleo termine en un zoom real con el mismo punto del papel bajo el disco |
 | `npm run pestanas` | Abre varios PDFs: que el estado sea de cada pestaña, que arrastrar una la cambie de lugar y que el worker compartido sobreviva a cerrar una |
-| `npm run cerrar` | Levanta la app entera y la cierra: que el último trazo llegue al disco **y que la ventana siga cerrándose** |
-| `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético |
+| `npm run cerrar` | Levanta la app entera y la cierra: que el último trazo llegue al disco **y que la ventana siga cerrándose** porque el renderer contestó, no por el timeout |
+| `npm run caida` | Tira el renderer a propósito: la primera caída se recarga sola con la sesión, la segunda no, y con el renderer caído cerrar no espera |
+| `npm run cartel` | El cartel de actualizaciones: cómo se **relevan** sus pasos, muestreados cuadro por cuadro (nunca dos legibles a la vez) |
+| `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético, imprime, organiza, exporta, y **afirma** dónde cae cada cosa |
+| `npm run smoke` | Las piezas del framework sobre la vitrina (overlays, fuente, re-tintado, anillos de foco en las siete vistas) y **la curva del fundido** al navegar y al repintar |
 | `npm run apertura` | Lanza la app **como proceso**, con un PDF en la línea de comandos |
+
+Suelto, fuera de verificar: `npm run color-ventana` mira qué color le manda la app a
+la ventana y cómo lo convirtió (el humo afirma lo mismo en su paso 0).
 
 `apertura` es el único que lanza la app entera desde afuera, y existe por un bug
 que ninguna otra suite podía ver: el doble click abría Quire vacía porque nadie
@@ -187,13 +193,36 @@ andaba bien. La señal que mira es `ultimosDocumentos` en disco, que solo se esc
 cuando una pestaña terminó de abrirse de verdad.
 
 El humo mide **dónde cae** cada cosa y si el canvas tiene tinta — no solo si el
-elemento existe. Dos trampas aprendidas a los golpes, ya resueltas en el test:
+elemento existe — y lo que mide lo afirma: hasta octubre de 2026 la mitad de sus
+mediciones solo se imprimían, y verificar daba verde con el bug de vuelta. Cada
+afirmación nueva se corrió al revés, con el arreglo deshecho, y tiene que fallar.
+Las trampas aprendidas a los golpes, ya resueltas en el test:
 
 - La ventana va en `x:-20000` + `showInactive()`, **no** `show:false`. Con la
   ventana oculta, Chromium congela las animaciones CSS y todo lo que entra
   animado se mide en `opacity: 0` — el test denuncia bugs que no existen.
 - `capturePage()` devuelve el último frame *compuesto*, que puede ser anterior al
-  último repintado. Hay que esperar antes de capturar.
+  último repintado. Antes de capturar se espera a que no quede calco.
+- Se espera la **señal**, no un número de milisegundos: las hojas pintadas, el
+  preview con su bitmap, las miniaturas con su canvas. Con otras pruebas
+  corriendo a la vez, una espera fija llega antes de tiempo.
+- Lo que pasa por un relevo se lee **vivo**: mientras dura, lo viejo sigue en el
+  DOM y un `textContent` pega las dos frases. Las filas se cuentan sin las que
+  se están yendo (`[data-state=closing]`).
+- Un canvas de la app **no se lee directo**: dos `getImageData` sobre el mismo
+  canvas hacen que Chromium avise por consola (y la consola vigilada pone el
+  humo en rojo) y hasta que mude ese contexto a CPU. Se copia con `drawImage` a
+  un canvas descartable con `willReadFrequently` y se lee la copia (`PIXELES`
+  y `leerHoja()`, en `_comun.cjs`). El paso 5-bis relee a propósito para que
+  eso no vuelva.
+
+Lo que comparten las suites vive en `test/_comun.cjs`: `abandono()` (un rechazo
+sin atajar o un cuelgue terminan la suite con código 3 en vez de dejar Electron
+vivo y verificar trabado), `hasta()` y `hastaQuieto()` para esperar señales,
+`vivo()` y `sinSalir()` para leer lo que queda, y `muestrear()` para medir una
+serie desde la página. Las que levantan la app de verdad (`cerrar`, `caida`,
+`apertura`) corren con `QUIRE_FUERA=1`: la ventana nace y se queda fuera de
+pantalla, sin robarle el foco a nadie.
 
 `seleccion` mide por la misma razón, y es el caso donde más se nota: la capa de
 texto son spans **invisibles**, así que cualquier assert de DOM la da por buena

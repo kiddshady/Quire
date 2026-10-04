@@ -21,13 +21,17 @@
      el de la Quire instalada. Sin eso, tener la app abierta rompe el test.
    · Sin `--dev`, justamente para que el lock SÍ se pida (en dev se saltea).
 
-   Ojo: la ventana de la app aparece en pantalla unos segundos. Es la app real.
+   La ventana es la de la app real, pero con QUIRE_FUERA=1 en el entorno nace
+   y se queda en -20000, sin tomar el foco (tests-09): antes aparecía en el
+   escritorio unos segundos, dos veces por cada verificar.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+
+const { abandono } = require('./_comun.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 const ELECTRON = require(path.join(RAIZ, 'node_modules', 'electron'));
@@ -49,7 +53,7 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 function lanzar(...args) {
   return spawn(ELECTRON, ['.', `--user-data-dir=${PERFIL}`, ...args], {
     cwd: RAIZ,
-    env: { ...process.env, QUIRE_DATA: DATOS },
+    env: { ...process.env, QUIRE_DATA: DATOS, QUIRE_FUERA: '1' },
     stdio: 'ignore',
   });
 }
@@ -76,10 +80,24 @@ async function abrio(ruta, ms = 30000) {
   return false;
 }
 
-(async () => {
-  let primera = null;
-  let segunda = null;
+let primera = null;
+let segunda = null;
 
+/* Si algo se cuelga (una espera que no vuelve, un proceso que no muere), se
+   abandona igual matando lo que se lanzó y borrando la carpeta: con Node
+   pelado, un Electron hijo colgado dejaba la suite trabada y la ventana
+   viva (tests-07). */
+abandono({
+  ms: 120000,
+  salir: (codigo) => {
+    matar(segunda);
+    matar(primera);
+    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* el Electron todavía la tiene */ }
+    process.exit(codigo);
+  },
+});
+
+(async () => {
   try {
     console.log('\n1. Doble click con Quire cerrada');
     primera = lanzar(PDF_A);

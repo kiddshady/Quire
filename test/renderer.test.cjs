@@ -1,8 +1,10 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    Humo del renderer: monta la app de verdad y la recorre.
 
-   Se corre con `npm run smoke` (necesita Electron, por eso no está en el
-   `npm test`, que es node pelado).
+   Se corre con `npm run smoke`, y es parte de `npm run verificar`: es lo
+   único que mide la curva del fundido al navegar y al repintar (9-ter). No
+   está en el `npm test` porque necesita Electron, y el `npm test` es Node
+   pelado.
 
    Lo que busca es lo que un test de unidad NO ve: overlays que aterrizan fuera
    de pantalla, vistas que no montan, animaciones que se quedan quietas donde no
@@ -12,8 +14,8 @@
    HTML, e inalcanzable con el mouse.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const { app, BrowserWindow } = require('electron');
-const { vigilarConsola } = require('./consola.cjs');
+const { app, BrowserWindow, nativeImage } = require('electron');
+const { abandono, hasta, vigilarConsola, brillo, muestrearAca } = require('./_comun.cjs');
 const { auditarAnillos } = require('./anillos.cjs');
 const path = require('path');
 
@@ -21,15 +23,15 @@ const ROOT = path.join(__dirname, '..');
 
 // Datos propios, antes de requerir src/ (el porqué, en datos-propios.cjs).
 require('./datos-propios.cjs')('smoke');
+/* Lo que se mide sobre la vitrina vive en Piezas, que en la app instalada no
+   está en el rail (ux-39: solo en modo desarrollo, por app:info). */
+process.env.QUIRE_DEV = '1';
 const W = 1440; const H = 900;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let pass = 0; let fail = 0;
 const ok = (n, c, x = '') => { if (c) { pass++; console.log(`  ok   ${n}`); } else { fail++; console.log(`  FALLA ${n} ${x}`); } };
-const bail = (w, e) => { console.log(`ABORTADO ${w}`, e?.stack || e || ''); app.exit(3); };
-process.on('unhandledRejection', (e) => bail('rechazo', e));
-process.on('uncaughtException', (e) => bail('excepción', e));
-setTimeout(() => bail('timeout de 120s'), 120000);
+abandono();                     // 120 s, y los rechazos sin atajar abortan
 
 app.whenReady().then(async () => {
   require(path.join(ROOT, 'src', 'ipc.cjs')).register();
@@ -42,8 +44,16 @@ app.whenReady().then(async () => {
   const errores = [];
   vigilarConsola(win, errores);
   await win.loadFile(path.join(ROOT, 'renderer', 'index.html'));
-  win.show();
-  await sleep(2200);
+  /* Mostrada sin activarla (tests-09): con show() la ventana de -20000 se
+     llevaba el foco del escritorio, y lo que Fran tecleaba mientras corría
+     verificar iba a parar a una ventana que no se ve. Visible alcanza para
+     que Chromium anime; el foco lo pide recién la auditoría de anillos, y lo
+     emula (bloque 9). */
+  win.showInactive();
+  /* Se espera la señal y no un número fijo (tests-18): el splash se fue y la
+     vista inicial pintó. Si no llega, las afirmaciones de abajo lo dicen. */
+  await hasta(() => win.webContents.executeJavaScript(`!document.getElementById('boot-splash') && document.getElementById('view').children.length > 0`), 15000)
+    .catch(() => {});
 
   const js = (c) => win.webContents.executeJavaScript(c);
   // Clickear sin explotar si el selector no existe: un elemento faltante tiene
@@ -57,6 +67,30 @@ app.whenReady().then(async () => {
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }));
     el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, composed: true }));
     el.click(); return true; })()`);
+
+  /* ── 0. Las herramientas de _comun.cjs que todavía no usa ninguna suite ──
+     brillo() y muestrearAca() quedaron para la receta de pestanas 3-ter
+     (va en «afuera»), y nadie las ejercitaba. Si la fórmula o el orden de los
+     canales estuvieran mal, el primer paquete que las use mediría basura sin
+     enterarse (revisión del paquete 0C). Se prueban acá porque hace falta
+     Electron: una NativeImage de verdad, armada con píxeles conocidos.
+     toBitmap() da BGRA; el azul puro es el que delata un orden cruzado: con
+     los pesos en BGRA da 29 (0,114 × 255), y leído como RGBA daría 76. */
+  console.log('\n0. Las herramientas de _comun.cjs');
+  {
+    const imagen = (b, g, r) => nativeImage.createFromBitmap(
+      Buffer.from(Array.from({ length: 4 }, () => [b, g, r, 255]).flat()), { width: 2, height: 2 });
+    const medidos = {
+      blanco: brillo(imagen(255, 255, 255)), negro: brillo(imagen(0, 0, 0)),
+      azul: brillo(imagen(255, 0, 0)), rojo: brillo(imagen(0, 0, 255)),
+    };
+    ok('brillo(): blanco 255, negro 0, azul 29 y rojo 76 (los canales en BGRA)',
+      medidos.blanco === 255 && medidos.negro === 0 && medidos.azul === 29 && medidos.rojo === 76, JSON.stringify(medidos));
+    const serie = await muestrearAca(async (t) => t, 10, 60);
+    ok('muestrearAca(): la serie avanza y llega hasta el final',
+      serie.length >= 3 && serie[0] < 10 && serie.at(-1) >= 60 && serie.every((t, i) => i === 0 || t >= serie[i - 1]),
+      JSON.stringify(serie));
+  }
 
   console.log('\n1. Arranque');
   ok('el splash se fue', !(await js(`!!document.getElementById('boot-splash')`)));
@@ -78,10 +112,11 @@ app.whenReady().then(async () => {
      Lo que SÍ vale de este archivo es lo que mide primitivos del framework
      sobre Piezas —dónde caen los overlays, la fuente empaquetada, el re-tintado
      y las reglas de oro—, y eso se conserva entero. Los flujos propios de Quire
-     los cubre humo.cjs, que es además el que corre en `npm run verificar`. */
+     los cubre humo.cjs. */
 
   console.log('\n2. Todas las vistas montan');
-  for (const v of ['lector', 'paginas', 'imprimir', 'herramientas', 'piezas', 'ajustes']) {
+  // Las siete del rail: Convertir faltaba acá y sí estaba en la auditoría de anillos (tests-03).
+  for (const v of ['lector', 'paginas', 'imprimir', 'herramientas', 'convertir', 'piezas', 'ajustes']) {
     await click(`[data-view="${v}"]`);
     await sleep(700);
     const hijos = await js(`document.getElementById('view').children.length`);
@@ -266,12 +301,40 @@ app.whenReady().then(async () => {
      adentro cuentan cero. */
   console.log('\n9. Ningún anillo de foco se corta');
   const AUDITAR_ANILLOS = auditarAnillos();
-  // Sin foco en la ventana, :focus-visible no se aplica y todo anillo mide
-  // cero: la auditoría pasaría sin haber medido nada.
-  win.focus();
-  win.webContents.focus();
+  /* Sin foco en la ventana, :focus-visible no se aplica y todo anillo mide
+     cero: la auditoría pasaría sin haber medido nada. El foco se EMULA por el
+     protocolo de DevTools (la página cree que tiene el foco) en vez de
+     win.focus(), que activaba la ventana de verdad y le robaba el teclado a
+     Fran (tests-09). Si el debugger no se puede enganchar, queda el foco de
+     verdad, como antes: mejor robarlo que medir cero. */
+  let focoEmulado = false;
+  try {
+    win.webContents.debugger.attach('1.3');
+    await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+    focoEmulado = true;
+  } catch (e) {
+    console.log(`  (no se pudo emular el foco: ${e.message}; se toma el de verdad)`);
+    win.focus();
+    win.webContents.focus();
+  }
   await sleep(150);
   ok('la ventana tiene el foco (si no, no hay anillos que medir)', await js('document.hasFocus()'));
+  /* hasFocus() solo dice que la página CREE tener el foco. Lo que la
+     auditoría necesita es que :focus-visible se aplique: un ítem del rail,
+     enfocado como con teclado, tiene que mostrar su anillo. Sin las
+     transiciones, como en anillos.cjs: a mitad de la entrada mediría cero. */
+  ok(`un anillo de prueba se ve (foco ${focoEmulado ? 'emulado' : 'de verdad'})`, await js(`(() => {
+    if (!document.getElementById('aud-notr')) document.head.insertAdjacentHTML('beforeend', '<style id="aud-notr">*,*::before{transition:none!important}</style>');
+    const b = document.querySelector('.ox-navitem');
+    if (!b) return false;
+    b.focus({ focusVisible: true, preventScroll: true });
+    const s = getComputedStyle(b);
+    const hay = (s.boxShadow !== 'none' && /[1-9][\\d.]*px/.test(s.boxShadow)) || (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0);
+    b.blur();
+    return hay;
+  })()`));
+  // Y el foco del escritorio sigue donde estaba: la ventana no se activó.
+  if (focoEmulado) ok('la ventana del smoke no se llevó el foco del escritorio', !win.isFocused());
   for (const v of ['lector', 'paginas', 'imprimir', 'herramientas', 'convertir', 'piezas', 'ajustes']) {
     await click(`[data-view="${v}"]`);
     await sleep(700);

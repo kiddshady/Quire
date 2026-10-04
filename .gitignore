@@ -11,6 +11,11 @@ data/
 # Capturas que dejan los tests al correr.
 test/*.png
 
+# Las páginas que arman tinta.cjs e imposicion.cjs para correr adentro del
+# renderer. Se borran al terminar, pero una corrida que explota a mitad de
+# camino las dejaba en el árbol (tests-08), y renderer/** se empaqueta.
+renderer/_*.html
+
 # El caché de tesseract, si alguna vez cae en el cwd (no debería: ver rutasOcr
 # en src/conversion.cjs).
 *.traineddata
