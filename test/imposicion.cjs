@@ -102,13 +102,22 @@ app.whenReady().then(async () => {
       }), geo);
       salida.posterIdeal = { hojas: (await leer(b)).length, mosaico: calculo.hojas[0]?.mosaico };
 
-      // (b) Real: con el borde muerto de la HP y 10 mm de solape hacen falta 3×3,
-      //     porque dos áreas imprimibles miden MENOS que dos A4.
+      // (b) Real: con el borde muerto de la HP y 10 mm de solape hacen falta 3×3
+      //     en vertical, porque dos áreas imprimibles miden MENOS que dos A4.
+      //     Va con la orientación elegida a mano: en automática el póster
+      //     prueba las dos y se queda con la que pide menos hojas (imprimir-07).
       const { calculo: c2 } = await imponer(bytes, planCon({
-        modo: 'poster', papel: A4, imprimible: HP, rango: '1',
+        modo: 'poster', papel: A4, imprimible: HP, rango: '1', orientacion: 'vertical',
         poster: { escala: 200, solape: 10, marcas: true },
       }), geo);
       salida.posterReal = { hojas: c2.hojas.length, mosaico: c2.hojas[0]?.mosaico };
+
+      // (c) El mismo en automática: apaisado entra en 4×2, una hoja menos.
+      const { calculo: c3 } = await imponer(bytes, planCon({
+        modo: 'poster', papel: A4, imprimible: HP, rango: '1',
+        poster: { escala: 200, solape: 10, marcas: true },
+      }), geo);
+      salida.posterAuto = { hojas: c3.hojas.length, apaisado: c3.papel.apaisado };
     }
 
     // 5. Escala real: el contenido no entra y hay que avisarlo
@@ -130,6 +139,60 @@ app.whenReady().then(async () => {
 
     // 7. Reparto del dúplex
     salida.duplex = partirDuplex(4);
+
+    /* 7-bis. Dúplex con un número IMPAR de caras (imprimir-02). La última hoja
+       de los frentes queda arriba del fajo y no tiene dorso: los dorsos tienen
+       que arrancar con una página en blanco, o el fajo entero sale corrido una
+       hoja. Cinco caras: el rango «1-4, 1» repite la primera. */
+    {
+      const { extraerCaras } = await import('./js/imposicion/motor.js');
+      salida.duplex5 = partirDuplex(5);
+      salida.duplex5Derecho = partirDuplex(5, { invertirReverso: false });
+      const { bytes: b5, calculo } = await imponer(bytes, planCon({ papel: A4, rango: '1-4, 1', duplex: 'largo' }), geo);
+      const dorsos = await leer(await extraerCaras(b5, salida.duplex5.dorsos));
+      salida.dorsos5 = { caras: calculo.hojas.length, hojas: dorsos };
+    }
+
+    /* 7-ter. La ventana del preview (imprimir-13): con «desde» se imponen las
+       hojas de donde está mirando, no siempre las primeras. */
+    {
+      const v = await imponer(bytes, planCon({ papel: A4 }), geo, { limiteHojas: 2, desde: 2 });
+      const fuera = await imponer(bytes, planCon({ papel: A4 }), geo, { limiteHojas: 2, desde: 99 });
+      salida.ventana = {
+        desde: v.desde, generadas: v.generadas, parcial: v.parcial, total: v.calculo.hojas.length,
+        textos: (await leer(v.bytes)).map((h) => h.texto),
+        fueraDesde: fuera.desde, fueraGeneradas: fuera.generadas,
+      };
+    }
+
+    /* 7-quater. La caché del original (imprimir-13, y la revisión del 2C): se
+       reusa mientras son los mismos bytes, guarda UNA sola entrada y la
+       vista la vacía al irse. Era un WeakMap por bytes: cada documento que
+       pasaba por Imprimir se quedaba con su parseado hasta cerrar la pestaña.
+       Se cuentan las cargas espiando PDFDocument.load (es la misma instancia
+       del módulo que usa el motor). */
+    {
+      const { PDFDocument } = await import('./vendor/pdf-lib/pdf-lib.mjs');
+      const motor = await import('./js/imposicion/motor.js');
+      const original = PDFDocument.load;
+      let cargas = 0;
+      PDFDocument.load = function (...a) { cargas++; return original.apply(this, a); };
+      try {
+        const otros = bytes.slice();
+        const p = planCon({ papel: A4 });
+        const una = (b) => imponer(b, p, geo, { limiteHojas: 1 });
+        motor.limpiarCacheOrigen?.();
+        await una(bytes); await una(bytes);
+        const reusa = cargas;
+        await una(otros); await una(bytes);
+        const unaSola = cargas;
+        motor.limpiarCacheOrigen?.();
+        await una(bytes);
+        salida.cache = { reusa, unaSola, trasLimpiar: cargas, hayLimpiar: typeof motor.limpiarCacheOrigen === 'function' };
+      } finally {
+        PDFDocument.load = original;
+      }
+    }
 
     // 8. Combinar y dividir
     {
@@ -341,6 +404,8 @@ app.whenReady().then(async () => {
   ok('con el borde muerto real de la HP y 10 mm de solape, hacen falta 3×3',
     r.posterReal.hojas === 9 && r.posterReal.mosaico?.filas === 3,
     `${r.posterReal.hojas} hojas, ${JSON.stringify(r.posterReal.mosaico)}`);
+  ok('en automática se queda con el apaisado, que pide una hoja menos (4×2)',
+    r.posterAuto.hojas === 8 && r.posterAuto.apaisado, JSON.stringify(r.posterAuto));
 
   console.log('\n5. Escalas');
   ok('A4 a tamaño real sobre A5 desborda, y se avisa', r.a5real.desborde);
@@ -354,6 +419,34 @@ app.whenReady().then(async () => {
      otra razón: la salida apila boca abajo y la entrada toma de arriba, así que
      la primera hoja de la segunda pasada es la última de la primera. */
   ok('los dorsos van INVERTIDOS (3,1): la salida apila al revés', r.duplex.dorsos.join() === '3,1', r.duplex.dorsos.join());
+
+  console.log('\n6-bis. Dúplex con cinco caras');
+  ok('partirDuplex(5): frentes 0,2,4', r.duplex5.frentes.join() === '0,2,4', r.duplex5.frentes.join());
+  ok('y los dorsos arrancan con una página en blanco: [null,3,1]',
+    JSON.stringify(r.duplex5.dorsos) === '[null,3,1]', JSON.stringify(r.duplex5.dorsos));
+  ok('sin invertir el reverso, el hueco no hace falta', JSON.stringify(r.duplex5Derecho.dorsos) === '[1,3]',
+    JSON.stringify(r.duplex5Derecho.dorsos));
+  ok('el rango «1-4, 1» da cinco caras', r.dorsos5.caras === 5, String(r.dorsos5.caras));
+  ok('el PDF de dorsos tiene tres páginas', r.dorsos5.hojas.length === 3, String(r.dorsos5.hojas.length));
+  ok('la primera, en blanco y del tamaño del pliego',
+    r.dorsos5.hojas[0] && !r.dorsos5.hojas[0].texto && r.dorsos5.hojas[0].anchoPt === 595 && r.dorsos5.hojas[0].altoPt === 842,
+    JSON.stringify(r.dorsos5.hojas[0]));
+  ok('después la cuarta y la segunda', /CUATRO/.test(r.dorsos5.hojas[1]?.texto) && /DOS/.test(r.dorsos5.hojas[2]?.texto),
+    JSON.stringify(r.dorsos5.hojas.map((h) => h.texto)));
+
+  console.log('\n6-ter. La ventana del preview');
+  ok('impone las hojas pedidas (desde la 3)', r.ventana.desde === 2 && r.ventana.generadas === 2 && r.ventana.parcial,
+    JSON.stringify(r.ventana));
+  ok('y son la tercera y la cuarta', /TRES/.test(r.ventana.textos[0]) && /CUATRO/.test(r.ventana.textos[1]),
+    JSON.stringify(r.ventana.textos));
+  ok('el cálculo sigue siendo el completo', r.ventana.total === 4);
+  ok('una ventana que se pasa del final se corre adentro', r.ventana.fueraDesde === 3 && r.ventana.fueraGeneradas === 1,
+    'desde ' + r.ventana.fueraDesde + ', ' + r.ventana.fueraGeneradas + ' hojas');
+
+  console.log('\n6-quater. La caché del original');
+  ok('los mismos bytes se parsean una sola vez', r.cache.reusa === 1, JSON.stringify(r.cache));
+  ok('guarda una sola entrada: otros bytes la reemplazan', r.cache.unaSola === 3, JSON.stringify(r.cache));
+  ok('y limpiarCacheOrigen la suelta', r.cache.hayLimpiar && r.cache.trasLimpiar === 4, JSON.stringify(r.cache));
 
   console.log('\n7. Combinar y dividir');
   ok('dos de 4 páginas dan 8', r.combinar.paginas === 8, String(r.combinar.paginas));

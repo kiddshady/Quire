@@ -9,9 +9,10 @@
    esto pueda correr así.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+import fs from 'node:fs';
 import {
   MM, mm, planCon, resolverRango, paginasDelPlan, papelDelPlan, areaUtil, papelParaElDriver,
-  encajar, celdasNup, ordenFolleto, mosaicoPoster, calcularHojas,
+  encajar, celdasNup, ordenFolleto, mosaicoPoster, calcularHojas, NOMBRES_DE_PAPEL,
 } from '../renderer/js/imposicion/plan.js';
 
 let pass = 0; let fail = 0;
@@ -209,6 +210,59 @@ console.log('\n9. El papel que se le pide al driver');
   const delCalculo = papelParaElDriver(calc.papel);
   ok('el cálculo y el pedido describen la misma hoja',
     delCalculo.pageSize === 'A5' && delCalculo.landscape === true, JSON.stringify(delCalculo));
+}
+
+/* ── 10. Lo que arregló la auditoría de octubre de 2026 (paquete 2C) ─────── */
+console.log('\n10. Auditoría: rango, orientación del N-up y papeles con nombre');
+{
+  /* imprimir-18: un tramo que cae entero después del final no es la última
+     página. Antes «20-30» sobre 10 daba [10] y se imprimía sin avisar. */
+  ok('«20-30» sobre 10 páginas no deja ninguna', resolverRango('20-30', 10).length === 0,
+    resolverRango('20-30', 10).join());
+  ok('«11-15» tampoco', resolverRango('11-15', 10).length === 0);
+  ok('pero un tramo que empieza adentro se acota: «8-30» → 8,9,10', resolverRango('8-30', 10).join() === '8,9,10');
+  ok('y uno al revés que arranca afuera baja desde el final: «20-8» → 10,9,8', resolverRango('20-8', 10).join() === '10,9,8');
+
+  /* imprimir-07: en automático, 2 por hoja (la grilla 1×2, rotulada «2×1»)
+     con A4 vertical pide el papel APAISADO y deja cada página al 70,7 %. */
+  const dos = calcularHojas(planCon({ modo: 'nup', escala: { tipo: 'ajustar' },
+    nup: { filas: 1, columnas: 2, orden: 'horizontal' } }), doc(4));
+  ok('2 por hoja en automático va en papel apaisado', dos.papel.apaisado);
+  ok('y cada página sale al 70,7 %', cerca(dos.hojas[0].colocaciones[0].escala, 0.7071, 0.002),
+    String(dos.hojas[0].colocaciones[0].escala));
+  // Con «Solo reducir», que es como arranca la vista, igual.
+  const dosRed = calcularHojas(planCon({ modo: 'nup', escala: { tipo: 'reducir' },
+    nup: { filas: 1, columnas: 2, orden: 'horizontal' } }), doc(4));
+  ok('también con Solo reducir', dosRed.papel.apaisado && cerca(dosRed.hojas[0].colocaciones[0].escala, 0.7071, 0.002));
+  // El 2×2 empata (0,5 en las dos): manda la mayoría de las páginas.
+  const cuatro = calcularHojas(planCon({ modo: 'nup', nup: { filas: 2, columnas: 2, orden: 'horizontal' } }), doc(4));
+  ok('el 2×2 empata y se queda vertical, como las páginas', !cuatro.papel.apaisado);
+  // Elegida a mano, la orientación manda.
+  const forzada = calcularHojas(planCon({ modo: 'nup', orientacion: 'vertical',
+    nup: { filas: 1, columnas: 2, orden: 'horizontal' } }), doc(4));
+  ok('con Vertical elegida a mano no la toca', !forzada.papel.apaisado);
+  /* Póster: la orientación que pide menos hojas para la misma ampliación. Una
+     página de 290 × 300 mm es vertical, pero en un A4 apaisado (297 de ancho)
+     entra en una columna: 2 hojas contra 4 en vertical. */
+  const ancha = { anchoPt: mm(290), altoPt: mm(300) };
+  const conPoster = (orientacion) => calcularHojas(planCon({ modo: 'poster', orientacion, respetarNoImprimible: false,
+    poster: { escala: 100, solape: 0, marcas: false } }), doc(1, ancha)).hojas.length;
+  ok('el póster en automático va apaisado si así pide menos hojas',
+    conPoster('auto') === 2 && conPoster('vertical') === 4,
+    `auto ${conPoster('auto')}, vertical ${conPoster('vertical')}, horizontal ${conPoster('horizontal')}`);
+
+  /* imprimir-19: el renderer y el proceso principal tienen que aceptar los
+     MISMOS papeles por nombre. Si no, uno fuera de la intersección viaja sin
+     `paper=` y SumatraPDF lo compone sobre el papel del driver. impresion.cjs
+     requiere electron y no se puede importar desde Node: se lee su lista. */
+  const fuente = fs.readFileSync(new URL('../src/impresion.cjs', import.meta.url), 'utf8');
+  const literal = fuente.match(/const PAPELES_CON_NOMBRE = new Set\(\[([\s\S]*?)\]\)/);
+  const delMain = literal ? [...literal[1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort() : [];
+  ok('el plan nombra exactamente los papeles que acepta el proceso principal',
+    delMain.length > 0 && delMain.join() === [...NOMBRES_DE_PAPEL].sort().join(),
+    `main: ${delMain.join()} · plan: ${[...NOMBRES_DE_PAPEL].sort().join()}`);
+  const ejecutivo = papelParaElDriver(papelDelPlan(planCon({ papel: { nombre: 'Ejecutivo', ancho: 184.15, alto: 266.7 } }), doc(1)));
+  ok('un Ejecutivo se pide por su nombre', ejecutivo.pageSize === 'Executive', JSON.stringify(ejecutivo));
 }
 
 function aMMs(pt) { return (pt / MM).toFixed(2) + 'mm'; }

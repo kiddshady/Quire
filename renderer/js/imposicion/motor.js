@@ -64,32 +64,74 @@ function marcasDeCorte(hoja, largo = mm(6)) {
   return lineas;
 }
 
+/* El original parseado, por identidad de sus bytes (imprimir-13). Cada toque
+   de una opción del preview volvía a hacer PDFDocument.load del documento
+   entero, y en un PDF grande eso era casi todo el tiempo de la imposición.
+   Se puede reusar porque embedPages no toca el origen: copia cada página al
+   documento de salida (PDFObjectCopier) antes de embeberla. La clave son los
+   bytes mismos: los del Documento, o la copia con la tinta aplanada, que
+   imprimir.js cachea por versión.
+
+   UNA sola entrada, y la vista de Imprimir la vacía al irse
+   (limpiarCacheOrigen). Era un WeakMap por bytes, pero los bytes del
+   Documento viven lo que la pestaña: cada documento que pasaba una vez por
+   Imprimir se quedaba con su árbol de pdf-lib hasta cerrarla, y el parser
+   copia el contenido de cada stream, así que un escaneo de 150 MB sumaba otros
+   150 MB que no se soltaban. Justo lo que imprimir-27 y tinta-27 venían a
+   cerrar (lo encontró la revisión del paquete 2C). Así se reusa entre toques
+   de opciones y se suelta al salir. Una carga que falla no se queda. */
+let origen = null;   // { bytes, promesa }
+
+function cargarOrigen(bytes) {
+  const clave = bytes && typeof bytes === 'object' ? bytes : null;
+  if (clave && origen?.bytes === clave) return origen.promesa;
+  const promesa = PDFDocument.load(
+    bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes),
+    // Un PDF con permisos de solo-lectura igual se puede imponer: el permiso
+    // es del documento, no del papel que ya tenés en la mano.
+    { ignoreEncryption: true, updateMetadata: false }
+  );
+  if (clave) {
+    const entrada = { bytes: clave, promesa };
+    origen = entrada;
+    promesa.catch(() => { if (origen === entrada) origen = null; });
+  }
+  return promesa;
+}
+
+/** Suelta el original parseado. La llama la vista de Imprimir al irse. */
+export function limpiarCacheOrigen() {
+  origen = null;
+}
+
 /**
  * Impone un PDF según el plan.
  *
  * @param {Uint8Array|ArrayBuffer} bytes  el PDF original, intacto
  * @param {object} plan
  * @param {Array} geometrias  las de pdf.js, con /Rotate ya aplicado
- * @param {{onProgreso?:(hecho:number,total:number)=>void}} opciones
- * @returns {Promise<{bytes:Uint8Array, calculo:object}>}
+ * @param {{onProgreso?:(hecho:number,total:number)=>void, limiteHojas?:number, desde?:number}} opciones
+ *   `limiteHojas` y `desde` (base 0) recortan una ventana de hojas para el
+ *   preview; sin `limiteHojas` se impone todo.
+ * @returns {Promise<{bytes:Uint8Array, calculo:object, generadas:number, desde:number, parcial:boolean}>}
  */
-export async function imponer(bytes, plan, geometrias, { onProgreso, limiteHojas = 0 } = {}) {
+export async function imponer(bytes, plan, geometrias, { onProgreso, limiteHojas = 0, desde = 0 } = {}) {
   const calculo = calcularHojas(plan, geometrias);
   if (!calculo.hojas.length) throw new Error('El plan no deja ninguna página para imprimir');
 
-  /* El preview puede pedir solo las primeras hojas: imponer 400 hojas en cada
+  /* El preview pide solo una VENTANA de hojas: imponer 400 hojas en cada
      tecleo del campo de escala haría que la app se arrastre. El CÁLCULO sigue
      siendo completo —el resumen dice cuántas hojas van a salir de verdad— y
      las que se generan salen del mismo camino que las de la impresión. Lo que
-     se ve sigue siendo lo que sale; solo se ve una parte. */
-  const hojasAGenerar = limiteHojas > 0 ? calculo.hojas.slice(0, limiteHojas) : calculo.hojas;
+     se ve sigue siendo lo que sale; solo se ve una parte.
 
-  const origen = await PDFDocument.load(
-    bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes),
-    // Un PDF con permisos de solo-lectura igual se puede imponer: el permiso
-    // es del documento, no del papel que ya tenés en la mano.
-    { ignoreEncryption: true, updateMetadata: false }
-  );
+     Era siempre el principio (las primeras 24) y la flecha se apagaba en la
+     24: lo de más allá no se podía revisar antes de imprimir (imprimir-13).
+     Con `desde`, la ventana va donde está mirando el preview. */
+  const inicio = limiteHojas > 0 ? Math.max(0, Math.min(Math.floor(desde) || 0, calculo.hojas.length - 1)) : 0;
+  const hojasAGenerar = limiteHojas > 0 ? calculo.hojas.slice(inicio, inicio + limiteHojas) : calculo.hojas;
+
+  const origen = await cargarOrigen(bytes);
   const salida = await PDFDocument.create();
 
   /* Cada página del original se embebe UNA sola vez aunque aparezca en varias
@@ -144,6 +186,7 @@ export async function imponer(bytes, plan, geometrias, { onProgreso, limiteHojas
     bytes: await salida.save({ useObjectStreams: true }),
     calculo,
     generadas: hojasAGenerar.length,
+    desde: inicio,
     parcial: hojasAGenerar.length < calculo.hojas.length,
   };
 }
@@ -179,26 +222,53 @@ function tituloDe(plan, calculo) {
  * está arriba; darla vuelta SÍ lo cambiaría, y por eso el instructivo insiste
  * con que no se da vuelta.
  *
- * @returns {{frentes:number[], dorsos:number[], hojasDePapel:number}}
- *   índices (base 0) dentro del PDF impuesto.
+ * ── Con un número IMPAR de caras ────────────────────────────────────────────
+ * La última hoja de los frentes no tiene dorso, y es justo la que queda
+ * arriba del fajo: la primera que entra en la segunda pasada. Sin nada que la
+ * ocupe, se llevaba el dorso de la anterior y todo el fajo salía corrido una
+ * hoja (partirDuplex(5) daba dorsos [3, 1]: la hoja de la cara 4 recibía la 3,
+ * la de la 2 la 1, y la primera quedaba sin dorso). Por eso los dorsos
+ * arrancan con un `null`, que extraerCaras convierte en una página en blanco:
+ * esa hoja pasa por la impresora sin que se le imprima nada (imprimir-02).
+ *
+ * Solo con el reverso invertido. Si la bandeja apilara boca arriba, la primera
+ * en volver a entrar sería la de la cara 0, y el hueco caería al final: ahí no
+ * hace falta ocuparlo, la última hoja simplemente no vuelve a entrar.
+ *
+ * @returns {{frentes:number[], dorsos:Array<number|null>, hojasDePapel:number}}
+ *   índices (base 0) dentro del PDF impuesto; `null` es una página en blanco.
  */
 export function partirDuplex(totalCaras, { invertirReverso = true } = {}) {
   const frentes = [];
   const dorsos = [];
   for (let i = 0; i < totalCaras; i++) (i % 2 === 0 ? frentes : dorsos).push(i);
-  if (invertirReverso) dorsos.reverse();
+  if (invertirReverso) {
+    dorsos.reverse();
+    if (totalCaras % 2 === 1) dorsos.unshift(null);
+  }
   return { frentes, dorsos, hojasDePapel: frentes.length };
 }
 
 /**
  * Extrae un subconjunto de páginas de un PDF ya impuesto, conservando el orden
  * pedido. Es lo que se manda a la cola en cada pasada del dúplex.
+ *
+ * Un `null` en los índices es una página en blanco del tamaño del pliego (la
+ * hoja sin dorso de un trabajo impar, ver partirDuplex). Se mide sobre la
+ * primera página del impuesto: todas las hojas de una imposición son del
+ * mismo papel.
  */
 export async function extraerCaras(bytesImpuestos, indices) {
   const doc = await PDFDocument.load(bytesImpuestos, { ignoreEncryption: true });
   const salida = await PDFDocument.create();
-  const copiadas = await salida.copyPages(doc, indices);
-  for (const p of copiadas) salida.addPage(p);
+  const reales = indices.filter((i) => i != null);
+  const copiadas = await salida.copyPages(doc, reales);
+  const { width, height } = doc.getPage(0).getSize();
+  let k = 0;
+  for (const i of indices) {
+    if (i == null) salida.addPage([width, height]);
+    else salida.addPage(copiadas[k++]);
+  }
   salida.setProducer('Quire');
   return salida.save({ useObjectStreams: true });
 }

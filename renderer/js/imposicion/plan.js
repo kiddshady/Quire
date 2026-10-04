@@ -77,6 +77,12 @@ export function resolverRango(texto, total) {
     const m = t.match(/^(\d+)\s*[-–]\s*(\d+)$/);
     if (m) {
       let [, a, b] = m;
+      /* Un tramo que cae ENTERO después del final no es ninguna página. Se
+         acotaban los dos extremos al total y «20-30» sobre 10 páginas daba
+         [10]: pedir «11-15» imprimía la última sin avisar, mientras «15-» y
+         «12» ya se descartaban (imprimir-18). Si el tramo empieza adentro,
+         solo se acota el extremo que se pasa. */
+      if (Math.min(+a, +b) > total) continue;
       a = Math.min(total, Math.max(1, +a));
       b = Math.min(total, Math.max(1, +b));
       const paso = a <= b ? 1 : -1;
@@ -121,11 +127,58 @@ export function papelDelPlan(plan, geometrias = []) {
     else if (geometrias.length) {
       const apaisadas = geometrias.filter((g) => g.anchoPt > g.altoPt).length;
       girar = apaisadas > geometrias.length / 2;
+      /* En N-up y en póster, «seguir al contenido» es seguir a la GRILLA, no
+         a la página: dos A4 verticales lado a lado en un A4 vertical salen al
+         50 %, con media hoja vacía arriba y abajo, y en el A4 apaisado al
+         70,7 % —el 2-up de siempre— (imprimir-07). Se prueban las dos y gana
+         la que aprovecha más; si empatan (el 2×2), manda la mayoría de arriba. */
+      if (plan.modo === 'nup' || plan.modo === 'poster') {
+        const mejor = orientacionQueAprovecha(plan, geometrias, ancho, alto);
+        if (mejor != null) girar = mejor;
+      }
     }
   }
 
   if (girar !== (ancho > alto)) [ancho, alto] = [alto, ancho];
   return { ancho, alto, apaisado: ancho > alto };
+}
+
+/**
+ * Para N-up y póster en orientación automática: ¿conviene el papel apaisado?
+ * true o false si una orientación gana, null si empatan.
+ *
+ * Se decide con la página más repetida del documento (un PDF mezclado no
+ * tiene una sola respuesta, y la que más aparece es la que más se ve). En
+ * N-up gana la que la deja más grande en la primera celda, sin desbordar si
+ * se puede; en póster, la que pide menos hojas para la misma ampliación.
+ */
+function orientacionQueAprovecha(plan, geometrias, ancho, alto) {
+  const cuenta = new Map();
+  for (const g of geometrias) {
+    const k = `${Math.round(g.anchoPt)}x${Math.round(g.altoPt)}`;
+    const e = cuenta.get(k) || { n: 0, g };
+    e.n += 1;
+    cuenta.set(k, e);
+  }
+  const tipica = [...cuenta.values()].sort((a, b) => b.n - a.n)[0].g;
+  const pagina = { ancho: tipica.anchoPt, alto: tipica.altoPt };
+  const corto = Math.min(ancho, alto);
+  const largo = Math.max(ancho, alto);
+
+  const puntaje = (apaisado) => {
+    const papel = apaisado ? { ancho: largo, alto: corto } : { ancho: corto, alto: largo };
+    const area = areaUtil(plan, papel);
+    if (plan.modo === 'poster') return -mosaicoPoster(pagina, area, plan.poster).baldosas.length;
+    const celda = celdasNup(area, plan.nup)[0];
+    const e = encajar(pagina, celda, plan.escala);
+    // No desbordar pesa más que cualquier escala: después, la más grande.
+    return (e.desborda ? 0 : 1000) + e.escala;
+  };
+
+  const vertical = puntaje(false);
+  const apaisado = puntaje(true);
+  if (Math.abs(apaisado - vertical) < 1e-6) return null;
+  return apaisado > vertical;
 }
 
 /* Los papeles que Electron sabe nombrar, con sus medidas nominales en mm.
@@ -136,7 +189,16 @@ const PAPELES_CON_NOMBRE = [
   ['A0', 841, 1189], ['A1', 594, 841], ['A2', 420, 594], ['A3', 297, 420],
   ['A4', 210, 297], ['A5', 148, 210], ['A6', 105, 148],
   ['Letter', 215.9, 279.4], ['Legal', 215.9, 355.6], ['Tabloid', 279.4, 431.8],
+  /* Los dos que el proceso principal ya aceptaba y acá no se nombraban: un
+     Ejecutivo viajaba en micrones, sin `paper=`, y salía corrido sobre el
+     papel del driver (imprimir-19). La lista tiene que ser la MISMA que la de
+     src/impresion.cjs: lo cuida plan.test.mjs. */
+  ['Statement', 139.7, 215.9], ['Executive', 184.15, 266.7],
 ];
+
+/** Los nombres que el plan sabe pedir. Para el test que los compara con los
+    que acepta el proceso principal. */
+export const NOMBRES_DE_PAPEL = PAPELES_CON_NOMBRE.map(([n]) => n);
 
 /**
  * Cómo se le pide el papel al driver: qué `pageSize` y con qué orientación.

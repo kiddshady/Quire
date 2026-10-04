@@ -20,34 +20,60 @@
   padding: var(--ox-4);
   /* Sin fade: es superficie de visualización (ver la excepción de .qr-visor). */
   overflow: hidden;
+  /* La transición va en la regla BASE: declarada solo en .is-trabajando, la
+     ida a .45 era suave y la vuelta a 1 de un cuadro al otro (css-03). Y
+     in-out, porque va y vuelve. */
+  transition: opacity var(--ox-t-2) var(--ox-ease-both);
 }
 
 /* Mientras se re-impone, la hoja anterior se atenúa en vez de desaparecer:
    ver el papel apagarse y volver se lee como "está recalculando"; verlo
-   desaparecer se lee como que algo se rompió. */
-.qr-preview.is-trabajando .qr-preview__cuerpo {
-  opacity: .45;
-  transition: opacity var(--ox-t-2) var(--ox-ease-soft);
-}
+   desaparecer se lee como que algo se rompió. Vuelve a pleno recién con la
+   hoja nueva a la vista (imprimir.js, rehacerImposicion). */
+.qr-preview.is-trabajando .qr-preview__cuerpo { opacity: .45; }
 
-.qr-preview__cuerpo > * { transition: opacity var(--ox-t-2) var(--ox-ease-soft); }
+/* Las hojas y el cartel de error comparten la celda: la hoja nueva se pinta
+   debajo de la vieja, en el mismo lugar, y el error va encima de las dos. */
+.qr-preview__cuerpo > * { grid-area: 1 / 1; }
+.qr-preview__aviso { z-index: 2; }
 
+/* ── La hoja ─────────────────────────────────────────────────────────────────
+   La hoja que se ve no se toca hasta que la nueva tiene su bitmap:
+   · la del montaje es un papel en blanco del tamaño final y su canvas entra
+     con el fundido del lector (.qr-pliego .qr-hoja → .is-pintada);
+   · las que vienen después nacen DEBAJO, invisibles (--relevo), y cuando
+     pdf.js termina se muestran mientras la vieja se esfuma encima (--saliente).
+   Antes el pliego se rehacía con un canvas vacío nuevo: en cada cambio de
+   opción la hoja vieja destellaba a pleno, quedaba un papel blanco y el
+   contenido aparecía de golpe (imprimir-03, css-02). Y entraba con
+   qr-aparecer, un keyframe sin `from` que iba de 1 a 1: no animaba nada
+   (imprimir-06). */
 .qr-pliego--preview {
   /* La hoja del preview flota más alto que las del lector: es el objeto sobre
      el que se está decidiendo algo. */
   box-shadow: var(--ox-e3);
-  animation: qr-aparecer var(--ox-t-3) var(--ox-ease) both;
+  transition: box-shadow var(--ox-t-2) var(--ox-ease-soft), opacity var(--ox-t-2) var(--ox-ease);
 }
 
-/* En el lector, el canvas arranca invisible y se revela cuando su render
-   termina: las páginas entran con el scroll y el fade evita el parpadeo.
+/* La que espera debajo no se ve, ni su papel en blanco. */
+.qr-pliego--relevo:not(.is-mostrada) { opacity: 0; }
+/* Mientras no se ve, su canvas no transiciona: si llega pintada, el contenido
+   está entero cuando el pliego empieza a entrar, y no entra más tarde que el
+   papel. */
+.qr-pliego--relevo:not(.is-mostrada) .qr-hoja { transition: none; }
 
-   Acá NO: en el preview hay una sola hoja, siempre presente, y varias cosas
-   pueden pedir un repintado a la vez (la imposición que termina, el panel que
-   cambia de alto, la ventana que se redimensiona). Si la visibilidad dependiera
-   de qué render gana esa carrera, un render cancelado dejaría la hoja EN
-   BLANCO. El canvas se ve siempre; quien hace la transición es el pliego. */
-.qr-pliego--preview .qr-hoja { opacity: 1; }
+/* La que se va: encima de la nueva, esfumándose. Espera 60 ms, lo justo para
+   que la nueva (que entra en expo-out) ya esté casi entera debajo: la
+   pantalla queda tapada todo el fundido. In-out, porque alguien espera
+   detrás. */
+.qr-pliego--saliente { z-index: 1; pointer-events: none; }
+.qr-pliego--saliente[data-state='closing'] {
+  animation: ox-desvanecer var(--ox-t-2) var(--ox-ease-both) 60ms both;
+}
+
+/* Con una impresora solo blanco y negro, el preview no puede mostrar color:
+   el trabajo sale en gris (imprimir-25). Estático: no se anima. */
+.qr-pliego--preview.is-mono .qr-hoja { filter: grayscale(1); }
 
 .qr-preview__error {
   display: flex;
@@ -74,6 +100,8 @@
   /* Comparte alto con el pie del rail, que queda pegado a su izquierda: las dos
      líneas de arriba tienen que ser la misma. Ver --qr-pie. */
   min-height: var(--qr-pie);
+  /* El chip de la cara se pliega a lo ancho y se come su hueco del gap. */
+  --ox-plegable-gap: var(--ox-3);
 }
 
 .qr-preview__cuenta {
@@ -85,28 +113,57 @@
 
 /* ── El área que el tóner no alcanza ─────────────────────────────────────────
    Se dibuja como una BANDA, no como una línea: lo que importa no es dónde está
-   el límite sino cuánto papel queda afuera. Los anchos de borde los calcula
-   marcoNoImprimible() a partir de lo que reportó el driver. */
+   el límite sino cuánto papel queda afuera. Los márgenes los calcula
+   marcoNoImprimible() a partir de lo que reportó el driver, en PORCENTAJES
+   del pliego: acompañan al pliego cuando cambia de tamaño sin recalcular.
+
+   La banda es un clip-path con el rectángulo de afuera y el de adentro
+   (evenodd): el agujero del medio no se pinta y tampoco recibe el puntero.
+   Antes eran bordes de un div con inset 0, y la caja entera agarraba el
+   pointerover: el tooltip salía en cualquier punto de la hoja (imprimir-17).
+
+   Las cuatro medidas están registradas para que viajen si cambia el área (otra
+   impresora, otro papel de la misma medida); un custom property sin
+   registrar salta de un valor al otro. Heredan: el borde punteado del
+   ::after las usa. */
+@property --qr-ni-arr { syntax: '<percentage>'; inherits: true; initial-value: 0%; }
+@property --qr-ni-der { syntax: '<percentage>'; inherits: true; initial-value: 0%; }
+@property --qr-ni-aba { syntax: '<percentage>'; inherits: true; initial-value: 0%; }
+@property --qr-ni-izq { syntax: '<percentage>'; inherits: true; initial-value: 0%; }
 
 .qr-noimprimible {
   position: absolute;
   inset: 0;
-  border-style: solid;
   /* Gris sobre el papel blanco. No es rojo a propósito: el rojo significa
      fallo, y esto es información sobre la impresora, no un error. */
-  border-color: rgb(20 24 33 / .11);
+  background: rgb(20 24 33 / .11);
+  clip-path: polygon(evenodd,
+    0 0, 100% 0, 100% 100%, 0 100%, 0 0,
+    var(--qr-ni-izq) var(--qr-ni-arr),
+    calc(100% - var(--qr-ni-der)) var(--qr-ni-arr),
+    calc(100% - var(--qr-ni-der)) calc(100% - var(--qr-ni-aba)),
+    var(--qr-ni-izq) calc(100% - var(--qr-ni-aba)),
+    var(--qr-ni-izq) var(--qr-ni-arr));
   pointer-events: auto;
-  animation: qr-aparecer var(--ox-t-3) var(--ox-ease) both;
+  transition:
+    --qr-ni-arr var(--ox-t-2) var(--ox-ease-both), --qr-ni-der var(--ox-t-2) var(--ox-ease-both),
+    --qr-ni-aba var(--ox-t-2) var(--ox-ease-both), --qr-ni-izq var(--ox-t-2) var(--ox-ease-both);
 }
 
-/* El borde interior marca exactamente hasta dónde llega. */
+/* El borde interior marca exactamente hasta dónde llega. Va por fuera de la
+   caja de adentro (outline-offset 0), o sea sobre la banda: adentro del clip. */
 .qr-noimprimible::after {
   content: '';
   position: absolute;
-  inset: 0;
+  top: var(--qr-ni-arr);
+  right: var(--qr-ni-der);
+  bottom: var(--qr-ni-aba);
+  left: var(--qr-ni-izq);
   outline: 1px dashed rgb(20 24 33 / .34);
   outline-offset: 0;
 }
+/* Si se va (el área dejó de informarse), se esfuma. */
+.qr-noimprimible[data-state='closing'] { animation: ox-desvanecer var(--ox-t-2) var(--ox-ease-both) both; }
 
 /* ── Panel de opciones ───────────────────────────────────────────────────── */
 
@@ -131,6 +188,33 @@
   gap: var(--ox-2);
 }
 .qr-op > .ox-plegable { --ox-plegable-gap: var(--ox-2); }
+
+/* El aviso del papel que no se puede pedir por nombre va en la grilla de
+   Copias y Papel, a todo el ancho, y se pliega comiéndose su fila del gap. */
+.qr-op--par > .qr-op__aviso { grid-column: 1 / -1; --ox-plegable-gap: var(--ox-3); }
+
+/* El bloque de cada modo (la grilla del N-up, el folleto, el póster) es una
+   caja que se releva entera al cambiar de modo, con el alto deslizándose. El
+   aire con lo de arriba va ADENTRO de la caja (padding), y el bloque se come
+   el gap de la columna: así en Simple, con la caja vacía, no queda un hueco. */
+.qr-op__modo { margin-top: calc(-1 * var(--ox-2)); }
+.qr-op__campos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ox-2);
+  padding-top: var(--ox-2);
+}
+.qr-op__campos--vacio { padding-top: 0; }
+
+/* Los rótulos de los selects se relevan (swap): el corte con puntos
+   suspensivos tiene que ir en cada ítem del relevo, no solo en el contenedor. */
+.qr-inspector .ox-select .ox-truncate > * {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .qr-op--par {
   display: grid;
@@ -166,7 +250,7 @@
   padding: var(--ox-2) var(--ox-1);
   background: var(--ox-s2);
   border: 0;
-  border-radius: var(--ox-r-md, var(--ox-r-sm));
+  border-radius: var(--ox-r-md);
   color: var(--ox-text-3);
   cursor: pointer;
   box-shadow: var(--ox-hairline);
@@ -207,7 +291,7 @@
   padding: var(--ox-1) 0;
   background: var(--ox-s2);
   border: 0;
-  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  border-radius: var(--ox-r-sm);
   cursor: pointer;
   box-shadow: var(--ox-hairline);
   transition: var(--tr-color);
@@ -253,24 +337,57 @@
    una var() sin declarar es inválida al computar —la cifra heredaba 13 px en
    vez de destacarse—. Desde el primer commit. Lo cuida tokens.test.mjs. */
 .qr-resumen__cifra .ox-stat__value { font-size: var(--ox-fs-19); }
-.qr-resumen__kv { row-gap: 3px; }
+/* 3 px y no un token: el par clave/valor del pie va apretado a propósito, es
+   una ficha que se lee de un vistazo y la escala salta de 4 a 8. La fila de
+   Tinta se pliega comiéndose ese hueco. */
+.qr-resumen__kv { row-gap: 3px; --ox-plegable-gap: 3px; }
+
+/* El total y su desglose por copia, pegados: son el mismo dato. */
+.qr-resumen__total { display: flex; flex-direction: column; gap: 2px; --ox-plegable-gap: 2px; }
+.qr-resumen > .ox-plegable { --ox-plegable-gap: var(--ox-3); }
+
+/* Un trabajo grande se DESTACA, no pide confirmación (ux-29, lo decidió
+   Fran): la cifra se apoya en una ficha. Con el acento de Quire (luz) un
+   color no se distinguiría del texto; la ficha sí. */
+#qr-res-hojas {
+  margin-inline: calc(-1 * var(--ox-1));
+  padding-inline: var(--ox-1);
+  border-radius: var(--ox-r-sm);
+  transition: background-color var(--ox-t-2) var(--ox-ease-soft), box-shadow var(--ox-t-2) var(--ox-ease-soft);
+}
+.qr-resumen__cifra.is-mucho #qr-res-hojas {
+  background: var(--ox-wash-2);
+  box-shadow: inset 0 0 0 1px var(--ox-line-2);
+}
+
+/* El botón cambia de rótulo según el paso (swap con relevo): cada rótulo es
+   una fila con su ícono. */
 .qr-pie__boton { width: 100%; justify-content: center; }
+.qr-pie__rotulo { display: inline-grid; }
+.qr-pie__paso { display: inline-flex; align-items: center; gap: var(--ox-2); white-space: nowrap; }
 
 .qr-aviso {
   display: flex;
   gap: var(--ox-2);
   align-items: flex-start;
   padding: var(--ox-2) var(--ox-3);
-  border-radius: var(--ox-r-sm, var(--ox-r-xs));
+  /* Sin respaldo: --ox-r-sm existe, el var() de reserva no hacía nada (css-23). */
+  border-radius: var(--ox-r-sm);
   background: var(--ox-danger-wash);
   color: var(--ox-danger);
   font-size: var(--ox-fs-11);
   line-height: 1.5;
-  animation: qr-aparecer var(--ox-t-3) var(--ox-ease) both;
+  /* Entra y sale plegándose (.ox-plegable): con qr-aparecer, que no tiene
+     `from`, aparecía de un cuadro al otro y empujaba el pie (css-16). */
 }
 
 .qr-aviso svg { flex: 0 0 auto; margin-top: 1px; }
 .qr-aviso b { font-weight: var(--ox-w-medium); }
+
+/* El renglón del modal de rango que cuenta cuántas páginas entran. Cuando no
+   entra ninguna, Aplicar se apaga: el renglón dice por qué. */
+.qr-rango__cuenta { transition: color var(--ox-t-1) var(--ox-ease-soft); }
+.qr-rango__cuenta.is-vacio { color: var(--ox-danger); }
 
 /* ── Diagrama de la vuelta del fajo ──────────────────────────────────────── */
 
