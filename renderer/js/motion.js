@@ -14,10 +14,20 @@ export function raf2(fn) {
  * Saca un elemento del DOM DESPUÉS de su animación de salida.
  * Marca data-state="closing" (el CSS engancha ahí) y espera al animationend,
  * con un timeout de red por si el elemento no tiene animación declarada.
+ *
+ * Lo que se está yendo se puede REVIVIR: sacarle `data-state` antes de que
+ * termine lo deja en el DOM (y `onDone` no corre). Hace falta cuando vuelve
+ * a hacer falta a mitad de su salida: el velo de un modal que se cierra y
+ * otro que abre enseguida (dos velos encimados oscurecían la pantalla), el
+ * número de un contador que vuelve mientras se iba (cortar la salida y entrar
+ * de nuevo desde 0 era un parpadeo). Si después vuelve a salir, esa salida es
+ * otra: la vieja no lo saca antes de tiempo.
  */
 export function exit(el, { fallback = 400, onDone } = {}) {
   if (!el || el.dataset.state === 'closing') return Promise.resolve();
   el.dataset.state = 'closing';
+  const salida = {};
+  el.__salida = salida;
 
   return new Promise((resolve) => {
     let done = false;
@@ -26,8 +36,8 @@ export function exit(el, { fallback = 400, onDone } = {}) {
       done = true;
       clearTimeout(timer);
       el.removeEventListener('animationend', onAnim);
-      el.remove();
-      onDone?.();
+      const sigueYendose = el.__salida === salida && el.dataset.state === 'closing';
+      if (sigueYendose) { el.remove(); onDone?.(); }
       resolve();
     };
     // Solo nos importa la animación del propio elemento, no la de sus hijos.
@@ -769,12 +779,15 @@ export function tick(el) {
                                  stepper apretadas): siempre en su lugar
      deslizarAlto(el, cambio)    la caja va de su alto al nuevo, no salta
      deslizarAncho(el, cambio)   lo mismo a lo ancho (un ítem de una fila)
+     ocupar(btn, ocupado, html)  un botón libre ↔ ocupado: relevo y el ancho viaja
+     contador(el, n)             un contador que aparece, cambia y se va
      reconcile(box, items)       una lista que se pone al día por clave */
 
 /* Los tokens de motion.css, para lo que se anima desde JS. */
-const T = { in: 280, out: 150, move: 280, size: 180, after: 80, step: 14 };
+const T = { in: 280, out: 150, move: 280, size: 180, after: 80, step: 14, pliegue: 100 };
 const EASE = 'cubic-bezier(.16, 1, .3, 1)';         // --ox-ease
 const EASE_BOTH = 'cubic-bezier(.65, 0, .35, 1)';   // --ox-ease-both
+const EASE_SOFT = 'cubic-bezier(.33, 1, .68, 1)';   // --ox-ease-soft
 
 const reducido = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
@@ -842,13 +855,50 @@ export function valor(el, html) {
   tick(el);
 }
 
+/* ¿Hay un relevo yéndose adentro de la caja? Es el calco de swap() con
+   `relevo`, que conserva la caja vieja mientras se esfuma. El de `fundido`
+   no cuenta: dura 180 ms y lleva fondo opaco, y la espera de abajo se midió
+   solo con la salida del relevo (160 ms). Con un fundido adentro la caja
+   viaja pareja, como antes. */
+const releva = (el) => !!el.querySelector('.ox-swap-out--over:not(.ox-swap-out--fundido)[data-state="closing"]');
+
+/* Cómo viaja una caja que cambia de tamaño. Sin nada yéndose adentro, in-out
+   parejo, como siempre. Con un relevo adentro importa el orden
+   (motion-timing §10: al achicarse, primero se va lo de adentro y después se
+   pliega la caja):
+   · Al ACHICARSE, espera a que el calco casi no se vea. Plegándose en el
+     acto, la caja le cortaba la frase que se iba cuando todavía estaba casi
+     entera: en el chip de Páginas de Quire, congelado, a los 60 ms le tapaba
+     7,5 px con opacidad 0,79 y a los 80 ms 17,6 px con 0,5; en la statusbar,
+     el nombre del documento; en Imprimir, la grilla de Múltiple a los 87 ms,
+     con la caja en 104 de 158 px y lo viejo al 51 %. La caja espera 100 ms
+     (la salida del relevo dura 160, in-out) y se pliega in-out, que en sus
+     primeros cuadros casi no se mueve. Medido cuadro por cuadro en el humo
+     (8-terdecies-bis): el calco va 100 → 93 → 85 → 71 → 50 → 29 → 15 → 7 %
+     y la caja sigue en su ancho hasta el 15 %; el primer recorte (3,5 px)
+     le llega con el 3 %. Sin la espera, con el 50 % ya le cortaba 71 px.
+     `fill: backwards` la tiene en el tamaño viejo durante la espera.
+   · Al CRECER no espera, y se abre rápido (expo-out): lo nuevo entra con el
+     retardo del relevo y encuentra la caja casi abierta. Con in-out la frase
+     nueva asomaba recortada por la caja que todavía se estaba abriendo (con
+     opacidad 0,5 le faltaba un cuarto del ancho; con expo-out, nada).
+   Es el glideSize de Prism (recetas §9). En Quire había dos copias locales
+   (deslizarBloque en Imprimir y deslizarAnchoRelevo en Páginas) y la
+   statusbar lo pedía aparte (2F), con el deslizarAncho de acá tal cual. */
+function viaje(achica, relevo) {
+  if (!relevo) return { duration: T.size, easing: EASE_BOTH };
+  return achica
+    ? { duration: T.size, delay: T.pliegue, easing: EASE_BOTH, fill: 'backwards' }
+    : { duration: T.size, easing: EASE };
+}
+
 /* La caja va del alto `h0` al que tiene ahora. Mientras viaja recorta lo que
    sobra (el calco de un relevo, que conserva el alto viejo). */
 function glideAlto(el, h0) {
   const h1 = el.getBoundingClientRect().height;
   if (Math.abs(h1 - h0) < 1 || reducido() || typeof el.animate !== 'function') return;
   el.__glide = el.animate([{ height: `${h0}px`, overflow: 'clip' }, { height: `${h1}px`, overflow: 'clip' }],
-    { duration: T.size, easing: EASE_BOTH });
+    viaje(h1 < h0, releva(el)));
 }
 
 /**
@@ -856,7 +906,9 @@ function glideAlto(el, h0) {
  * desde el que tenía hasta el nuevo, en vez de saltar. Para una caja que
  * cambia de forma adentro de un modal o una card: sin esto todo lo de abajo
  * —y el modal entero— cambiaba de alto en un cuadro (Apex, la zona de
- * cantidad al cambiar de sustancia).
+ * cantidad al cambiar de sustancia). Con un relevo adentro
+ * (`deslizarAlto(el, () => swap(el, html, { relevo: true }))`), al achicarse
+ * espera a que lo viejo casi no se vea, como deslizarAncho (ver viaje()).
  */
 export function deslizarAlto(el, cambio) {
   if (!el) { cambio(); return; }
@@ -877,7 +929,7 @@ function glideAncho(el, w0) {
   el.__glideAncho = el.animate([
     { width: `${w0}px`, overflow: 'clip', whiteSpace: 'nowrap' },
     { width: `${w1}px`, overflow: 'clip', whiteSpace: 'nowrap' },
-  ], { duration: T.size, easing: EASE_BOTH });
+  ], viaje(w1 < w0, releva(el)));
 }
 
 /**
@@ -887,7 +939,8 @@ function glideAncho(el, w0) {
  * la derecha saltaba. En Quire, el nombre del documento al cambiar de
  * pestaña, la impresora y el aviso de actualización (shell-22, shell-23).
  * Con un relevo adentro (swap con `relevo`) va solo: el calco conserva la
- * caja vieja y no cuenta para el ancho nuevo.
+ * caja vieja y no cuenta para el ancho nuevo. Y respeta el orden: al
+ * achicarse espera a que lo que se va casi no se vea (ver viaje()).
  */
 export function deslizarAncho(el, cambio) {
   if (!el) { cambio(); return; }
@@ -895,6 +948,87 @@ export function deslizarAncho(el, cambio) {
   el.__glideAncho?.cancel();
   cambio();
   glideAncho(el, w0);
+}
+
+/**
+ * Un botón que hace un trabajo, libre ↔ ocupado («Exportar» ↔ «Exportando…»
+ * con un spinner): un estado por otro, así que es un relevo en el lugar, y el
+ * ancho del botón viaja en vez de saltar (con la espera al achicarse). `html`
+ * es el rótulo del estado al que va.
+ *
+ * El estado vive en `data-ocupado` y no en la memoria de swap(): esa memoria
+ * es del nodo, y si la vista se repinta en medio del trabajo el botón es OTRO,
+ * que nace ya ocupado. Sin marca, el primer ocupar() sobre él relevaba el
+ * mismo rótulo por sí mismo. Por eso el HTML que lo arma lleva
+ * `data-ocupado="1"` cuando nace ocupado; sin la marca cuenta como libre.
+ * Llamarlo con el mismo estado no hace nada. Apagar el botón (`disabled`) es
+ * de quien lo llama: suele depender de más cosas que de este trabajo.
+ *
+ * Nació repetido en Quire (Herramientas, Convertir y el «Guardar» de Páginas,
+ * herr-14), cada uno con su copia.
+ */
+export function ocupar(btn, ocupado, html) {
+  if (!btn) return;
+  const v = ocupado ? '1' : '0';
+  if ((btn.dataset.ocupado ?? '0') === v) return;
+  btn.dataset.ocupado = v;
+  btn.setAttribute('aria-busy', String(!!ocupado));
+  deslizarAncho(btn, () => swap(btn, html, { relevo: true }));
+}
+
+/**
+ * Un contador que solo se ve cuando hay algo que contar (el de un ítem del
+ * rail: las páginas del documento, lo que falta convertir). `n` en 0, vacío o
+ * null es «nada»: el contador queda vacío.
+ * · aparece (vacío → n) o se va (n → vacío): se funde, con swap();
+ * · cambia (n → m): en su lugar, con destello, como numero();
+ * · vuelve mientras se iba (12 → 0 → 12, o 4 → 0 → 7): el que se iba se
+ *   revive desde la opacidad en que estaba y, si es otro número, cambia ahí
+ *   con destello. Con swap() la salida se cortaba de golpe y lo nuevo entraba
+ *   desde 0: medido, 0,93 → 0 en un cuadro.
+ * No se pueden mezclar swap() y numero() sobre el mismo nodo: cada uno lleva
+ * su memoria, y numero() compara contra el textContent, que durante una
+ * salida todavía tiene el número que se va. numero(el, '') además corta de
+ * golpe. La memoria acá es una sola (`__cuenta`), y el número que cambia se
+ * escribe en el hijo que dejó swap(), no en el nodo entero, para no
+ * reemplazar el que ya está. Como numero(), nace vacío en el HTML.
+ *
+ * De Quire (app.js, shell-25 y herr-30; corrección 8 del plan de la
+ * auditoría): se escribía con textContent y saltaba de 4 a 12 al cambiar de
+ * pestaña, o entraba y se iba en un cuadro.
+ */
+export function contador(el, n) {
+  if (!el) return;
+  const v = n ? String(n) : '';
+  const antes = el.__cuenta ?? el.textContent.trim();
+  if (v === antes) return;
+  el.__cuenta = v;
+  const yendose = v ? el.querySelector(':scope > .ox-swap-out[data-state="closing"]') : null;
+  if (yendose) { revivirCuenta(el, yendose, v); return; }
+  if (!v || !antes) { swap(el, v); return; }
+  const vivo = el.querySelector(':scope > :not(.ox-swap-out)');
+  if (vivo) vivo.textContent = v; else el.textContent = v;
+  ultimo.set(el, v);
+  tick(el);
+}
+
+/* El número que se iba vuelve: sin data-state, exit() no lo saca (ver exit),
+   y sube desde donde estaba con la curva de las entradas chicas. */
+function revivirCuenta(el, hijo, v) {
+  const op = +getComputedStyle(hijo).opacity;
+  const otro = hijo.textContent.trim() !== v;
+  delete hijo.dataset.state;
+  hijo.classList.remove('ox-swap-out');
+  hijo.inert = false;
+  hijo.style.opacity = '';
+  hijo.textContent = v;
+  // swap() tiene que saber que el contador vuelve a mostrar algo: si no, el
+  // próximo 0 le parecería el mismo vacío de la última vez y no haría nada.
+  ultimo.set(el, v);
+  if (!reducido() && typeof hijo.animate === 'function' && op < 0.99) {
+    hijo.animate([{ opacity: op }, { opacity: 1 }], { duration: T.size, easing: EASE_SOFT });
+  }
+  if (otro) tick(el);
 }
 
 /* ── Listas que se ponen al día ─────────────────────────────────────────────

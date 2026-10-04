@@ -354,15 +354,55 @@ const UN_RENGLON = new Set(['text', 'search', 'email', 'url', 'tel', 'password',
 const Modal = (() => {
   let open = null;
 
-  function close(result) {
+  /* Cierra el que está abierto. `pisado` lo pasa solo show(), cuando abre
+     otro encima: el velo se queda para el nuevo y la caja sale en relevo. No
+     es una opción de Modal.close: desde afuera, un close que dejara el velo
+     puesto lo dejaría huérfano para siempre. */
+  function cerrar(result, pisado = false) {
     if (!open) return;
     const { scrim, anim, resolve, restore } = open;
     open = null;
     document.removeEventListener('keydown', onKey, true);
+    /* La caja que se va ya no contesta. data-state=closing no apaga los
+       eventos y .ox-modal lleva pointer-events: auto: durante su salida se
+       la podía clickear, y su botón llamaba a close(), que cierra al que
+       esté abierto —el NUEVO—. Medido: el «Borrar todo» de abajo, a los
+       40 ms, contestaba con su valor el modal de arriba. */
+    anim.inert = true;
+    if (pisado) anim.classList.add('ox-modal__anim--pisada');
     exit(anim, { fallback: 300 });
-    exit(scrim, { fallback: 300 });
+    if (!pisado) exit(scrim, { fallback: 300 });
     restore?.focus?.();
     resolve(result);
+  }
+  const close = (result) => cerrar(result);
+
+  /* El velo de un modal que se acaba de cerrar, si todavía se está yendo:
+     el que abre ahora lo revive en vez de poner otro debajo (ver show). */
+  function veloSaliendo() {
+    const v = [...layer().children].reverse()
+      .find((n) => n.classList.contains('ox-scrim') && n.dataset.state === 'closing');
+    if (!v) return null;
+    const op = +getComputedStyle(v).opacity;
+    // Sin data-state, exit() ya no lo saca (ver exit en motion.js). Vuelve a
+    // su opacidad desde donde iba: --ox-desde es el `from` de su animación.
+    delete v.dataset.state;
+    v.style.setProperty('--ox-desde', String(op));
+    v.classList.add('ox-scrim--vuelve');
+    return v;
+  }
+
+  /* Con una caja todavía saliendo, la nueva espera su turno (is-after). Si la
+     de abajo se cerró en este mismo cuadro (close y show seguidos), también
+     pasa a la salida del relevo: todavía no se movió, así que cambiarle la
+     curva no salta. Si ya venía saliendo, se la deja como va. */
+  function cajaSaliendo() {
+    const a = [...layer().children]
+      .find((n) => n.classList.contains('ox-modal__anim') && n.dataset.state === 'closing');
+    if (!a) return false;
+    const t = a.getAnimations()[0]?.currentTime;
+    if (t == null || t < 17) a.classList.add('ox-modal__anim--pisada');
+    return true;
   }
 
   function onKey(e) {
@@ -434,11 +474,25 @@ const Modal = (() => {
    */
   function show({ title, sub = '', body = '', actions = [], width, dismissible = true } = {}) {
     return new Promise((resolve) => {
-      const scrim = document.createElement('div');
-      scrim.className = 'ox-scrim';
+      /* Un modal abierto encima de otro lo pisa: el de abajo se contesta con
+         null y sale con su exit(). Antes quedaba huérfano —su promesa no se
+         resolvía nunca, y su velo y su caja se quedaban en el DOM, tapando
+         la app aunque se cerrara el nuevo— (Quire, 2F). El velo NO se va: lo
+         hereda el nuevo. Con uno saliendo y otro entrando se apilaban dos
+         capas a .62 y la pantalla se oscurecía de golpe (medido: hasta .79)
+         en el medio del cambio; el mismo velo queda quieto. Y si el de antes
+         ya se había cerrado (close y show seguidos) y su velo todavía se iba,
+         ese velo vuelve: el mismo oscurecimiento salía por ahí. */
+      const heredado = open?.scrim || null;
+      if (open) cerrar(null, true);
+      const revivido = heredado ? null : veloSaliendo();
+      const scrim = heredado || revivido || document.createElement('div');
+      if (!revivido) scrim.className = 'ox-scrim';
 
+      // Dos cajas que se reemplazan hacen un relevo, no se cruzan en el
+      // centro (motion-timing, regla 2).
       const anim = document.createElement('div');
-      anim.className = 'ox-modal__anim';
+      anim.className = `ox-modal__anim${cajaSaliendo() ? ' is-after' : ''}`;
 
       const modal = document.createElement('div');
       modal.className = 'ox-modal';
@@ -469,16 +523,23 @@ const Modal = (() => {
         const b = document.createElement('button');
         b.className = `ox-btn ox-flashable ox-btn--${a.variant || 'ghost'}`;
         b.textContent = a.label;
-        b.addEventListener('click', () => close(a.value));
+        // Atado a SU modal: aunque la caja se vuelva inerte al irse, un
+        // click que ya venía en camino no le contesta al que la pisó.
+        b.addEventListener('click', () => { if (open?.anim === anim) close(a.value); });
         foot.appendChild(b);
         return { a, b };
       });
 
-      modal.querySelector('[data-dismiss]')?.addEventListener('click', () => close(null));
-      if (dismissible) scrim.addEventListener('click', () => close(null));
+      modal.querySelector('[data-dismiss]')?.addEventListener('click', () => { if (open?.anim === anim) close(null); });
+      // En propiedad y no con addEventListener: un velo heredado traería el
+      // oyente del modal de antes, y cerraría uno que no se deja descartar.
+      scrim.onclick = dismissible ? () => close(null) : null;
 
       anim.appendChild(modal);
-      layer().append(scrim, anim);
+      // El heredado (o el revivido) ya está en la capa: moverlo le
+      // reiniciaría la animación. La caja nueva va encima de todo.
+      if (heredado || revivido) layer().append(anim);
+      else layer().append(scrim, anim);
       Icons.mount(modal);
       scrollFade(bodyEl);
 

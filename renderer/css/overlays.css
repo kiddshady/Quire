@@ -144,6 +144,13 @@
   backdrop-filter: blur(2px);
   animation: ox-fade-in var(--ox-t-3) var(--ox-ease) both;
 }
+/* El velo que se estaba yendo y vuelve, porque otro modal abrió enseguida
+   (Modal.show): sube desde la opacidad en que iba, que el JS deja en
+   --ox-desde. Otro velo nuevo debajo del que se va apilaba dos capas y
+   oscurecía la pantalla en el medio del cambio. Declarado antes de la
+   salida, para que la salida le gane si se vuelve a cerrar. */
+@keyframes ox-velo-vuelve { from { opacity: var(--ox-desde, 0) } to { opacity: 1 } }
+.ox-scrim--vuelve { animation: ox-velo-vuelve var(--ox-t-3) var(--ox-ease) both; }
 .ox-scrim[data-state='closing'] { animation: ox-fade-out var(--ox-t-2) var(--ox-ease-in) both; }
 
 /* El wrapper de la animación es TAMBIÉN el que centra, y esto no es un capricho
@@ -183,7 +190,14 @@
   box-shadow: var(--ox-hairline), var(--ox-e4);
   overflow: hidden;
 }
+/* Un modal que pisa a otro (o abre mientras el anterior sale): las dos cajas
+   hacen un relevo y no se cruzan en el centro. La nueva espera su turno y
+   asoma cuando la vieja ya va por un tercio; la vieja sale en in-out, porque
+   hay alguien esperando detrás (motion-timing, regla 2). La espera va antes
+   de la salida: si la nueva se cierra, su salida no hereda el retardo. */
+.ox-modal__anim.is-after { animation-delay: 90ms; }
 .ox-modal__anim[data-state='closing'] { animation: ox-lift-out var(--ox-t-2) var(--ox-ease-in) both; }
+.ox-modal__anim--pisada[data-state='closing'] { animation: ox-lift-out 160ms var(--ox-ease-both) both; }
 .ox-modal__head { padding: var(--ox-5) var(--ox-5) var(--ox-3); display: flex; align-items: flex-start; gap: var(--ox-3); }
 .ox-modal__title { font-size: var(--ox-fs-15); font-weight: var(--ox-w-semi); letter-spacing: var(--ox-track-tight); }
 .ox-modal__sub { font-size: var(--ox-fs-12); color: var(--ox-text-3); margin-top: 4px; line-height: var(--ox-lh-loose); }

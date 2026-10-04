@@ -10,7 +10,7 @@
 
 import { Icons } from './icons.js';
 import { Toast, Menu, Modal } from './overlays.js';
-import { bindSwitcher, bindStepper, swap } from './motion.js';
+import { bindSwitcher, bindStepper, swap, ocupar, contador } from './motion.js';
 import { mark, status, copy, colorToken, path, esc } from './ui.js';
 
 /* ── Las tres perillas ───────────────────────────────────────────────────────
@@ -259,6 +259,17 @@ export function designHTML() {
           <div class="ox-card__body">
             <div id="demo-swap" style="display:flex;align-items:center;gap:10px;min-height:40px"></div>
           </div>
+        </div>`)}
+
+      ${section('Ocupado y contadores', 'Dos piezas para lo que cambia con la app andando, armadas sobre <span class="ox-mono">swap()</span>. <span class="ox-mono">ocupar(btn, ocupado, html)</span>: un botón que hace un trabajo pasa a «ocupado» con un relevo en el lugar, y su ancho viaja en vez de saltar — al achicarse espera a que el rótulo que se va casi no se vea, así la caja no lo corta. El vecino acompaña. <span class="ox-mono">contador(el, n)</span>: un contador que solo se ve cuando hay algo; aparece y se va fundiéndose, y cuando cambia se escribe en su lugar con un destello.', `
+        <div class="ox-row" style="gap:8px;margin-bottom:16px;align-items:center">
+          <button class="ox-btn ox-btn--primary ox-flashable" id="demo-ocupar" data-ocupado="0">${Icons.svg('download')} Exportar</button>
+          <span class="ox-meta" id="demo-ocupar-vecino">el vecino acompaña</span>
+        </div>
+        <div class="ox-row" style="gap:8px;align-items:center">
+          <button class="ox-btn ox-btn--ghost ox-btn--sm" id="demo-contar-mas">Sumar</button>
+          <button class="ox-btn ox-btn--ghost ox-btn--sm" id="demo-contar-vaciar">Vaciar</button>
+          <div class="ox-navitem" style="width:200px;pointer-events:none">${Icons.svg('grid')} Páginas <span class="ox-navitem__count" id="demo-contador"></span></div>
         </div>`)}
 
       ${section('Mostrar y esconder', 'Lo que se prende con <span class="ox-mono">el.hidden</span> no aparece de golpe: con <span class="ox-mono">.ox-plegable</span> el alto se pliega mientras se desvanece, y lo de abajo se corre de a poco en vez de saltar. <span class="ox-mono">.ox-plegable--ancho</span> hace lo mismo en una fila, con los de al lado. El JS no cambia: sigue siendo <span class="ox-mono">hidden</span>. Si manejás una clase y tenés un envoltorio, <span class="ox-mono">.ox-reveal</span>.', `
@@ -596,6 +607,26 @@ export function wireDesign(rootEl) {
     const k = e.target.closest('[data-swap]')?.dataset.swap;
     if (k) swap(swapBox, SWAP[k], { relevo: k !== 'vacio' });
   });
+
+  /* ocupar(): el botón de demo trabaja 1,6 s y vuelve. El rótulo de cada
+     estado sale de acá, no de una foto del innerHTML: la foto se llevaría el
+     destello del clic que todavía está (Quire, herr-15). */
+  const ocupadoBtn = rootEl.querySelector('#demo-ocupar');
+  const ROTULO = {
+    libre: `${Icons.svg('download')} Exportar`,
+    ocupado: `${Icons.spinner()} Exportando las 12 páginas…`,
+  };
+  ocupadoBtn?.addEventListener('click', () => {
+    if (ocupadoBtn.dataset.ocupado === '1') return;
+    ocupar(ocupadoBtn, true, ROTULO.ocupado);
+    setTimeout(() => { if (ocupadoBtn.isConnected) ocupar(ocupadoBtn, false, ROTULO.libre); }, 1600);
+  });
+
+  /* contador(): nace vacío (vacío es «nada que contar»). */
+  let cuenta = 0;
+  const cont = rootEl.querySelector('#demo-contador');
+  rootEl.querySelector('#demo-contar-mas')?.addEventListener('click', () => contador(cont, ++cuenta));
+  rootEl.querySelector('#demo-contar-vaciar')?.addEventListener('click', () => { cuenta = 0; contador(cont, 0); });
 
   /* Mostrar y esconder: el JS solo cambia `hidden`, el CSS pliega. */
   const plegable = rootEl.querySelector('#demo-plegable');
