@@ -164,6 +164,29 @@
   text-align: center;
 }
 
+/* El color y el grosor del lápiz, plegados a lo ancho mientras el lápiz está
+   apagado. Las pastillas son las de la barra de tinta del lector (.qr-color,
+   lector.css); el grosor se dice con un punto de su tamaño. */
+.qr-pres__flota,
+.qr-orador__pie { --ox-plegable-gap: var(--ox-1); }
+.qr-pres__lapiz {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-1);
+}
+.qr-pres__lapiz .qr-color { margin: 0 2px; }
+.qr-pres__grosor span {
+  width: var(--d);
+  height: var(--d);
+  border-radius: 50%;
+  background: currentColor;
+}
+/* En el pie del orador el fondo es --ox-bg, no --ox-s2: el hueco entre la
+   pastilla y su anillo tiene que ser de ese color o se lee como un halo. */
+.qr-orador__pie .qr-color.is-on {
+  box-shadow: inset 0 0 0 1px var(--ox-line-3), 0 0 0 2px var(--ox-bg), 0 0 0 3px var(--ox-accent);
+}
+
 /* El cronómetro, en el rincón. T lo esconde; un clic lo pausa. */
 .qr-pres__reloj {
   position: absolute;

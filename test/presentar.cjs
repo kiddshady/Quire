@@ -109,6 +109,13 @@ app.whenReady().then(async () => {
         });
         return dist < 60 ? mejor : -1;
       },
+      /* El color de la tinta: el de un píxel bien opaco (los bordes se mezclan). */
+      tintaColor(sel, doc = document) {
+        const c = doc.querySelector(sel + ' .qr-esc__tinta');
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        for (let i = 3; i < d.length; i += 4) if (d[i] === 255) return [d[i - 3], d[i - 2], d[i - 1]];
+        return null;
+      },
       tintaRoja(sel, doc = document) {
         const c = doc.querySelector(sel + ' .qr-esc__tinta');
         const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
@@ -270,6 +277,56 @@ app.whenReady().then(async () => {
     ok('Escape suelta el lápiz antes de terminar', (await estado()).modo === null && (await estado()).activa);
   });
 
+  /* Un clic de verdad sobre un botón de la botonera: primero el mouse se
+     mueve hasta ahí (la botonera de una pantalla aparece al moverlo). */
+  const clicEn = async (sel) => {
+    const b = await js(`T.caja(${JSON.stringify(sel)})`);
+    raton('mouseMove', b.x + b.w / 2, b.y + b.h / 2);
+    await esperar(260);
+    raton('mouseDown', b.x + b.w / 2, b.y + b.h / 2);
+    raton('mouseUp', b.x + b.w / 2, b.y + b.h / 2);
+    await esperar(80);
+  };
+  const trazar = async (dy) => {
+    const c = await centroPrincipal();
+    raton('mouseMove', c.x - 200, c.y + dy);
+    raton('mouseDown', c.x - 200, c.y + dy);
+    for (let i = 1; i <= 10; i++) raton('mouseMove', c.x - 200 + i * 40, c.y + dy, { button: 'left' });
+    raton('mouseUp', c.x + 200, c.y + dy);
+    await esperar(120);
+  };
+
+  await bloque('color y grosor del lápiz', async () => {
+    ok('con el lápiz apagado no hay colores', await js(`document.querySelector('[data-lapiz]').hidden`));
+    await tecla('D');
+    await esperar(400);
+    const abierto = await js(`(() => { const el = document.querySelector('[data-lapiz]'); return { hidden: el.hidden, ancho: el.getBoundingClientRect().width }; })()`);
+    ok('D despliega el color y el grosor', !abierto.hidden && abierto.ancho > 150, JSON.stringify(abierto));
+    ok('arranca en rojo y mediano', await js(`!!document.querySelector('[data-color="#ff3b30"].is-on') && !!document.querySelector('[data-grosor="medio"].is-on')`));
+    await clicEn('[data-color="#0a84ff"]');
+    await clicEn('[data-grosor="grueso"]');
+    ok('se elige azul y grueso', await js(`!!document.querySelector('[data-color="#0a84ff"].is-on') && !!document.querySelector('[data-grosor="grueso"].is-on') && document.querySelectorAll('[data-color].is-on').length === 1`));
+    ok('elegir no cambia de diapositiva', (await estado()).n === 4);
+    await trazar(0);
+    const color = await js(`T.tintaColor('.qr-esc--principal')`);
+    ok('la tinta sale azul', color && Math.hypot(color[0] - 10, color[1] - 132, color[2] - 255) < 30, JSON.stringify(color));
+    const grueso = await js(`T.tintaRoja('.qr-esc--principal')`);
+    await tecla('E');
+    await esperar(350);
+    await clicEn('[data-grosor="fino"]');
+    await trazar(0);
+    const fino = await js(`T.tintaRoja('.qr-esc--principal')`);
+    ok('el grueso es más grueso que el fino', grueso > fino * 2.5, `${grueso} contra ${fino}`);
+    await clicEn('[data-color="#ffffff"]');
+    await trazar(60);
+    ok('cada trazo se queda con su color', (await estado()).trazos === 2 && JSON.stringify(await js(`T.tintaColor('.qr-esc--principal')`)) === '[10,132,255]');
+    await tecla('E');
+    await esperar(350);
+    await tecla('D');
+    await esperar(400);
+    ok('al soltar el lápiz se pliegan', await js(`document.querySelector('[data-lapiz]').hidden`));
+  });
+
   await bloque('la grilla', async () => {
     await tecla('G');
     await esperar(300);
@@ -323,6 +380,9 @@ app.whenReady().then(async () => {
     await js(`document.getElementById('qr-presentar').click()`);
     await listo();
     ok('el botón arranca desde el principio', await enDiapositiva(1));
+    await tecla('D');
+    ok('el lápiz se acuerda del color y el grosor', await js(`!!document.querySelector('[data-color="#ffffff"].is-on') && !!document.querySelector('[data-grosor="fino"].is-on')`));
+    await tecla('D');
     await tecla('Escape');
     await hasta(() => js(`!document.getElementById('qr-presentacion')`), 3000, 'la capa no se fue');
   });

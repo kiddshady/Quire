@@ -66,8 +66,9 @@ ocupa la ventana y el cronómetro queda en un rincón. Se avanza con las
 flechas, AvPág/RePág (lo que mandan los presentadores de mano), Espacio, un
 clic o la rueda; un número y Enter van a esa diapositiva. **L** prende el
 puntero láser (o Ctrl mientras lo apretás, o el botón del costado de la
-lapicera), **D** dibuja encima con la tablet —tinta de paso, que se va al
-cambiar de diapositiva y no toca el PDF—, **E** la borra, **B** pone la sala
+lapicera), **D** dibuja encima con la tablet, en el color y el grosor que
+elijas en la botonera —tinta de paso, que se va al cambiar de diapositiva y
+no toca el PDF—, **E** la borra, **B** pone la sala
 en negro y **G** muestra todas las diapositivas. Esc termina, y el lector
 queda en la diapositiva donde terminaste.
 
@@ -195,7 +196,7 @@ npm run verificar     # npm test y todas las suites con Electron, en orden
 | `npm run buscar` | Genera un PDF con los casos difíciles y mide **dónde cae cada marca**: el resaltado tiene que caer sobre las mismas letras que el span de la capa de texto |
 | `npm run lector` | El lector de punta a punta: la barra, el zoom, el campo de página, Espacio y AvPág, las marcas, la tinta y la hoja a la misma escala, los errores de abrir en castellano y **la contraseña que se pide** (y el documento que queda marcado) |
 | `npm run puck` | Prende la tinta y aprieta la barra con eventos del sistema: que el disco aparezca bajo el puntero, que el anillo mueva el scroll píxel por píxel y que el núcleo termine en un zoom real con el mismo punto del papel bajo el disco |
-| `npm run presentar` | Presentar con seis diapositivas de colores (el color dice cuál se ve): cada tecla de los presentadores, ir por número, la tarjeta del final, el negro, el láser, la tinta de paso, la grilla, el clic y la rueda; y **con sala** (un segundo monitor de mentira, fuera de pantalla): que la sala muestre lo mismo que el orador, que el láser y la tinta lleguen a la sala en el mismo lugar, y que si la sala se cierra sola se siga en una pantalla |
+| `npm run presentar` | Presentar con seis diapositivas de colores (el color dice cuál se ve): cada tecla de los presentadores, ir por número, la tarjeta del final, el negro, el láser, la tinta de paso con su color y su grosor, la grilla, el clic y la rueda; y **con sala** (un segundo monitor de mentira, fuera de pantalla): que la sala muestre lo mismo que el orador, que el láser y la tinta lleguen a la sala en el mismo lugar, y que si la sala se cierra sola se siga en una pantalla |
 | `npm run pestanas` | Abre varios PDFs: que el estado sea de cada pestaña, que arrastrar una la cambie de lugar y que el worker compartido sobreviva a cerrar una |
 | `npm run paginas` | Organizar páginas: lo pendiente es de la pestaña, la grilla se pone al día por clave (girar, quitar, arrastrar, medidos por cuadro), Descartar se deshace, cerrar con cambios **pregunta con las mismas palabras que cerrar la app**, y con un **PDF con contraseña** se ordena y se mira pero Guardar y Extraer se apagan diciendo por qué |
 | `npm run cerrar` | Levanta la app entera y la cierra: que el último trazo llegue al disco **y que la ventana siga cerrándose** porque el renderer contestó, no por el timeout |

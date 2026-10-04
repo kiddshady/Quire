@@ -32,7 +32,7 @@
 import { S, alCambiar } from './estado.js';
 import { Icons } from './icons.js';
 import { Modal } from './overlays.js';
-import { exit, raf2 } from './motion.js';
+import { exit, raf2, asentarPlegables } from './motion.js';
 import { StrokeInput } from './tinta/stroke.js';
 import { contornoDeTrazo, trazoTocado } from './tinta/contorno.js';
 
@@ -48,11 +48,29 @@ const EASE_BOTH = 'cubic-bezier(.65, 0, .35, 1)';
    puntos a menos de 0.08—, y con un ancho de 1 se comía el trazo entero. */
 const U = 1000;
 
-/* La tinta de paso: roja, para que se vea sobre cualquier diapositiva. 4.5
-   unidades son ~9 px en un proyector de 1920. */
-const TINTA_COLOR = '#ff3b30';
-const TINTA_ANCHO = 4.5;
+/* La tinta de paso. Colores para proyectar, no los del lector: saturados y
+   claros, que se vean sobre una lámina blanca y sobre una oscura (por eso el
+   blanco). El rojo es el de siempre. Los grosores en unidades de diapositiva:
+   el mediano, 4.5, son ~9 px en un proyector de 1920. */
+const COLORES_LAPIZ = [
+  { hex: '#ff3b30', nombre: 'Rojo' },
+  { hex: '#ffcc00', nombre: 'Amarillo' },
+  { hex: '#34c759', nombre: 'Verde' },
+  { hex: '#0a84ff', nombre: 'Azul' },
+  { hex: '#ffffff', nombre: 'Blanco' },
+  { hex: '#1a1a1a', nombre: 'Negro' },
+];
+const GROSORES = [
+  { id: 'fino', nombre: 'Fino', ancho: 2.5, punto: 4 },
+  { id: 'medio', nombre: 'Mediano', ancho: 4.5, punto: 7 },
+  { id: 'grueso', nombre: 'Grueso', ancho: 9, punto: 11 },
+];
 const GOMA_RADIO = 18;
+
+/* Lo que se eligió para el lápiz dura lo que dura la app: la próxima
+   presentación arranca con el mismo color y grosor. */
+const lapiz = { color: COLORES_LAPIZ[0].hex, grosor: 'medio' };
+const anchoLapiz = () => (GROSORES.find((g) => g.id === lapiz.grosor) || GROSORES[1]).ancho;
 
 /* Cuántas láminas ya pintadas se guardan. Cada escenario pide la suya a su
    tamaño, así que con la sala, la actual y la siguiente son ~3 por página. */
@@ -282,8 +300,8 @@ class Escenario {
     if (!r) return;
     const k = (dpr * r.w) / U;
     ctx.setTransform(k, 0, 0, k, dpr * r.x, dpr * r.y);
-    ctx.fillStyle = TINTA_COLOR;
     for (const t of P.vivo ? [...P.trazos, P.vivo] : P.trazos) {
+      ctx.fillStyle = t.color;
       const path = new this.win.Path2D();
       const v = t.contorno || contorno(t);
       if (!v.length) continue;
@@ -434,7 +452,7 @@ function cablearPuntero(esc) {
       if (mods.eraser) { borrando = true; if (q) borrarEn(q); return; }
       if (P.modo === 'lapiz' && q && mods.button === 0) {
         dibujando = true;
-        P.vivo = { puntos: [[q.x, q.y, pt.p]], ancho: TINTA_ANCHO };
+        P.vivo = { puntos: [[q.x, q.y, pt.p]], ancho: anchoLapiz(), color: lapiz.color };
         dibujarTintaEnTodos();
         return;
       }
@@ -541,6 +559,14 @@ function botonera() {
     <div class="ox-vr"></div>
     ${boton('laser', 'laser', 'Puntero láser', 'L', { toggle: true })}
     ${boton('lapiz', 'tinta', 'Dibujar encima', 'D', { toggle: true })}
+    <!-- El color y el grosor solo con el lápiz prendido: se despliegan a lo
+         ancho al apretar D y se pliegan al soltarlo. -->
+    <div class="qr-pres__lapiz ox-plegable--ancho" data-lapiz hidden>
+      <div class="ox-vr"></div>
+      ${COLORES_LAPIZ.map((c) => `<button class="qr-color" data-color="${c.hex}" style="--tinta:${c.hex}" data-tip="${c.nombre}" data-tip-side="top"></button>`).join('')}
+      <div class="ox-vr"></div>
+      ${GROSORES.map((g) => `<button class="ox-iconbtn qr-tool qr-pres__grosor" data-grosor="${g.id}" data-tip="${g.nombre}" data-tip-side="top"><span style="--d:${g.punto}px"></span></button>`).join('')}
+    </div>
     ${boton('borrar', 'borrador', 'Borrar lo dibujado', 'E')}
     <div class="ox-vr"></div>
     ${boton('negro', 'pantallaNegra', 'Pantalla en negro', 'B', { toggle: true })}
@@ -607,6 +633,8 @@ function armar() {
   P.raiz.querySelector('.qr-pres__reloj')?.classList.toggle('is-oculto', !P.reloj.verlo);
   actualizarTextos();
   marcarBotones();
+  // Si se rearma con el lápiz prendido, su color y grosor nacen en su lugar.
+  asentarPlegables(raiz);
   tic();
 }
 
@@ -631,6 +659,9 @@ function marcarBotones() {
   for (const [act, v] of Object.entries(on)) {
     for (const b of P.raiz.querySelectorAll(`[data-act="${act}"].qr-tool`)) b.classList.toggle('is-on', v);
   }
+  for (const el of P.raiz.querySelectorAll('[data-lapiz]')) el.hidden = P.modo !== 'lapiz';
+  for (const b of P.raiz.querySelectorAll('[data-color]')) b.classList.toggle('is-on', b.dataset.color === lapiz.color);
+  for (const b of P.raiz.querySelectorAll('[data-grosor]')) b.classList.toggle('is-on', b.dataset.grosor === lapiz.grosor);
   const pausa = P.raiz.querySelector('.qr-orador__reloj [data-act="pausar"]');
   if (pausa) {
     pausa.dataset.tip = P.reloj.pausa ? 'Seguir con el cronómetro' : 'Pausar el cronómetro';
@@ -935,6 +966,10 @@ export async function presentar({ desde = 1, alTerminar = null } = {}) {
   raiz.innerHTML = '<div class="qr-pres__cont" data-cont></div><div class="qr-pres__telon"></div>';
   raiz.addEventListener('animationend', (e) => { if (e.target === raiz && !raiz.dataset.state) raiz.classList.add('is-settled'); });
   raiz.addEventListener('click', (e) => {
+    const color = e.target.closest('[data-color]');
+    if (color) { lapiz.color = color.dataset.color; marcarBotones(); return; }
+    const grosor = e.target.closest('[data-grosor]');
+    if (grosor) { lapiz.grosor = grosor.dataset.grosor; marcarBotones(); return; }
     const ir2 = e.target.closest('[data-ir]');
     if (ir2) { cerrarGrilla({ ir: +ir2.dataset.ir }); return; }
     const b = e.target.closest('[data-act]');
