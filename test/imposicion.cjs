@@ -17,6 +17,26 @@ const { vigilarConsola } = require('./consola.cjs');
 const RAIZ = path.join(__dirname, '..');
 const HTML = path.join(RAIZ, 'renderer', '_imposicion.html');
 
+/* La red (tests-07) y la página del test, que se borra en TODAS las salidas
+   (tests-08): también cuando explota a mitad de camino. Antes un «EXPLOTÓ»
+   salía antes del unlink y renderer/_imposicion.html quedaba en el árbol,
+   donde build.files lo habría empaquetado de no ser por "!renderer/_*.html". */
+const { abandono } = require('./_comun.cjs');
+const bail = abandono({ ms: 120000 });
+const salirApp = app.exit.bind(app);
+app.exit = (codigo) => {
+  try { fs.rmSync(HTML, { force: true }); } catch { /* ya no está */ }
+  salirApp(codigo);
+};
+
+/* Dos PDF cifrados chicos, una hoja en blanco cada uno, hechos con pypdf
+   (pdf-lib no cifra). CON_CLAVE pide «quire» para abrir (es el de
+   test/lector.cjs); SOLO_DUENIO tiene solo contraseña de propietario, la de
+   las restricciones: pdf.js lo abre sin preguntar, y pdf-lib lo copiaba en
+   blanco igual (paquete 4A). */
+const CON_CLAVE = 'JVBERi0xLjMKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPDM3YzhmZTlmOGI+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbIDQgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKPj4KL01lZGlhQm94IFsgMC4wIDAuMCAyMDAgMjAwIF0KL1BhcmVudCAyIDAgUgo+PgplbmRvYmoKNSAwIG9iago8PAovViAxCi9SIDIKL0xlbmd0aCA0MAovUCA0Mjk0OTY3MjkyCi9GaWx0ZXIgL1N0YW5kYXJkCi9PIDxjNzI4ODNjN2M5OWQzYzcwODU3NjE3NDBhNTBiYmE4YjdlOGJjYjg5NGViZTUzNGY5YzlhOTUxMDhmY2JkNWIyPgovVSA8M2FhODUyYWRiZWNhY2ZiOWJkNDdlZWFhMDliYmRjMTU2NDg4MDk5Nzc3YzUwM2Y0YWIzNGMxZTQ4ZDJhNjY4MT4KPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxNSAwMDAwMCBuIAowMDAwMDAwMDU5IDAwMDAwIG4gCjAwMDAwMDAxMTggMDAwMDAgbiAKMDAwMDAwMDE2NyAwMDAwMCBuIAowMDAwMDAwMjYxIDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgNgovUm9vdCAzIDAgUgovSW5mbyAxIDAgUgovSUQgWyA8MzUzOTYzMzIzMDYyNjI2MTY1NjMzODMyNjUzMTYyMzU2MzM2MzM2MzYxNjI2NTY2MzU2MTY2NjE2NTY2MzEzMT4gPDM1Mzk2MzMyMzA2MjYyNjE2NTYzMzgzMjY1MzE2MjM1NjMzNjMzNjM2MTYyNjU2NjM1NjE2NjYxNjU2NjMxMzE+IF0KL0VuY3J5cHQgNSAwIFIKPj4Kc3RhcnR4cmVmCjQ3NQolJUVPRgo=';
+const SOLO_DUENIO = 'JVBERi0xLjMKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPGM2ZDkwMDA5MDU+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbIDQgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKPj4KL01lZGlhQm94IFsgMC4wIDAuMCAyMDAgMjAwIF0KL1BhcmVudCAyIDAgUgo+PgplbmRvYmoKNSAwIG9iago8PAovViAyCi9SIDMKL0xlbmd0aCAxMjgKL1AgMAovRmlsdGVyIC9TdGFuZGFyZAovTyA8NmZiZTAwMDBhZjFiNTUxNGM4OGMwY2E4YWU3ZDg4YWU5ZTgwM2M2NGY4ZGJkMzk1ZGQ0YWJiM2NlM2IyYTBiMT4KL1UgPDM5NWExMDkxZDE4OTk5ZGVhNjJmNTVkMGUzYTk5MmJhMjhiZjRlNWU0ZTc1OGE0MTY0MDA0ZTU2ZmZmYTAxMDg+Cj4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDAgbiAKMDAwMDAwMDA1OSAwMDAwMCBuIAowMDAwMDAwMTE4IDAwMDAwIG4gCjAwMDAwMDAxNjcgMDAwMDAgbiAKMDAwMDAwMDI2MSAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDYKL1Jvb3QgMyAwIFIKL0luZm8gMSAwIFIKL0lEIFsgPDM1Mzk2MzMyMzA2MjYyNjE2NTYzMzgzMjY1MzE2MjM1NjMzNjMzNjM2MTYyNjU2NjM1NjE2NjYxNjU2NjMxMzE+IDwzNTM5NjMzMjMwNjI2MjYxNjU2MzM4MzI2NTMxNjIzNTYzMzYzMzYzNjE2MjY1NjYzNTYxNjY2MTY1NjYzMTMxPiBdCi9FbmNyeXB0IDUgMCBSCj4+CnN0YXJ0eHJlZgo0NjcKJSVFT0YK';
+
 let pass = 0; let fail = 0;
 const ok = (n, c, x = '') => { if (c) { pass++; console.log(`  ok   ${n}`); } else { fail++; console.log(`  FALLA ${n} ${x}`); } };
 
@@ -516,11 +536,102 @@ app.whenReady().then(async () => {
   ok('un DPI imposible avisa en vez de dar un lienzo en blanco',
     /máximo|bajá el DPI/i.test(r.exportarLimite || ''), r.exportarLimite);
 
-  fs.unlinkSync(HTML);
+  /* ── Un PDF cifrado no sale en blanco: el motor lo frena (paquete 4A) ─────
+     pdf-lib no descifra: con ignoreEncryption copiaba los streams cifrados y
+     salía la hoja vacía. Las vistas ya no llaman al motor con un documento
+     abierto con contraseña (conClave), pero uno de solo lectura pdf.js lo
+     abre sin preguntar, y a Combinar puede entrar uno desde el disco: para
+     esos, cada trabajo tiene que fallar con el mensaje en castellano y el
+     código que las vistas reconocen. */
+  console.log('\nCifrados: el motor no los reescribe');
+  const cifrados = await win.webContents.executeJavaScript(`(async () => {
+    const motor = await import('./js/imposicion/motor.js');
+    const { planCon } = await import('./js/imposicion/plan.js');
+    const { abrirDocumento, alPedirClave } = await import('./js/pdf/documento.js');
+    const desde64 = (b) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0));
+    const A4 = { nombre: 'A4', ancho: 210, alto: 297 };
+    const intento = async (fn) => { try { await fn(); return { paso: true }; } catch (e) { return { codigo: e.code || null, mensaje: e.message }; } };
+    const out = {};
+    alPedirClave(() => 'quire');
+    for (const [k, b64] of [['conClave', ${JSON.stringify(CON_CLAVE)}], ['soloDuenio', ${JSON.stringify(SOLO_DUENIO)}]]) {
+      const doc = await abrirDocumento(desde64(b64), { nombre: k + '.pdf' });
+      const geo = await doc.geometrias();
+      const bytes = doc.bytes;
+      out[k] = {
+        marcado: doc.conClave,
+        imponer: await intento(() => motor.imponer(bytes, planCon({ papel: A4 }), geo)),
+        reorganizar: await intento(() => motor.reorganizar(bytes, { orden: [1] })),
+        extraer: await intento(() => motor.reorganizar(bytes, { orden: [1], accion: 'extraer sus páginas' })),
+        dividir: await intento(() => motor.dividir(bytes, { tipo: 'cada', cada: 1 }, 'x')),
+        combinar: await intento(() => motor.combinar([{ bytes, nombre: k + '.pdf', tipo: 'pdf', formato: 'pdf' }])),
+      };
+      doc.destruir();
+    }
+    alPedirClave(null);
+    return out;
+  })()`, true).catch((e) => ({ error: String(e) }));
+  if (cifrados.error) { console.log('EXPLOTÓ: ' + cifrados.error); app.exit(1); return; }
+  {
+    const { conClave: cc, soloDuenio: sd } = cifrados;
+    ok('el de contraseña de apertura queda marcado y el de solo propietario no (pdf.js no la pidió)',
+      cc.marcado === true && sd.marcado === false, JSON.stringify([cc.marcado, sd.marcado]));
+    for (const [nombre, r] of [['con contraseña de apertura', cc], ['con contraseña de propietario', sd]]) {
+      const trabajos = ['imponer', 'reorganizar', 'dividir', 'combinar'];
+      ok(`${nombre}: ningún trabajo del motor lo reescribe`, trabajos.every((t) => r[t].codigo === 'quire-clave'), JSON.stringify(r));
+      ok(`${nombre}: y el aviso lo dice en castellano`,
+        /tiene contraseña: Quire lo puede leer, pero todavía no imprimirlo/.test(r.imponer.mensaje || ''), r.imponer.mensaje);
+    }
+    /* Páginas reorganiza para guardar y para extraer: el aviso dice la que
+       se pidió. Con la acción fija, el Toast de Extraer decía «todavía no
+       guardar sus páginas» (revisión del 4A). */
+    ok('reorganizar dice la acción que se le pidió',
+      sd.extraer.codigo === 'quire-clave' && /todavía no extraer sus páginas/.test(sd.extraer.mensaje || '') && /todavía no guardar sus páginas/.test(sd.reorganizar.mensaje || ''),
+      JSON.stringify([sd.extraer.mensaje, sd.reorganizar.mensaje]));
+    ok('Combinar nombra al archivo que frena', /«soloDuenio\.pdf» tiene contraseña/.test(sd.combinar.mensaje || ''), sd.combinar.mensaje);
+  }
+
+  /* ── El resaltador exportado no lava la letra (tinta-07) ─────────────────
+     Decisión de Fran: el resaltador multiplica, en pantalla, al imprimir y
+     al exportar. Esto mira el exportar (exportar.js): un resaltador que
+     cubre la hoja entera y la página 1 exportada. Con la mezcla normal el
+     píxel más oscuro de la letra no baja de rgb(82, 67, 5) (el 34 % de
+     amarillo encima del negro); multiplicando queda negro. El papel, en los
+     dos casos, amarillo. Se lee el PNG que sale, no el canvas. */
+  console.log('\nEl resaltador al exportar');
+  const resaltado = await win.webContents.executeJavaScript(`(async () => {
+    const { exportarImagenes } = await import('./js/exportar.js');
+    const { abrirDocumento } = await import('./js/pdf/documento.js');
+    const bytes = new Uint8Array(await (await fetch('./vendor/cobayo.pdf')).arrayBuffer());
+    const doc = await abrirDocumento(bytes, { nombre: 'cobayo.pdf' });
+    const trazo = { id: 't1', herramienta: 'resaltador', color: '#f1c40f', opacidad: 0.34, ancho: 2400,
+      puntos: [[0, 421, 0.5], [595, 421, 0.5]] };
+    const capa = { trazos: (n) => (n === 1 ? [trazo] : []) };
+    const leer = async (img) => {
+      const bm = await createImageBitmap(new Blob([img.bytes], { type: 'image/png' }));
+      const c = document.createElement('canvas'); c.width = bm.width; c.height = bm.height;
+      const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(bm, 0, 0);
+      const d = x.getImageData(0, 0, c.width, c.height).data;
+      let minR = 255; let minG = 255;
+      for (let i = 0; i < d.length; i += 4) { if (d[i] < minR) minR = d[i]; if (d[i + 1] < minG) minG = d[i + 1]; }
+      return { minR, minG, esquina: [d[0], d[1], d[2]] };
+    };
+    const [limpia] = await exportarImagenes(doc, { paginas: [1], dpi: 150 });
+    const [conResaltador] = await exportarImagenes(doc, { paginas: [1], dpi: 150, capa });
+    doc.destruir();
+    return { limpia: await leer(limpia), resaltada: await leer(conResaltador) };
+  })()`, true).catch((e) => ({ error: String(e) }));
+  if (resaltado.error) { console.log('EXPLOTÓ: ' + resaltado.error); app.exit(1); return; }
+  {
+    const { limpia, resaltada } = resaltado;
+    ok('sin tinta, la letra del cobayo es negra (si no, lo de abajo no prueba nada)', limpia.minR <= 30, JSON.stringify(limpia));
+    ok('el papel resaltado sale amarillo', resaltada.esquina[2] < 200 && resaltada.esquina[0] > 230, JSON.stringify(resaltada.esquina));
+    ok('y la letra debajo del resaltador sigue negra: multiplica, no la lava (tinta-07)', resaltada.minR <= 40 && resaltada.minG <= 40, JSON.stringify(resaltada));
+  }
+
   console.log(`\n----- errores de consola: ${errores.length} -----`);
   for (const e of errores) console.log('  ! ' + e);
   console.log(`\n═══ ${pass} ok · ${fail} fallas ═══`);
 
   win.destroy();
   app.exit(fail || errores.length ? 1 : 0);
-});
+}).catch((e) => bail('excepción', e));

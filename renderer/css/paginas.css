@@ -34,6 +34,15 @@
 
 .qr-org__estado { white-space: nowrap; }
 
+/* La franja del PDF con contraseña (paquete 4A), arriba de la grilla y sobre
+   su mismo fondo hundido: se lee como parte de lo que se mira, no como otra
+   barra. Sin línea propia: la de la barra de arriba ya cierra. */
+.qr-org__clave {
+  flex: 0 0 auto;
+  padding: var(--ox-3) var(--ox-6) 0;
+  background: var(--ox-sunken);
+}
+
 /* Sin esfumado en ningún lado: los dos bordes ya están cerrados por una línea
    —la barra arriba, el pie abajo—, así que los dos cortes son limpios.
    Posicionada: las filas que se van (reconcile) quedan absolutas en su lugar

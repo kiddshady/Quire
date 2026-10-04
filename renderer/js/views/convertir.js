@@ -31,7 +31,7 @@ import { Icons } from '../icons.js';
 import { Toast } from '../overlays.js';
 import { paint, head, esc, attempt } from '../ui.js';
 import { fmtBytes, plural, ellipsize } from '../format.js';
-import { bindSwitcher, scrollFade, swap, frase, numero, reconcile, deslizarAncho, asentarPlegables } from '../motion.js';
+import { bindSwitcher, scrollFade, swap, frase, numero, reconcile, deslizarAncho, ocupar, asentarPlegables } from '../motion.js';
 
 const api = window.onyx;
 
@@ -651,12 +651,7 @@ const rotuloCancelar = () => (V.cancelando ? 'Cancelando…' : `${Icons.svg('clo
    el botón por id: si volviste a la vista con el lote corriendo, es otro nodo,
    y nació ya ocupado. */
 function ponerOcupado(id, ocupado, html) {
-  const b = document.getElementById(id);
-  if (!b) return;
-  const v = ocupado ? '1' : '0';
-  if (b.dataset.ocupado === v) return;
-  b.dataset.ocupado = v;
-  deslizarAncho(b, () => swap(b, html, { relevo: true }));
+  ocupar(document.getElementById(id), ocupado, html);
 }
 
 function ponerCancelar() {

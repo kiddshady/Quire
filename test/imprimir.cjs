@@ -879,6 +879,130 @@ app.whenReady().then(async () => {
     ok('al volver se vuelve a cargar el original: la caché se soltó al salir', salir.recarga === 1 && salir.vuelve, JSON.stringify(salir));
   } catch (e) { ok('la sección 15 no explota', false, e.message); }
 
+  try {
+    /* ── 16. Un PDF con contraseña ──────────────────────────────────────────
+       Sus bytes están cifrados y pdf-lib no los descifra: el preview y el
+       papel salían en blanco. Lo decidió Fran (paquete 4A): avisar y bloquear,
+       sin rasterizar. Se fabrica el estado (conClave en el documento abierto,
+       como lo deja el lector tras pedir la contraseña; el camino real lo
+       cubre lector.cjs ux-11) y se espía pdf-lib en la misma instancia de
+       módulo que usa el motor: ni el montaje, ni cambiar una opción, ni
+       Ctrl+Enter, ni llamar a imprimirAhora pueden llegar a cargar o crear un
+       PDF. El resumen sí: contar hojas es aritmética, no toca los bytes. */
+    console.log('\n16. Un PDF con contraseña');
+    const LEER = `() => {
+      const boton = document.getElementById('qr-imprimir');
+      const aviso = document.getElementById('qr-preview-aviso');
+      const r = aviso.getBoundingClientRect();
+      return {
+        aviso: __vivo(aviso), alto: Math.round(r.height),
+        pliegos: document.querySelectorAll('#qr-preview-cuerpo .qr-pliego--preview:not(.qr-pliego--saliente)').length,
+        trabajando: document.getElementById('qr-preview').classList.contains('is-trabajando'),
+        boton: { apagado: boton.disabled, explica: boton.classList.contains('qr-explica'), tip: boton.dataset.tip || null,
+          tecla: boton.dataset.tipKey || null, puntero: getComputedStyle(boton).pointerEvents },
+        flechas: [document.getElementById('qr-hoja-prev').disabled, document.getElementById('qr-hoja-next').disabled],
+        cuenta: [__vivo(document.getElementById('qr-nav-actual')), __vivo(document.getElementById('qr-nav-total'))],
+        chip: document.getElementById('qr-nav-chip').hidden,
+        resumen: __vivo(document.getElementById('qr-res-hojas')),
+        cargas: window.__cargas?.() ?? null,
+      };
+    }`;
+    const bloqueada = await js(`(async () => {
+      const est = await __est; const router = await __router;
+      const { PDFDocument } = await import('./vendor/pdf-lib/pdf-lib.mjs');
+      const cargar = PDFDocument.load; const crear = PDFDocument.create;
+      let cargas = 0;
+      PDFDocument.load = function (...a) { cargas++; return cargar.apply(this, a); };
+      PDFDocument.create = function (...a) { cargas++; return crear.apply(this, a); };
+      window.__cargas = () => cargas;
+      window.__soltarPdfLib = () => { PDFDocument.load = cargar; PDFDocument.create = crear; window.__cargas = null; return cargas; };
+      router.go('lector');
+      await __dormir(500);
+      est.S.doc.conClave = true;
+      router.go('imprimir');
+      /* Al montar, el aviso nace entero debajo del calco del router y lo
+         que se funde es el calco (motion-timing §2, el fundido). Antes
+         entraba con un relevo: invisible tres cuadros y entero a los
+         ~250 ms, con el calco ya ido (revisión del 4A). Por cuadro, desde el
+         mismo task del go(): la opacidad del aviso y la del calco. */
+      const serie = []; const calco = [];
+      const t0 = performance.now();
+      while (performance.now() - t0 < 400) {
+        const vivo = document.querySelector('#qr-preview-aviso > :not(.ox-swap-out)');
+        serie.push(vivo ? Math.round(+getComputedStyle(vivo).opacity * 100) : null);
+        const c = document.querySelector('.ox-main--saliente');
+        calco.push(c ? Math.round(+getComputedStyle(c).opacity * 100) : null);
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      await __dormir(600);
+      return { ...(${LEER})(), serie, calco };
+    })()`);
+    /* Con las flechas apagadas, las teclas tampoco mueven la hoja: antes
+       ArrowRight y Fin cambiaban la cuenta a «2 de N» sin hoja que mirar. */
+    await js(`document.activeElement?.blur?.(); true`);
+    await tecla('Right');
+    await tecla('End');
+    await sleep(400);
+    const conFlechas = await js(`(() => {
+      // Y la tecla no se agarra: la vista no la usa para nada mientras tanto.
+      const e = new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true });
+      document.body.dispatchEvent(e);
+      return { ...(${LEER})(), comida: e.defaultPrevented };
+    })()`);
+    const otroModo = await js(`(async () => {
+      document.querySelector('.qr-modo[data-value="nup"]').click();
+      await __dormir(700);
+      return (${LEER})();
+    })()`);
+    impresos.length = 0;
+    await js(`document.activeElement?.blur?.(); true`);
+    await tecla('Enter', ['control']);
+    await sleep(600);
+    const conTecla = impresos.length;
+    const directo = await js(`(async () => {
+      const m = await import('./js/views/imprimir.js');
+      await m.imprimirAhora();
+      await __dormir(300);
+      return { cargas: __cargas(), toasts: [...document.querySelectorAll('.ox-toast:not([data-state=closing])')].map((t) => t.textContent) };
+    })()`);
+    /* El tooltip del botón apagado, con el puntero de verdad: un .ox-btn
+       deshabilitado no recibía el puntero y nunca decía por qué. */
+    const caja = await js(`(() => { const b = document.getElementById('qr-imprimir').getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: caja.x, y: caja.y });
+    await sleep(700);
+    const tip = await js(`document.querySelector('#ox-layer .ox-tooltip:not([data-state=closing])')?.textContent || null`);
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: 300, y: 450 });
+    await sleep(300);
+    const vuelta = await js(`(async () => {
+      const est = await __est; const router = await __router;
+      est.S.doc.conClave = false;
+      router.go('lector');
+      await __dormir(500);
+      router.go('imprimir');
+      const pinto = await __pintada(6000);
+      const leido = (${LEER})();
+      return { pinto, ...leido, cargas: __soltarPdfLib() };
+    })()`);
+
+    const b = bloqueada;
+    ok('con contraseña, el preview dice qué tiene y qué no se puede', /Este PDF tiene contraseña/.test(b.aviso || '') && /todavía no imprimirlo/.test(b.aviso || '') && b.alto > 20, `${b.aviso} (${b.alto} px)`);
+    ok('sin pliego en blanco que prometa una hoja, y sin atenuar', b.pliegos === 0 && !b.trabajando, JSON.stringify({ ...b, serie: undefined }));
+    ok('al montar, el aviso está entero desde el primer cuadro', b.serie.length > 5 && b.serie.every((v) => v === 100), b.serie.join(' '));
+    ok('lo que se funde es el calco del router', b.calco[0] >= 97 && b.calco.some((v) => v > 3 && v < 97) && b.calco.at(-1) === null, b.calco.join(' '));
+    console.log(`       opacidad del aviso por cuadro: ${b.serie.join(' ')}`);
+    console.log(`       opacidad del calco por cuadro: ${b.calco.join(' ')}`);
+    ok('el botón se apaga y su tooltip dice por qué, sin el atajo', b.boton.apagado && b.boton.explica && /tiene contraseña: Quire todavía no puede imprimirlo/.test(b.boton.tip || '') && !b.boton.tecla && b.boton.puntero === 'auto', JSON.stringify(b.boton));
+    ok('sin hojas que mirar, las flechas se apagan', b.flechas.every(Boolean), JSON.stringify(b.flechas));
+    ok('ni cuenta ni chip al lado del candado', b.cuenta.every((t) => t === '') && b.chip, JSON.stringify({ cuenta: b.cuenta, chip: b.chip }));
+    ok('las teclas tampoco mueven la hoja', conFlechas.cuenta.every((t) => t === '') && conFlechas.chip && !conFlechas.comida, JSON.stringify({ cuenta: conFlechas.cuenta, chip: conFlechas.chip, comida: conFlechas.comida }));
+    ok('el resumen sigue contando las hojas', /hoja/.test(b.resumen || ''), b.resumen);
+    ok('cambiar el modo pone el resumen al día sin imponer nada', otroModo.cargas === 0 && otroModo.pliegos === 0 && !otroModo.trabajando && /hoja/.test(otroModo.resumen || ''), JSON.stringify(otroModo));
+    ok('Ctrl+Enter no manda nada', conTecla === 0, `${conTecla} trabajos`);
+    ok('ni llamando a imprimirAhora: nada llegó a pdf-lib ni a la cola', directo.cargas === 0 && impresos.length === 0 && !directo.toasts.some((t) => /No se pudo/.test(t)), JSON.stringify({ ...directo, impresos: impresos.length }));
+    ok('pasando el puntero sobre el botón apagado, sale el tooltip con el porqué', /tiene contraseña/.test(tip || ''), String(tip));
+    ok('sin la marca, vuelve a imponer, el botón vuelve con su atajo', vuelta.pinto && !vuelta.boton.apagado && !vuelta.boton.explica && vuelta.boton.tecla === 'Ctrl Enter' && vuelta.boton.tip === 'Mandar a la impresora' && vuelta.cargas > 0 && !vuelta.aviso, JSON.stringify(vuelta));
+  } catch (e) { ok('la sección 16 no explota', false, e.message); }
+
   console.log(`\n----- errores de consola: ${errores.length} -----`);
   for (const e of errores) console.log('  ! ' + e);
   console.log(`\n═══ ${pass} ok · ${fail} fallas ═══`);

@@ -32,8 +32,8 @@ import { Toast, Modal, Menu, Tooltip } from '../overlays.js';
 import Router from '../router.js';
 import { paint, head, empty, esc, attempt, viewEl } from '../ui.js';
 import { plural } from '../format.js';
-import { reconcile, frase, tick, swap, asentarPlegables } from '../motion.js';
-import { reorganizar } from '../imposicion/motor.js';
+import { reconcile, frase, tick, asentarPlegables, deslizarAncho, ocupar } from '../motion.js';
+import { reorganizar, tituloClave, queFaltaClave } from '../imposicion/motor.js';
 import { aplanarTinta } from '../tinta/aplanar.js';
 import { exportarImagenes } from '../exportar.js';
 
@@ -128,16 +128,34 @@ function rehacer() {
   pintarGrilla();
 }
 
-/** «3 páginas quitadas, 2 giradas y el orden cambiado». Para el Toast de
-    descartar y la pregunta antes de cerrar. */
+/** «3 páginas quitadas, 2 giradas y el orden cambiado», o «1 página girada»
+    si no se quitó ninguna. Para el Toast de descartar, la pregunta antes de
+    cerrar la pestaña y la de cerrar la app (app.js la importa de acá): eran
+    dos copias y la de la app decía «1 página girada» donde esta decía
+    «1 girada» (paquete 4A). */
 export function describirCambios(c) {
   if (!c) return '';
   const partes = [];
   if (c.quitadas) partes.push(plural(c.quitadas, 'página quitada', 'páginas quitadas'));
-  if (c.giradas) partes.push(plural(c.giradas, 'girada', 'giradas'));
+  if (c.giradas) {
+    partes.push(c.quitadas
+      ? plural(c.giradas, 'girada', 'giradas')
+      : plural(c.giradas, 'página girada', 'páginas giradas'));
+  }
   if (c.reordenada) partes.push('el orden cambiado');
   return partes.length > 1 ? `${partes.slice(0, -1).join(', ')} y ${partes.at(-1)}` : partes[0] || '';
 }
+
+/* Las palabras de la pregunta, las mismas que la del cierre de la app
+   (app.js, confirmarCierreConCambios): el mismo título, la misma frase con
+   lo que se pierde y el mismo botón. Cerrar una pestaña decía «¿Cerrar sin
+   guardar?» y «Cerrar igual», y cerrar Quire «Hay cambios sin guardar en
+   Páginas» y «Cerrar sin guardar», por lo mismo (paquete 4A). */
+export const PREGUNTA_CAMBIOS = {
+  titulo: 'Hay cambios sin guardar en Páginas',
+  boton: 'Cerrar sin guardar',
+  frase: (nombre, c, porQue) => `${nombre}: ${describirCambios(c)}. ${porQue} se pierden.`,
+};
 
 /**
  * Pregunta antes de cerrar una pestaña con cambios de Páginas sin guardar.
@@ -146,7 +164,7 @@ export function describirCambios(c) {
  */
 export async function preguntarSiDescartar(p) {
   const c = cambiosDePaginas(p);
-  const nombre = p.doc?.nombre ?? 'el documento';
+  const nombre = p.doc?.nombre || 'documento.pdf';
   /* Con un trabajo andando también se pregunta, aunque no haya nada
      pendiente: una pestaña que exportaba PNG se cerraba sin avisar y el
      documento se soltaba mientras pdf.js todavía lo rasterizaba. Lo que
@@ -165,9 +183,9 @@ export async function preguntarSiDescartar(p) {
   }
   if (!c) return true;
   return Modal.confirm({
-    title: '¿Cerrar sin guardar?',
-    sub: `Los cambios de Páginas en «${nombre}» (${describirCambios(c)}) no se guardaron. Si lo cerrás, se pierden.`,
-    confirmLabel: 'Cerrar igual',
+    title: PREGUNTA_CAMBIOS.titulo,
+    sub: PREGUNTA_CAMBIOS.frase(nombre, c, 'Si cerrás la pestaña,'),
+    confirmLabel: PREGUNTA_CAMBIOS.boton,
     danger: true,
   });
 }
@@ -207,6 +225,7 @@ export function viewPaginas() {
   const o = organizarDe();
   const c = cambiosDePaginas();
   const ocupado = ocupada();
+  const bloqueado = conClave();
   const n = o.seleccion.size;
   /* Los botones nacen como van a quedar: con la selección y el historial que
      ya tenía la pestaña, si nacieran apagados se encenderían con su
@@ -233,11 +252,17 @@ export function viewPaginas() {
         <div class="ox-vr"></div>
         <button class="ox-iconbtn ox-iconbtn--sm" id="org-rotar-izq" data-tip="Girar a la izquierda" ${apagado(!n)}><i data-icon="rotarIzq"></i></button>
         <button class="ox-iconbtn ox-iconbtn--sm" id="org-rotar-der" data-tip="Girar a la derecha" ${apagado(!n)}><i data-icon="rotarDer"></i></button>
-        <button class="ox-iconbtn ox-iconbtn--sm" id="org-extraer" data-tip="Extraer a un PDF nuevo" ${apagado(!n || ocupado)}><i data-icon="external"></i></button>
+        <button class="ox-iconbtn ox-iconbtn--sm" id="org-extraer" data-tip="${esc(bloqueado ? tipClave(FALTA_EXTRAER) : TIP_EXTRAER)}" ${apagado(!n || ocupado || bloqueado)}><i data-icon="external"></i></button>
         <button class="ox-iconbtn ox-iconbtn--sm" id="org-exportar-png" data-tip="Exportar selección como PNG · 300 dpi" ${apagado(!n || ocupado)}><i data-icon="download"></i></button>
         <button class="ox-iconbtn ox-iconbtn--sm qr-iconbtn-danger" id="org-borrar" data-tip="Quitar del documento" data-tip-key="Supr" ${apagado(!n || n >= o.orden.length)}><i data-icon="trash"></i></button>
       </div>
 
+${bloqueado ? `
+      <div class="qr-org__clave">
+        <div class="qr-clave-aviso qr-clave-aviso--fila" id="org-clave">${Icons.svg('lock')}
+          <span><span class="ox-label">${esc(tituloClave())}</span><span class="ox-meta">${esc(queFaltaClave(`${FALTA_GUARDAR} ni ${FALTA_EXTRAER}`))} Ordenar y girar sirven para mirar, y Exportar como PNG sí anda.</span></span>
+        </div>
+      </div>` : ''}
       <div class="qr-org__grilla" id="org-grilla"></div>
 
       <div class="qr-org__pie">
@@ -250,7 +275,7 @@ export function viewPaginas() {
         <button class="ox-btn ox-btn--ghost ox-flashable" id="org-reiniciar" ${apagado(!c || ocupado)}>
           <i data-icon="retry"></i> Descartar cambios
         </button>
-        <button class="ox-btn ox-btn--primary ox-flashable" id="org-guardar" ${apagado(!c || ocupado)}>${rotuloGuardar(trabajos.get(S.pestana)?.tipo === 'guardar')}</button>
+        <button class="ox-btn ox-btn--primary ox-flashable${bloqueado ? ' qr-explica' : ''}" id="org-guardar" data-ocupado="${trabajos.get(S.pestana)?.tipo === 'guardar' ? 1 : 0}"${bloqueado ? ` data-tip="${esc(tipClave(FALTA_GUARDAR))}"` : ''} ${apagado(!c || ocupado || bloqueado)}>${rotuloGuardar(trabajos.get(S.pestana)?.tipo === 'guardar')}</button>
       </div>
     </div>`);
 
@@ -533,41 +558,19 @@ function pintarGrilla({ entrar = true } = {}) {
 
 const ocupada = (p = S.pestana) => !!(p && trabajos.get(p));
 
-/* deslizarAncho() de motion.js, con el orden que pide la skill
-   (motion-timing §10) para una caja con un relevo adentro:
-   · Al ACHICARSE, primero se va lo de adentro y después se pliega la caja.
-     Con deslizarAncho la caja arrancaba en el acto, y el chip de la cuenta
-     («nada seleccionado» → «1 página») le cortaba la frase que se iba:
-     congelado, a los 60 ms le tapaba 7,5 px con opacidad 0,79, y a los
-     80 ms 17,6 px con 0,5. Espera lo que tarda el calco (160 ms, in-out) en
-     llegar a ~20 %, y se pliega in-out.
-   · Al CRECER no espera: se abre rápido (expo-out) y lo nuevo, que entra
-     con el retardo del relevo, ya encuentra la caja casi abierta. Con
-     in-out la frase nueva aparecía recortada por la caja que todavía se
-     estaba abriendo.
-   Mismo nombre de animación que motion.js (__glideAncho): si alguien llama
-   a deslizarAncho sobre la misma caja, se cortan entre sí. Si esto sirve,
-   va a motion.js (anotado para el integrador). */
-const ANCHO = { dur: 180, espera: 100 };
-const EASE = 'cubic-bezier(.16, 1, .3, 1)';         // --ox-ease
-const EASE_BOTH = 'cubic-bezier(.65, 0, .35, 1)';   // --ox-ease-both
-
-function deslizarAnchoRelevo(el, cambio) {
-  if (!el) { cambio(); return; }
-  const w0 = el.getBoundingClientRect().width;   // el que se VE, aunque viniera viajando
-  el.__glideAncho?.cancel();
-  cambio();
-  const w1 = el.getBoundingClientRect().width;
-  if (Math.abs(w1 - w0) < 1 || typeof el.animate !== 'function'
-    || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-  const achica = w1 < w0;
-  el.__glideAncho = el.animate([
-    { width: `${w0}px`, overflow: 'clip', whiteSpace: 'nowrap' },
-    { width: `${w1}px`, overflow: 'clip', whiteSpace: 'nowrap' },
-  ], achica
-    ? { duration: ANCHO.dur, delay: ANCHO.espera, easing: EASE_BOTH, fill: 'backwards' }
-    : { duration: ANCHO.dur, easing: EASE });
-}
+/* ── Un PDF con contraseña ───────────────────────────────────────────────────
+   Guardar y Extraer reescriben los bytes con pdf-lib, que no los descifra:
+   salía un PDF con las hojas en blanco. Lo decidió Fran (paquete 4A): avisar
+   y bloquear. Ordenar, girar y quitar siguen andando (es mirar, y Exportar
+   como PNG sale de pdf.js, que sí lo lee): lo que se apaga es escribir, con
+   el porqué en una franja arriba de la grilla y en el tooltip de los dos
+   botones. */
+// `cifrado`: la marca de los de solo lectura, si documento.js la pone (ver imprimir.js).
+const conClave = (p = S.pestana) => !!(p?.doc?.conClave || p?.doc?.cifrado);
+const FALTA_GUARDAR = 'guardar sus cambios';
+const FALTA_EXTRAER = 'extraer sus páginas';
+const TIP_EXTRAER = 'Extraer a un PDF nuevo';
+const tipClave = (accion) => `${tituloClave()}: Quire todavía no puede ${accion}`;
 
 function actualizarBarra() {
   const o = organizarDe();
@@ -579,26 +582,25 @@ function actualizarBarra() {
   /* Frases y no textContent (shell-11): si cambian solo las cifras («2
      páginas» → «3 páginas») se reescriben en el lugar con un destello; si
      cambia la frase, relevo. El chip además cambia de ancho: viaja. Solo si
-     cambió: deslizarAnchoRelevo corta el viaje anterior, y un aviso que no
+     cambió: deslizarAncho corta el viaje anterior, y un aviso que no
      toca la cuenta (girar) lo dejaba saltar a su ancho final. */
   const cuenta = document.getElementById('org-cuenta');
   const html = esc(textoCuenta(n));
   if (cuenta && (cuenta.__frase ?? cuenta.innerHTML) !== html) {
-    deslizarAnchoRelevo(cuenta, () => frase(cuenta, html));
+    deslizarAncho(cuenta, () => frase(cuenta, html));
   }
   cuenta?.classList.toggle('is-vacia', !n);
 
   for (const id of ['org-rotar-izq', 'org-rotar-der']) {
     document.getElementById(id)?.toggleAttribute('disabled', !n);
   }
-  for (const id of ['org-extraer', 'org-exportar-png']) {
-    document.getElementById(id)?.toggleAttribute('disabled', !n || trabajando);
-  }
+  document.getElementById('org-extraer')?.toggleAttribute('disabled', !n || trabajando || conClave());
+  document.getElementById('org-exportar-png')?.toggleAttribute('disabled', !n || trabajando);
   // No se puede borrar todo: un PDF sin páginas no es un PDF.
   document.getElementById('org-borrar')?.toggleAttribute('disabled', !n || n >= o.orden.length);
   document.getElementById('org-deshacer')?.toggleAttribute('disabled', !o.historial.atras.length);
   document.getElementById('org-rehacer')?.toggleAttribute('disabled', !o.historial.adelante.length);
-  document.getElementById('org-guardar')?.toggleAttribute('disabled', !c || trabajando);
+  document.getElementById('org-guardar')?.toggleAttribute('disabled', !c || trabajando || conClave());
   document.getElementById('org-reiniciar')?.toggleAttribute('disabled', !c || trabajando);
 
   frase(document.getElementById('org-estado'), esc(textoEstado(c)));
@@ -651,8 +653,7 @@ async function conTrabajo(p, tipo, fn, { errorTitle }) {
   trabajos.set(p, t);
   const rotular = (ocupado) => {
     if (tipo !== 'guardar' || S.pestana !== p) return;
-    const btn = document.getElementById('org-guardar');
-    if (btn) deslizarAnchoRelevo(btn, () => swap(btn, rotuloGuardar(ocupado), { relevo: true }));
+    ocupar(document.getElementById('org-guardar'), ocupado, rotuloGuardar(ocupado));
   };
   rotular(true);
   actualizarBarra();
@@ -1212,13 +1213,13 @@ async function extraer() {
   const p = S.pestana;
   const o = organizarDe(p);
   const paginas = o?.orden.filter((n) => o.seleccion.has(n)) ?? [];
-  if (!paginas.length) return;
+  if (!paginas.length || conClave(p)) return;
   const { doc, tinta } = p;
   const rotaciones = { ...o.rotaciones };
 
   await conTrabajo(p, 'extraer', async () => {
     const bytes = await aplanarTinta(doc.bytes, tinta);
-    const nuevo = await reorganizar(bytes, { orden: paginas, rotaciones });
+    const nuevo = await reorganizar(bytes, { orden: paginas, rotaciones, accion: FALTA_EXTRAER });
     if (!vigente(p)) return;
     const base = doc.nombre.replace(/\.pdf$/i, '');
     const guardado = await api.docs.guardarComo(nuevo, `${base}-extraido.pdf`);
@@ -1234,14 +1235,14 @@ async function extraer() {
 async function guardar() {
   const p = S.pestana;
   const o = organizarDe(p);
-  if (!o || !cambiosDePaginas(p)) return;
+  if (!o || !cambiosDePaginas(p) || conClave(p)) return;
   const { doc, tinta } = p;
   const guardada = foto(o);
 
   // El trabajo es aplanar, reorganizar y escribir; lo demás va después.
   const guardado = await conTrabajo(p, 'guardar', async () => {
     const bytes = await aplanarTinta(doc.bytes, tinta);
-    const nuevo = await reorganizar(bytes, guardada);
+    const nuevo = await reorganizar(bytes, { ...guardada, accion: FALTA_GUARDAR });
     if (!vigente(p)) return null;
     const base = doc.nombre.replace(/\.pdf$/i, '');
     return api.docs.guardarComo(nuevo, `${base}-organizado.pdf`);

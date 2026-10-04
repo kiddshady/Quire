@@ -702,12 +702,16 @@ app.whenReady().then(async () => {
       // La hoja tiene que caer DENTRO de la ventana, no en el limbo.
       dentroDeLaVentana: !!(r && r.top > 40 && r.left > 0 && r.bottom < window.innerHeight + 1),
       marcoPresente: !!marco,
-      bordes: cs ? {
-        top: num(cs.borderTopWidth), right: num(cs.borderRightWidth),
-        bottom: num(cs.borderBottomWidth), left: num(cs.borderLeftWidth),
+      /* El marco ya no usa bordes: la banda es un clip-path con las cuatro
+         variables registradas --qr-ni-* (porcentajes del pliego), para que
+         viaje cuando cambia el área (imprimir.js, estiloMarco). Leer
+         borderLeftWidth daba 0 con el marco bien puesto. Con la P1102w el
+         izquierdo es 3,97 mm sobre 210: 1,890 %. Es una nota: el área depende
+         de la impresora de la máquina que corre el humo. */
+      margenes: cs ? {
+        arriba: num(cs.getPropertyValue('--qr-ni-arr')), derecha: num(cs.getPropertyValue('--qr-ni-der')),
+        abajo: num(cs.getPropertyValue('--qr-ni-aba')), izquierda: num(cs.getPropertyValue('--qr-ni-izq')),
       } : null,
-      // 3,97 mm sobre 210 mm de ancho de hoja: la proporción tiene que dar.
-      proporcionIzquierda: cs && r ? Math.round(parseFloat(cs.borderLeftWidth) / r.width * 21000) / 100 : null,
       modos: document.querySelectorAll('.qr-modo').length,
       resumen: ${vivo('.qr-resumen__cifra .ox-stat__value')},
       nav: ${vivo('#qr-preview-nav')},
@@ -820,12 +824,13 @@ app.whenReady().then(async () => {
     arriba.dispatchEvent(new PointerEvent('pointerup', o));
     await new Promise((r) => setTimeout(r, 260));
 
-    /* Se vuelve a consultar el DOM. Hoy el 'change' de copias no repinta el
-       panel (cambiar con repintar: false, y con imprimir-04 el panel se arma
-       una sola vez), pero si algún cambio lo rehiciera, las referencias de
-       arriba quedarían en nodos desprendidos: de un nodo suelto,
-       getComputedStyle devuelve todo vacío y getBoundingClientRect ceros, y un
-       componente sano parecería roto. */
+    /* Se vuelve a consultar el DOM, y tiene que ser el MISMO nodo: el panel
+       de Imprimir se arma una vez y después solo se sincroniza (imprimir-04),
+       así que el 'change' de copias no lo rehace. Lo afirma también
+       test/imprimir.cjs §3; acá se mira sobre el camino del humo. Si algún
+       cambio lo volviera a rehacer, las referencias de arriba quedarían en
+       nodos desprendidos (getComputedStyle vacío, rectángulos en cero) y por
+       eso lo de abajo se mide sobre los nodos de ahora (imprimir-33). */
     const root2 = document.getElementById('op-copias-stepper');
     const input2 = document.getElementById('op-copias');
     const arriba2 = root2?.querySelector('[data-step="up"]');
@@ -834,6 +839,7 @@ app.whenReady().then(async () => {
     const btn = arriba2.getBoundingClientRect();
     const caja = root2.getBoundingClientRect();
     return {
+      mismoPanel: root2 === root && input2 === input,
       antesValor, valor: input2.value,
       antesHojas, hojas: cifra(),
       // Las flechas tienen que caer DENTRO del campo, no al lado ni encima.
@@ -849,6 +855,7 @@ app.whenReady().then(async () => {
     if (c.error) problemas.push('copias: ' + c.error);
     else {
       if (c.valor !== '2') problemas.push(`copias: la flecha dejó el campo en ${c.valor}, no en 2`);
+      if (!c.mismoPanel) problemas.push('copias: el panel de Imprimir se rehízo con la flecha de copias (imprimir-04: se arma una vez)');
       if (c.hojas === c.antesHojas) problemas.push(`copias: el resumen no se movió (${c.antesHojas})`);
       if (!c.flechaDentro) problemas.push('copias: las flechas caen fuera del campo');
       if (c.apariencia !== 'textfield') problemas.push(`copias: el input sigue en appearance ${c.apariencia}`);
@@ -913,11 +920,12 @@ app.whenReady().then(async () => {
   await js(`(async () => (await import('./js/router.js')).default.go('herramientas'))()`).catch((e) => problemas.push('ir a herramientas: ' + e.message));
   await senal('el panel de Herramientas', `!!document.querySelector(${PANEL})`);
 
-  /* Click, ESPERAR al panel de esa pestaña, y recién ahí medir. Hoy el cambio
-     es sincrónico (pintarSeccion() hace innerHTML en el click), pero si pasa
-     a salida-y-después-entrada o a un relevo, en el instante del click no hay
-     panel vivo, o el vivo todavía es el de la pestaña anterior: medir en la
-     misma tarea daría rojo con la app sana. Los paneles no dicen de qué
+  /* Click, ESPERAR al panel de esa pestaña, y recién ahí medir. El cambio de
+     pestaña es un fundido (swap con fundido, herr-02): el panel nuevo entra
+     en el acto como hijo directo, pero el viejo sigue un rato en el calco, y
+     antes era un innerHTML; si vuelve a cambiar de forma, en el instante del
+     click puede no haber panel vivo, o el vivo ser el de la pestaña anterior:
+     medir en la misma tarea daría rojo con la app sana. Los paneles no dicen de qué
      pestaña son; lo que los distingue es su texto de presentación, así que
      se espera a que la pestaña quede activa y la intro del panel vivo sea
      otra que la de la pestaña anterior. */
@@ -1060,11 +1068,12 @@ app.whenReady().then(async () => {
     return foot.querySelector('.ox-btn--danger-solid, .ox-btn--danger')
       || (primario && !/guard/i.test(primario.textContent) ? primario : null);
   })`;
-  /* La elección del botón, probada sola: hoy la guardia no existe, así que
-     el bloque de abajo nunca ve un modal y la elección no se ejercitaría
-     hasta que 2E la sume. Tres pies de modal armados a mano, con las clases
-     de Onyx: el de una guardia con Modal.show, el de Modal.confirm con
-     peligro y uno que solo ofrece guardar. */
+  /* La elección del botón, probada sola, además de en el bloque de abajo
+     (que ve el modal de verdad desde que la guardia de Páginas existe, ux-03):
+     así se cubren las variantes que esa guardia no usa. Tres pies de modal
+     armados a mano, con las clases de Onyx: el de una guardia con
+     Modal.show, el de Modal.confirm con peligro y uno que solo ofrece
+     guardar. */
   notas.push(['boton-de-cerrar', await js(`(() => {
     const pie = (botones) => {
       const foot = document.createElement('div');
@@ -1085,6 +1094,9 @@ app.whenReady().then(async () => {
     exigir('boton-de-cerrar', n.soloGuardar === null, `si el modal solo ofrece guardar apretaría «${n.soloGuardar}», y eso escribe el cobayo`);
   }
 
+  /* El cobayo no se puede escribir: está versionado y se empaqueta. Si el
+     botón que se aprieta fuera el de guardar, se notaría acá. */
+  const cobayoAntes = (() => { const st = fs.statSync(PDF); return `${st.size}:${st.mtimeMs}`; })();
   notas.push(['desde-inicio', await js(`(async () => {
     const est = await import('./js/estado.js');
     const router = (await import('./js/router.js')).default;
@@ -1158,12 +1170,16 @@ app.whenReady().then(async () => {
       problemas.push(`desde-inicio: cerrar la pestaña abrió un modal sin botón de confirmar (${JSON.stringify(vacio.modalRaro)})`);
     }
     exigir('desde-inicio', vacio.cerro, `cerrar() no terminó (preguntó: ${vacio.pregunto}, apreté: ${vacio.apretado})`);
-    /* Pendiente ux-03 (la guardia la pone 2E): con dos páginas quitadas y dos
-       giradas sin guardar, cerrar la pestaña TIENE que preguntar. Hoy la
-       guardia no existe y `pregunto` da false. Este archivo no lo toca ningún
-       paquete de la etapa 2 (plan, §3), así que 2E no puede activarla: queda
-       anotada para 4A, que la activa cuando la guardia de 2E esté integrada:
-         exigir('desde-inicio', vacio.pregunto, 'cerré una pestaña con cambios de Páginas y no preguntó'); */
+    /* ux-03: con dos páginas quitadas y dos giradas sin guardar (§8), cerrar
+       la pestaña TIENE que preguntar. La guardia la puso 2E y este archivo no
+       lo tocaba nadie en la etapa 2: la activa 4A. Lo que se aprieta tiene que
+       ser descartar, con las palabras de la pregunta de cerrar la app
+       (paginas.js, PREGUNTA_CAMBIOS), y el cobayo tiene que quedar como estaba. */
+    exigir('desde-inicio', vacio.pregunto, 'cerré una pestaña con cambios de Páginas y no preguntó');
+    exigir('desde-inicio', !vacio.pregunto || vacio.apretado === 'Cerrar sin guardar',
+      `la guardia de Páginas se contestó con «${vacio.apretado}»: tenía que ser «Cerrar sin guardar», el descartar`);
+    const cobayoDespues = (() => { const st = fs.statSync(PDF); return `${st.size}:${st.mtimeMs}`; })();
+    exigir('desde-inicio', cobayoDespues === cobayoAntes, `el cobayo se escribió al cerrar la pestaña (${cobayoAntes} → ${cobayoDespues})`);
     exigir('desde-inicio', vacio.hayCartel, `sin documento, el lector no muestra su cartel (${JSON.stringify(vacio)})`);
     exigir('desde-inicio', despues.pliegos > 0, 'abrí un PDF parado en el lector vacío y no aparecieron hojas');
     exigir('desde-inicio', !despues.hayCartel, 'con el documento abierto sigue el cartel de vacío');

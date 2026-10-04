@@ -64,6 +64,45 @@ function marcasDeCorte(hoja, largo = mm(6)) {
   return lineas;
 }
 
+/* ── Un PDF cifrado no pasa por acá ──────────────────────────────────────────
+   pdf-lib no descifra. Con ignoreEncryption carga igual, pero copia los
+   streams tal como están en el archivo, cifrados, a un documento que ya no
+   dice cómo descifrarlos: lo que sale es una hoja en blanco o un PDF roto.
+   Medido en octubre de 2026 (paquete 4A): un PDF con una línea de texto,
+   cifrado con pypdf, copiado con copyPages, daba «Hola palabra secreta» en
+   el original y "" en la copia. Pasa con la contraseña de apertura
+   (Documento.conClave, que pdf.js pidió al abrir) y TAMBIÉN con la de
+   propietario sola, la de las restricciones de imprimir o copiar: esa pdf.js
+   la abre sin preguntar y nadie se entera hasta ver el papel vacío. El
+   comentario de cargarOrigen decía que un PDF «de solo lectura» igual se
+   podía imponer; con pdf-lib eso nunca anduvo.
+
+   Lo decidió Fran: avisar y bloquear, no rasterizar. Las vistas miran
+   conClave antes y apagan el botón con el porqué; esto es la red de abajo,
+   para lo que ellas no pueden saber (un PDF de solo lectura, un archivo
+   cifrado que entró a Combinar desde el disco): el trabajo falla con un
+   mensaje que dice qué pasa, en vez de terminar en papel en blanco.
+   pdf-lib lo sabe sin descifrar nada: isEncrypted es tener /Encrypt en el
+   trailer, y lo conserva al volver a guardar (el aplanado de la tinta de un
+   cifrado sale cifrado). */
+
+/** El código de los errores de un PDF cifrado, para que la vista los distinga. */
+export const CLAVE = 'quire-clave';
+
+/* La frase del aviso, la misma en todas las vistas, en dos mitades para los
+   carteles que la parten en título y texto: «Este PDF tiene contraseña» y
+   «Quire lo puede leer, pero todavía no imprimirlo.». */
+export const tituloClave = (nombre = '') => `${nombre ? `«${nombre}»` : 'Este PDF'} tiene contraseña`;
+export const queFaltaClave = (accion) => `Quire lo puede leer, pero todavía no ${accion}.`;
+export const textoClave = (accion, nombre = '') => `${tituloClave(nombre)}: ${queFaltaClave(accion)}`;
+
+function exigirSinCifrar(doc, accion, nombre) {
+  if (!doc.isEncrypted) return doc;
+  const err = new Error(textoClave(accion, nombre));
+  err.code = CLAVE;
+  throw err;
+}
+
 /* El original parseado, por identidad de sus bytes (imprimir-13). Cada toque
    de una opción del preview volvía a hacer PDFDocument.load del documento
    entero, y en un PDF grande eso era casi todo el tiempo de la imposición.
@@ -87,10 +126,10 @@ function cargarOrigen(bytes) {
   if (clave && origen?.bytes === clave) return origen.promesa;
   const promesa = PDFDocument.load(
     bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes),
-    // Un PDF con permisos de solo-lectura igual se puede imponer: el permiso
-    // es del documento, no del papel que ya tenés en la mano.
+    /* ignoreEncryption para que un cifrado no tire el error en inglés de
+       pdf-lib: se lo frena acá abajo con el nuestro (ver exigirSinCifrar). */
     { ignoreEncryption: true, updateMetadata: false }
-  );
+  ).then((doc) => exigirSinCifrar(doc, 'imprimirlo'));
   if (clave) {
     const entrada = { bytes: clave, promesa };
     origen = entrada;
@@ -288,13 +327,18 @@ export async function extraerCaras(bytesImpuestos, indices) {
  * `rotaciones` es un giro EXTRA sobre el /Rotate que la página ya tenía: una
  * página escaneada al revés ya viene con 180, y sumarle 90 tiene que dar 270.
  *
+ * `accion` es lo que el aviso de un cifrado dice que todavía no se puede
+ * («…todavía no extraer sus páginas»): Páginas reorganiza para guardar y para
+ * extraer, y con la acción fija el Toast de Extraer decía «guardar»
+ * (revisión del 4A).
+ *
  * @param {Uint8Array} bytes
- * @param {{orden:number[], rotaciones?:Record<number,number>}} cambios
+ * @param {{orden:number[], rotaciones?:Record<number,number>, accion?:string}} cambios
  */
-export async function reorganizar(bytes, { orden, rotaciones = {} }) {
+export async function reorganizar(bytes, { orden, rotaciones = {}, accion = 'guardar sus páginas' }) {
   if (!orden?.length) throw new Error('No queda ninguna página');
 
-  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const doc = exigirSinCifrar(await PDFDocument.load(bytes, { ignoreEncryption: true }), accion);
   const total = doc.getPageCount();
   const validas = orden.filter((n) => n >= 1 && n <= total);
   if (!validas.length) throw new Error('Ninguna de las páginas pedidas existe');
@@ -331,7 +375,7 @@ export async function combinar(docs) {
     if (d.tipo === 'imagen') {
       await paginaDeImagen(salida, d);
     } else {
-      const doc = await PDFDocument.load(d.bytes, { ignoreEncryption: true });
+      const doc = exigirSinCifrar(await PDFDocument.load(d.bytes, { ignoreEncryption: true }), 'combinarlo', d.nombre);
       const paginas = await salida.copyPages(doc, doc.getPageIndices());
       for (const p of paginas) salida.addPage(p);
     }
@@ -396,7 +440,7 @@ async function paginaDeImagen(salida, d) {
  * @returns {Promise<Array<{nombre:string, bytes:Uint8Array, desde:number, hasta:number}>>}
  */
 export async function dividir(bytes, corte, nombreBase = 'documento') {
-  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const doc = exigirSinCifrar(await PDFDocument.load(bytes, { ignoreEncryption: true }), 'dividirlo');
   const total = doc.getPageCount();
 
   let bloques = [];

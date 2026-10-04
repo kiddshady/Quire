@@ -10,8 +10,9 @@
    imagen impresa no se vea blanda.
 
    La tinta va incluida: se dibuja en un lienzo aparte, transparente, y se
-   compone encima de la página antes de sacar el bitmap. Exportar una página
-   anotada tiene que traer la anotación.
+   compone encima de la página antes de sacar el bitmap (el resaltador,
+   multiplicando: la letra de abajo queda negra). Exportar una página anotada
+   tiene que traer la anotación.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 import { dibujarTrazos } from './tinta/capa.js';
@@ -142,14 +143,33 @@ export async function exportarImagenes(doc, {
        (imprimir-01, tinta-01). dibujarTrazos arranca con un clearRect de todo
        el lienzo —en el editor es lo correcto: su canvas es solo de tinta—, y
        el de la página nació con `alpha: false`, donde borrar deja NEGRO
-       opaco: la página exportada salía negra con los trazos encima. */
-    if (capa?.trazos(n).length) {
+       opaco: la página exportada salía negra con los trazos encima.
+
+       Los resaltadores se componen aparte y MULTIPLICANDO (tinta-07, lo
+       decidió Fran: en pantalla, al imprimir y al exportar). Con la mezcla
+       normal, el 34 % de amarillo encima de una letra negra la dejaba oliva,
+       rgb(82, 67, 5): la letra lavada, justo lo que el buscador ya había
+       resuelto con multiply para sus marcas. Multiplicando, sobre el papel
+       blanco el amarillo es el mismo de antes y la letra queda negra. La
+       pluma va después y normal: es opaca y queda por encima, como en
+       dibujarTrazos, que ya ponía los resaltadores primero. */
+    const trazos = capa?.trazos(n) || [];
+    if (trazos.length) {
       const viewport = await doc.viewport(n, { escala, rotacionExtra: rotacionPagina });
       const tinta = document.createElement('canvas');
       tinta.width = canvas.width;
       tinta.height = canvas.height;
-      dibujarTrazos(tinta.getContext('2d'), capa.trazos(n), viewport, { dpr: 1 });
-      canvas.getContext('2d').drawImage(tinta, 0, 0);
+      const ctx = canvas.getContext('2d');
+      const componer = (lista, modo) => {
+        if (!lista.length) return;
+        dibujarTrazos(tinta.getContext('2d'), lista, viewport, { dpr: 1 });
+        ctx.save();
+        ctx.globalCompositeOperation = modo;
+        ctx.drawImage(tinta, 0, 0);
+        ctx.restore();
+      };
+      componer(trazos.filter((t) => t.herramienta === 'resaltador'), 'multiply');
+      componer(trazos.filter((t) => t.herramienta !== 'resaltador'), 'source-over');
       tinta.width = 0;
       tinta.height = 0;
     }

@@ -167,18 +167,24 @@ npm run verificar     # npm test y todas las suites con Electron, en orden
 
 | | |
 |---|---|
-| `npm test` | Node pelado: tokens, escritura atómica, la aritmética de imposición, el parseo de argv, las decisiones del actualizador, las cabeceras de imagen, el plegado del buscador y **el motor de conversión** (Moodle y PDF a markdown/txt/json/chunks, destinos, colisiones de nombre, unir textos) |
+| `npm test` | Node pelado: tokens, escritura atómica, la aritmética de imposición, el parseo de argv, las decisiones del actualizador, las cabeceras de imagen, el plegado del buscador, **los decodificadores de pdf.js** (que los dos pdf.js reciban `wasmUrl` y que estén los archivos que su worker pide: sin eso un escaneo JBIG2 sale en blanco), **el motor de conversión** (Moodle y PDF a markdown/txt/json/chunks, destinos, colisiones de nombre, unir textos) y **el proceso principal sin ventana** (`main.test.cjs`: qué archivo entra, qué se encola, cómo se nombra lo que se escribe, qué se le pide a la impresora) |
 | `npm run ocr` | Fabrica un PDF escaneado —una página rasterizada, sin una letra de texto— y mira que tesseract la lea con los modelos de `vendor/tessdata` |
 | `npm run convertir` | Con Electron: imprime el cuestionario a PDF con `printToPDF`, y después monta la app, encola el archivo por el mismo camino que un arrastre, convierte, y comprueba que el PDF **terminó abierto en una pestaña** |
-| `npm run imposicion` | Impone de verdad y **vuelve a leer** el PDF para ver qué cayó dónde |
+| `npm run herramientas` | Combinar, Dividir y Exportar sobre la app montada: la cola se pone al día por clave (la fila que sube es el mismo nodo), cambiar de pestaña es un fundido que tapa la pantalla, lo exportado con tinta sale blanco con el trazo, **soltar archivos en Combinar** los suma a la lista, y con un **PDF con contraseña** Dividir y Combinar avisan y apagan su botón sin llegar a pdf-lib |
+| `npm run imposicion` | Impone de verdad y **vuelve a leer** el PDF para ver qué cayó dónde. Y un PDF cifrado (con contraseña de apertura o solo de propietario) no sale en blanco: ningún trabajo del motor lo reescribe |
+| `npm run imprimir` | La vista de Imprimir **poniéndose al día**: el panel armado una vez, las cápsulas de los segmentados, la hoja nueva que se pinta debajo de la vieja, el error, el rango, el dúplex asistido, salir con una imposición en vuelo, y el **PDF con contraseña** (aviso, botón apagado con el porqué, nada llega a pdf-lib) |
 | `npm run tinta` | El vuelco de la Y, el contorno, el borrador y el historial |
+| `npm run anotar` | La tinta montada en el lector: zoom, giro, resaltador con multiply, fundidos, botón lateral y memoria de los canvas |
 | `npm run seleccion` | Rasteriza la página y compara: los spans invisibles tienen que caer sobre las letras |
 | `npm run buscar` | Genera un PDF con los casos difíciles y mide **dónde cae cada marca**: el resaltado tiene que caer sobre las mismas letras que el span de la capa de texto |
+| `npm run lector` | El lector de punta a punta: la barra, el zoom, el campo de página, Espacio y AvPág, las marcas, la tinta y la hoja a la misma escala, los errores de abrir en castellano y **la contraseña que se pide** (y el documento que queda marcado) |
 | `npm run puck` | Prende la tinta y aprieta la barra con eventos del sistema: que el disco aparezca bajo el puntero, que el anillo mueva el scroll píxel por píxel y que el núcleo termine en un zoom real con el mismo punto del papel bajo el disco |
 | `npm run pestanas` | Abre varios PDFs: que el estado sea de cada pestaña, que arrastrar una la cambie de lugar y que el worker compartido sobreviva a cerrar una |
+| `npm run paginas` | Organizar páginas: lo pendiente es de la pestaña, la grilla se pone al día por clave (girar, quitar, arrastrar, medidos por cuadro), Descartar se deshace, cerrar con cambios **pregunta con las mismas palabras que cerrar la app**, y con un **PDF con contraseña** se ordena y se mira pero Guardar y Extraer se apagan diciendo por qué |
 | `npm run cerrar` | Levanta la app entera y la cierra: que el último trazo llegue al disco **y que la ventana siga cerrándose** porque el renderer contestó, no por el timeout |
 | `npm run caida` | Tira el renderer a propósito: la primera caída se recarga sola con la sesión, la segunda no, y con el renderer caído cerrar no espera |
 | `npm run cartel` | El cartel de actualizaciones: cómo se **relevan** sus pasos, muestreados cuadro por cuadro (nunca dos legibles a la vez) |
+| `npm run chrome` | Lo que vive fuera de la vista (titlebar, rail, statusbar, Abrir), Ajustes y los atajos del shell, medidos por cuadro; **soltar imágenes** fuera de Combinar lleva a Combinar con ellas cargadas; y, con la app de verdad en un proceso aparte, cerrar con cambios en Páginas y reabrir la sesión |
 | `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético, imprime, organiza, exporta, y **afirma** dónde cae cada cosa |
 | `npm run smoke` | Las piezas del framework sobre la vitrina (overlays, fuente, re-tintado, anillos de foco en las siete vistas) y **la curva del fundido** al navegar y al repintar |
 | `npm run apertura` | Lanza la app **como proceso**, con un PDF en la línea de comandos |

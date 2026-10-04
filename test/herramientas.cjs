@@ -26,14 +26,19 @@
       vista se repinta en el medio (herr-14) y no deja destellos (herr-15,
       contado en el mismo botón, paso 10).
    9. Soltar en Combinar (ux-13), y dos documentos sin ruta son dos filas
-      (paso 11).
+      (paso 11). El arrastre de verdad (paso 12): parado en Combinar, un PDF
+      y una imagen soltados van a la lista y no abren una pestaña; parado en
+      Dividir, las imágenes llevan a Combinar con las imágenes cargadas.
+  10. Un PDF con contraseña (paso 13): Dividir y Combinar avisan y apagan su
+      botón con el porqué, sin llegar a pdf-lib; sacarlo de la cola vuelve a
+      habilitar Combinar, y Exportar (pdf.js) sigue andando.
 
    Los diálogos (elegir varios, guardar como, elegir carpeta) se reemplazan
    desde el proceso principal: la prueba dice qué se eligió. La ventana va
    visible en x:-20000 (ver humo.cjs). */
 'use strict';
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeImage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -61,6 +66,17 @@ app.whenReady().then(async () => {
   fs.copyFileSync(COBAYO, B);
   const salidas = path.join(tmp, 'salidas');
   fs.mkdirSync(salidas);
+  /* Para soltar (paso 12): otro PDF y dos imágenes de verdad, en disco. */
+  const C = path.join(tmp, 'apuntes-c.pdf');
+  fs.copyFileSync(COBAYO, C);
+  const png = nativeImage.createFromBitmap(Buffer.alloc(8 * 6 * 4, 0xc8), { width: 8, height: 6 }).toPNG();
+  const FOTO = path.join(tmp, 'foto-guia.png');
+  const FOTO2 = path.join(tmp, 'foto-guia-2.png');
+  fs.writeFileSync(FOTO, png);
+  fs.writeFileSync(FOTO2, png);
+  // Y uno que no se combina pero se convierte: soltado junto, va a Convertir.
+  const NOTAS = path.join(tmp, 'notas-guia.txt');
+  fs.writeFileSync(NOTAS, 'Una línea de notas.' + String.fromCharCode(10));
 
   /* Los diálogos, contestados por la prueba. `eleccion` es lo que «elige» el
      próximo Agregar; guardar como escribe en la carpeta temporal y puede
@@ -600,6 +616,187 @@ app.whenReady().then(async () => {
     if (n(s.materializado) !== '["cobayo","sin-ruta-a","apuntes-a","apuntes-b"]') problemas.push(`sin ruta: al bajar el abierto quedó ${n(s.materializado)} (antes ${n(s.conA)})`);
     else if (n(s.conB) !== '["sin-ruta-b","cobayo","sin-ruta-a","apuntes-a","apuntes-b"]') problemas.push(`sin ruta: con otro abierto sin ruta la cola muestra ${n(s.conB)}`);
     else if (n(s.sinA) !== '["sin-ruta-b","cobayo","apuntes-a","apuntes-b"]') problemas.push(`sin ruta: Sacar en sin-ruta-a dejó ${n(s.sinA)}`);
+  }
+
+  // ── 12. Soltar archivos (ux-13): el arrastre de la ventana ────────────────
+  /* Por soltarArchivos de app.js, que es lo que llama el 'drop' de la
+     ventana con la lista de lo soltado: un File fabricado en la página no
+     tiene ruta en disco (webUtils da ''), así que un drop sintético no llega
+     más allá de «No se pudo ubicar el archivo». */
+  notas.push(['soltar', await paso('soltar', `(async () => {
+    const { soltarArchivos } = await import('./js/app.js');
+    const est = await import('./js/estado.js');
+    const router = (await import('./js/router.js')).default;
+    const toasts = () => [...document.querySelectorAll('.ox-toast:not([data-state=closing])')].map((t) => t.textContent.replace(/\\s+/g, ' ').trim());
+    const r = {};
+    __tab('combinar'); await __dormir(450);
+    const pestanas = est.S.pestanas.length;
+    const { pendientes } = await import('./js/views/convertir.js');
+    const enConvertir = pendientes();
+    await soltarArchivos([
+      { nombre: 'apuntes-c.pdf', ruta: ${JSON.stringify(C)} },
+      { nombre: 'foto-guia.png', ruta: ${JSON.stringify(FOTO)} },
+      { nombre: 'notas-guia.txt', ruta: ${JSON.stringify(NOTAS)} },
+    ]);
+    await __dormir(700);
+    r.enCombinar = { vista: router.name, pestanas: est.S.pestanas.length - pestanas, nombres: __nombres(), toasts: toasts(), aConvertir: pendientes() - enConvertir };
+
+    // Si el PDF abrió una pestaña (el código de antes), se vuelve: lo de abajo igual se mide.
+    if (router.name !== 'herramientas') { router.go('herramientas'); await __dormir(700); }
+    __tab('dividir'); await __dormir(450);
+    await soltarArchivos([{ nombre: 'foto-guia-2.png', ruta: ${JSON.stringify(FOTO2)} }]);
+    await __dormir(800);
+    r.desdeDividir = {
+      vista: router.name,
+      tab: document.querySelector('#herr-tabs .ox-tab.is-active')?.dataset.value,
+      nombres: __nombres(), toasts: toasts(),
+    };
+    return r;
+  })()`)]);
+  {
+    const r = notas.at(-1)[1];
+    const a = r.enCombinar || {};
+    const b = r.desdeDividir || {};
+    if (a.vista !== 'herramientas' || a.pestanas !== 0) problemas.push(`soltar: en Combinar, soltar un PDF abrió una pestaña o cambió de vista (${JSON.stringify(a)})`);
+    if (!a.nombres?.includes('apuntes-c.pdf') || !a.nombres?.includes('foto-guia.png')) problemas.push(`soltar: en Combinar, el PDF y la imagen soltados no quedaron en la lista (${JSON.stringify(a.nombres)})`);
+    /* Soltado junto, lo que no se combina pero se convierte iba a ningún
+       lado sin decir nada (revisión del 4A): va a la cola de Convertir y un
+       aviso lo dice, sin sacarte de Combinar. */
+    if (a.aConvertir !== 1 || !a.toasts?.some((t) => /1 archivo fue a Convertir/.test(t)) || a.nombres?.includes('notas-guia.txt')) problemas.push(`soltar: en Combinar, el .txt soltado junto no fue a Convertir con su aviso (${JSON.stringify(a)})`);
+    if (a.toasts?.some((t) => /Acá se abren PDFs|Eso no es un PDF/.test(t))) problemas.push(`soltar: en Combinar, soltar dio un error (${JSON.stringify(a.toasts)})`);
+    if (b.vista !== 'herramientas' || b.tab !== 'combinar' || !b.nombres?.includes('foto-guia-2.png')) problemas.push(`soltar: desde Dividir, la imagen tenía que llevar a Combinar con ella en la lista (${JSON.stringify(b)})`);
+  }
+
+  // ── 13. Un PDF con contraseña ─────────────────────────────────────────────
+  /* Combinar y Dividir copian páginas con pdf-lib, que no descifra: con un
+     PDF abierto con contraseña salían hojas en blanco (decisión de Fran:
+     avisar y bloquear, paquete 4A). Se fabrica el estado, conClave en el
+     documento abierto como lo deja el lector, y se espía pdf-lib en la misma
+     instancia de módulo que usa el motor. Exportar rasteriza con pdf.js: se
+     exporta de verdad y tiene que salir, sin tocar pdf-lib.
+     Los clics a los botones apagados van por dispatchEvent: .click() sobre
+     un botón deshabilitado no despacha nada (medido en Electron 40), y así
+     no se probaban las guardias de hacerDividir() y hacerCombinar(), solo
+     que el botón estaba apagado (revisión del 4A). Un evento despachado sí
+     llega al handler delegado. */
+  const clicForzado = `((id) => document.getElementById(id).dispatchEvent(new MouseEvent('click', { bubbles: true })))`;
+  const pngsAntes = fs.readdirSync(salidas).length;
+  notas.push(['con-clave', await paso('con-clave', `(async () => {
+    const est = await import('./js/estado.js');
+    const router = (await import('./js/router.js')).default;
+    const { PDFDocument } = await import('./vendor/pdf-lib/pdf-lib.mjs');
+    const cargar = PDFDocument.load; const crear = PDFDocument.create;
+    let cargas = 0;
+    PDFDocument.load = function (...a) { cargas++; return cargar.apply(this, a); };
+    PDFDocument.create = function (...a) { cargas++; return crear.apply(this, a); };
+    const boton = (id) => { const b = document.getElementById(id); return b && { apagado: b.disabled, explica: b.classList.contains('qr-explica'), tip: b.dataset.tip || null, puntero: getComputedStyle(b).pointerEvents }; };
+    const aviso = (id) => { const a = document.getElementById(id); return a && { visible: !a.hidden && a.getBoundingClientRect().height > 20, texto: __vivo(a) }; };
+    const r = {};
+    let falsa = null;
+    try {
+      if (router.name !== 'herramientas') { router.go('herramientas'); await __dormir(700); }
+      est.S.doc.conClave = true;
+      __tab('dividir'); await __dormir(500);
+      r.dividir = { aviso: aviso('qr-div-clave'), boton: boton('qr-div-hacer') };
+      ${clicForzado}('qr-div-hacer');
+      await __dormir(300);
+      r.cargasDividir = cargas;
+
+      __tab('combinar'); await __dormir(500);
+      r.combinar = { aviso: aviso('qr-comb-clave'), boton: boton('qr-comb-hacer'), nombres: __nombres() };
+      ${clicForzado}('qr-comb-hacer');
+      await __dormir(300);
+      r.cargasCombinar = cargas;
+      // Sacarlo de la lista: lo demás se puede combinar.
+      /* El aviso se pliega, no desaparece de golpe (motion-timing §10: el
+         alto y la opacidad pasan por valores intermedios). Se muestrea cada
+         cuadro desde el mismo task del clic. */
+      const fila = __filas().find((f) => f.querySelector('.ox-listitem__title').textContent.trim() === 'cobayo.pdf');
+      const plegado = document.getElementById('qr-comb-clave');
+      const serie = [];
+      __boton(fila, 'saca')?.click();
+      const t0 = performance.now();
+      while (performance.now() - t0 < 450) {
+        const cs = getComputedStyle(plegado);
+        serie.push({ alto: Math.round(plegado.getBoundingClientRect().height), op: Math.round(+cs.opacity * 100) });
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      await __dormir(300);
+      r.sinEl = { aviso: aviso('qr-comb-clave'), boton: boton('qr-comb-hacer'), nombres: __nombres(), serie };
+
+      /* Plegado, frena otro: el nombre se repone en seco y recién después
+         se despliega. Con frase() siempre, el calco de «cobayo.pdf» se
+         esfumaba encima del nombre nuevo mientras el aviso se abría
+         (revisión del 4A). La contraseña se fabrica con una pestaña del
+         mismo archivo que apuntes-c.pdf de la lista, que es lo que mira
+         bloqueaCombinar; lo que pone la lista al día es sacar otra fila. */
+      falsa = { doc: { ruta: ${JSON.stringify(C)}, nombre: 'apuntes-c.pdf', conClave: true } };
+      est.S.pestanas.push(falsa);
+      {
+        const titulo = document.getElementById('qr-comb-clave-titulo');
+        const otra = __filas().find((f) => f.querySelector('.ox-listitem__title').textContent.trim() === 'foto-guia-2.png');
+        const serieB = [];
+        __boton(otra, 'saca')?.click();
+        const t1 = performance.now();
+        while (performance.now() - t1 < 450) {
+          serieB.push({ calco: !!titulo.querySelector('.ox-swap-out'), texto: __vivo(titulo), alto: Math.round(plegado.getBoundingClientRect().height) });
+          await new Promise((r) => requestAnimationFrame(r));
+        }
+        r.otro = { serie: serieB, hallada: !!otra, aviso: aviso('qr-comb-clave'), boton: boton('qr-comb-hacer') };
+      }
+      est.S.pestanas.splice(est.S.pestanas.indexOf(falsa), 1);
+      falsa = null;
+
+      __tab('exportar'); await __dormir(500);
+      r.exportar = { avisos: document.querySelectorAll('#herr-cuerpo > .qr-herr__panel .qr-clave-aviso:not([hidden])').length, boton: boton('qr-exp-hacer') };
+      document.getElementById('qr-exp-rango').value = '1';
+      document.getElementById('qr-exp-rango').dispatchEvent(new Event('change', { bubbles: true }));
+      await __dormir(200);
+      document.getElementById('qr-exp-hacer').click();
+      await __hasta(() => document.getElementById('qr-exp-hacer')?.dataset.ocupado === '1', 2000);
+      await __hasta(() => document.getElementById('qr-exp-hacer')?.dataset.ocupado === '0', 8000);
+      r.cargas = cargas;
+    } finally {
+      PDFDocument.load = cargar; PDFDocument.create = crear;
+      if (falsa) est.S.pestanas.splice(est.S.pestanas.indexOf(falsa), 1);
+      est.S.doc.conClave = false;
+      router.refresh(); await __dormir(500);
+    }
+    return r;
+  })()`)]);
+  {
+    const r = notas.at(-1)[1];
+    const d = r.dividir || {};
+    const c = r.combinar || {};
+    const sin = r.sinEl || {};
+    const e = r.exportar || {};
+    if (!d.aviso?.visible || !/Este PDF tiene contraseña/.test(d.aviso.texto || '') || !/todavía no dividirlo/.test(d.aviso.texto || '')) problemas.push(`con clave: Dividir no avisa (${JSON.stringify(d.aviso)})`);
+    if (!d.boton?.apagado || !d.boton.explica || !/tiene contraseña: Quire todavía no puede dividirlo/.test(d.boton.tip || '') || d.boton.puntero !== 'auto') problemas.push(`con clave: el botón de Dividir no se apaga diciendo por qué (${JSON.stringify(d.boton)})`);
+    if (!c.aviso?.visible || !/«cobayo\.pdf» tiene contraseña/.test(c.aviso.texto || '') || !/todavía no combinarlo/.test(c.aviso.texto || '')) problemas.push(`con clave: Combinar no avisa cuál frena (${JSON.stringify(c.aviso)})`);
+    if (!c.boton?.apagado || !c.boton.explica || !/tiene contraseña/.test(c.boton.tip || '')) problemas.push(`con clave: el botón de Combinar no se apaga diciendo por qué (${JSON.stringify(c.boton)})`);
+    if (sin.aviso?.visible || sin.boton?.apagado || sin.boton?.explica || sin.boton?.tip || sin.nombres?.includes('cobayo.pdf')) problemas.push(`con clave: sacarlo de la lista no vuelve a habilitar Combinar (${JSON.stringify({ ...sin, serie: undefined })})`);
+    {
+      const serie = sin.serie || [];
+      const alto0 = serie[0]?.alto || 0;
+      const medios = serie.filter((f) => f.alto > 2 && f.alto < alto0 - 2).length;
+      const final = serie.at(-1);
+      if (!(alto0 > 20) || medios < 2 || !final || final.alto > 0) problemas.push(`con clave: el aviso de Combinar no se pliega de a poco (${serie.map((f) => `${f.alto}/${f.op}`).join(' ')})`);
+    }
+    {
+      const o = r.otro || {};
+      const serie = o.serie || [];
+      const abriendo = serie.filter((f) => f.alto > 2);
+      if (!o.hallada || !o.aviso?.visible || !/«apuntes-c\.pdf» tiene contraseña/.test(o.aviso.texto || '') || !o.boton?.apagado) problemas.push(`con clave: otro con contraseña no vuelve a frenar Combinar (${JSON.stringify({ ...o, serie: undefined })})`);
+      else if (serie.some((f) => f.calco) || abriendo.some((f) => !/apuntes-c/.test(f.texto || ''))) problemas.push(`con clave: al desplegarse, el aviso mostró el nombre de antes (${serie.map((f) => `${f.alto}${f.calco ? '+calco' : ''}`).join(' ')})`);
+      else if (serie[0]?.alto > 2 || abriendo.length < 2) problemas.push(`con clave: el aviso no se desplegó de a poco desde plegado (${serie.map((f) => f.alto).join(' ')})`);
+    }
+    if (r.cargasDividir !== 0 || r.cargasCombinar !== 0) problemas.push(`con clave: el clic despachado al botón apagado llegó a pdf-lib (dividir ${r.cargasDividir}, combinar ${r.cargasCombinar})`);
+    if (e.avisos || e.boton?.apagado) problemas.push(`con clave: Exportar no tendría que avisar ni apagarse, rasteriza con pdf.js (${JSON.stringify(e)})`);
+    if (r.cargas !== 0) problemas.push(`con clave: algo llegó a pdf-lib (${r.cargas} cargas)`);
+  }
+  {
+    const nuevos = fs.readdirSync(salidas).length - pngsAntes;
+    if (nuevos !== 1) problemas.push(`con clave: Exportar tenía que sacar la página 1 como imagen y salieron ${nuevos}`);
   }
 
   fs.writeFileSync(path.join(RAIZ, 'test', 'herramientas.png'), (await win.webContents.capturePage()).toPNG());

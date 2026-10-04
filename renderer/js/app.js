@@ -12,7 +12,7 @@ import { Icons } from './icons.js';
 import { Tooltip, Toast, Menu, Modal } from './overlays.js';
 import Router from './router.js';
 import {
-  initClickFlash, initScrollFades, raf2, swap, frase, tick, deslizarAncho, bindSwitcher, exit,
+  initClickFlash, initScrollFades, raf2, swap, frase, contador, ocupar, deslizarAncho, bindSwitcher, exit,
 } from './motion.js';
 import { paint, head, empty, esc, attempt, copy, colorToken } from './ui.js';
 import { fmtBytes, fmtDec, plural, relTime } from './format.js';
@@ -25,9 +25,9 @@ import {
 } from './estado.js';
 import * as Pestanas from './pestanas.js';
 import { viewLector, atajosLector } from './views/lector.js';
-import { viewImprimir } from './views/imprimir.js';
-import { viewPaginas } from './views/paginas.js';
-import { viewHerramientas } from './views/herramientas.js';
+import { viewImprimir, SIN_IMPRESORAS } from './views/imprimir.js';
+import { viewPaginas, describirCambios, PREGUNTA_CAMBIOS } from './views/paginas.js';
+import { viewHerramientas, encolarCombinar, seccionActual } from './views/herramientas.js';
 import { viewConvertir, encolar as encolarConvertibles, pendientes as convertiblesPendientes } from './views/convertir.js';
 
 const api = window.onyx;
@@ -232,6 +232,11 @@ async function restaurarSesion() {
    src/conversion.cjs, repetido acá para decidir sin ida y vuelta al main a
    dónde va lo que soltaste. */
 const ES_CONVERTIBLE = /\.(htm|html|pdf|docx|pptx|txt|text|md|markdown|rst|log)$/i;
+/* Lo que Combinar sabe unir: PDFs e imágenes (los mismos formatos que lee
+   docs.leer con `imagenes`). */
+const ES_IMAGEN = /\.(png|jpe?g|webp)$/i;
+const PARA_COMBINAR = /\.(pdf|png|jpe?g|webp)$/i;
+const nombreDeRuta = (ruta) => String(ruta || '').split(/[\\/]/).pop();
 
 /* Arrastrar un PDF a la ventana. Chromium abriría el archivo REEMPLAZANDO la
    app si no se cancelan los dos eventos — con prevenir el drop no alcanza. */
@@ -254,46 +259,92 @@ function cablearArrastre() {
   window.addEventListener('drop', async (e) => {
     e.preventDefault();
     dentro = 0; marcar(false);
-
     const archivos = [...(e.dataTransfer?.files || [])];
-    const rutas = archivos.map((f) => api.docs.rutaDe(f)).filter(Boolean);
-
-    /* En Convertir, todo lo que soltás entra a la cola, PDFs incluidos: ahí un
-       PDF es materia prima, no algo para leer. En cualquier otra vista, un
-       archivo convertible que no es PDF —el .htm de un cuestionario, un
-       .docx— te lleva a Convertir con el archivo ya en la lista. */
-    const convertibles = rutas.filter((r) => ES_CONVERTIBLE.test(r));
-    if (Router.name === 'convertir' && convertibles.length) {
-      await encolarConvertibles(convertibles);
-      return;
-    }
-
-    const pdfs = archivos.filter((f) => /\.pdf$/i.test(f.name));
-    if (!pdfs.length) {
-      const otros = convertibles.filter((r) => !/\.pdf$/i.test(r));
-      if (otros.length) {
-        const n = await encolarConvertibles(otros);
-        if (n) Router.go('convertir');
-        return;
-      }
-      /* Soltar acá abre un documento, y una imagen no es un documento. Pero la
-         app SÍ sabe qué hacer con una imagen, así que el aviso dice dónde en
-         vez de terminar en "no". */
-      if (archivos.some((f) => /\.(png|jpe?g|webp)$/i.test(f.name))) {
-        Toast.error('Acá se abren PDFs', 'Para volver imágenes un PDF, andá a Herramientas, sección Combinar.');
-      } else if (archivos.length) {
-        Toast.error('Eso no es un PDF', archivos[0].name);
-      }
-      return;
-    }
-    /* Todos los PDF que soltaste, en orden, hasta llenar las pestañas: se
-       abría solo el primero y los demás se ignoraban sin aviso (shell-28). */
-    const rutasPdf = pdfs.map((f) => api.docs.rutaDe(f)).filter(Boolean);
-    if (rutasPdf.length) await abrirVarias(rutasPdf);
-    else Toast.error('No se pudo ubicar el archivo', 'Probá abrirlo desde el botón Abrir.');
+    await soltarArchivos(archivos.map((f) => ({ nombre: f.name, ruta: api.docs.rutaDe(f) || null })));
   });
 
   return capa;
+}
+
+/**
+ * A dónde va lo que se soltó en la ventana. `lista` es [{ nombre, ruta }]:
+ * la ruta la da webUtils (preload, rutaDe) y puede faltar.
+ *
+ * Separado del evento para que chrome.cjs y herramientas.cjs lo prueben con
+ * archivos de verdad: un File fabricado en la página no tiene ruta en disco
+ * (webUtils devuelve ''), así que un drop sintético no llega más allá del
+ * «No se pudo ubicar el archivo».
+ */
+export async function soltarArchivos(lista) {
+  const rutas = lista.map((a) => a.ruta).filter(Boolean);
+
+  /* En Convertir, todo lo que soltás entra a la cola, PDFs incluidos: ahí un
+     PDF es materia prima, no algo para leer. En cualquier otra vista, un
+     archivo convertible que no es PDF —el .htm de un cuestionario, un
+     .docx— te lleva a Convertir con el archivo ya en la lista. */
+  const convertibles = rutas.filter((r) => ES_CONVERTIBLE.test(r));
+  if (Router.name === 'convertir' && convertibles.length) {
+    await encolarConvertibles(convertibles);
+    return;
+  }
+
+  /* Lo mismo en Combinar (ux-13): parado en Herramientas, sección Combinar,
+     los PDFs y las imágenes que soltás se suman a la lista. Antes un PDF se
+     abría en una pestaña y una imagen daba un error que mandaba… a
+     Herramientas, sección Combinar, donde ya estabas. */
+  const paraCombinar = rutas.filter((r) => PARA_COMBINAR.test(r));
+  if (Router.name === 'herramientas' && seccionActual() === 'combinar' && paraCombinar.length) {
+    await encolarCombinar(paraCombinar);
+    /* Lo que vino junto y no se combina pero sí se convierte (un .docx, el
+       .htm de un cuestionario) se descartaba sin decir nada; fuera de
+       Combinar ese mismo archivo llevaba a Convertir (revisión del 4A). Va a
+       esa cola sin sacarte de acá, y el aviso lo dice con un atajo. */
+    const aConvertir = convertibles.filter((r) => !PARA_COMBINAR.test(r));
+    if (aConvertir.length) {
+      const n = await encolarConvertibles(aConvertir);
+      if (n) {
+        Toast.show({
+          title: n === 1 ? '1 archivo fue a Convertir' : `${n} archivos fueron a Convertir`,
+          text: 'Combinar suma PDFs e imágenes: lo demás espera en la lista de Convertir.',
+          icon: 'convertir',
+          action: { label: 'Ver', run: () => Router.go('convertir') },
+        });
+      }
+    }
+    return;
+  }
+
+  const pdfs = lista.filter((a) => /\.pdf$/i.test(a.ruta || a.nombre));
+  if (!pdfs.length) {
+    const otros = convertibles.filter((r) => !/\.pdf$/i.test(r));
+    if (otros.length) {
+      const n = await encolarConvertibles(otros);
+      if (n) Router.go('convertir');
+      return;
+    }
+    /* Soltar acá abre un documento, y una imagen no es un documento. Pero la
+       app SÍ sabe qué hacer con una imagen: van a Combinar, ya cargadas, como
+       los .docx van a Convertir (ux-13). encolarCombinar deja elegida la
+       sección; el «Acá se abren PDFs» que mandaba a buscarla ya no hace falta.
+       Si no entró ninguna (fallaron todas), su aviso ya dijo por qué. */
+    const imagenes = rutas.filter((r) => ES_IMAGEN.test(r));
+    if (imagenes.length) {
+      const n = await encolarCombinar(imagenes);
+      if (n) Router.go('herramientas');
+      return;
+    }
+    if (lista.some((a) => ES_IMAGEN.test(a.nombre))) {
+      Toast.error('No se pudo ubicar el archivo', 'Probá sumarlo desde Herramientas, sección Combinar, con Agregar archivos.');
+    } else if (lista.length) {
+      Toast.error('Eso no es un PDF', lista[0].nombre || nombreDeRuta(lista[0].ruta));
+    }
+    return;
+  }
+  /* Todos los PDF que soltaste, en orden, hasta llenar las pestañas: se
+     abría solo el primero y los demás se ignoraban sin aviso (shell-28). */
+  const rutasPdf = pdfs.map((a) => a.ruta).filter(Boolean);
+  if (rutasPdf.length) await abrirVarias(rutasPdf);
+  else Toast.error('No se pudo ubicar el archivo', 'Probá abrirlo desde el botón Abrir.');
 }
 
 /* ══ Piezas ══════════════════════════════════════════════════════════════════ */
@@ -562,9 +613,11 @@ function cablearAjustes() {
   });
 
   $('set-impresora')?.addEventListener('click', (e) => {
-    /* El mismo texto que Imprimir (ux-20): qué hacer, no solo qué falta. */
-    // Ya estás en Ajustes: el botón está arriba, a la derecha.
-    if (!S.impresoras.length) return Toast.error('No hay impresoras', 'Instalá una impresora en Windows y tocá Releer impresoras.');
+    /* El MISMO texto que Imprimir (ux-20), de la misma constante: qué hacer,
+       no solo qué falta. Eran dos copias y ya decían distinto («… en
+       Ajustes» de un lado y no del otro); acá también es cierto: el botón
+       está arriba, a la derecha. */
+    if (!S.impresoras.length) return Toast.error('No hay impresoras', SIN_IMPRESORAS);
     Menu.show(e.currentTarget, S.impresoras.map((p) => ({
       label: p.etiqueta,
       icon: 'printer',
@@ -594,7 +647,7 @@ function cablearAjustes() {
     const b = e.currentTarget;
     if (b.disabled) return;
     b.disabled = true;
-    swap(b, `${Icons.spinner()}<span>Leyendo…</span>`, { relevo: true });
+    ocupar(b, true, `${Icons.spinner()}<span>Leyendo…</span>`);
     const leidas = await attempt(() => cargarImpresoras({ refrescar: true }), { errorTitle: 'No se pudieron leer las impresoras' });
     if (leidas) {
       Toast.show({
@@ -605,7 +658,7 @@ function cablearAjustes() {
     }
     // Si mientras leía te fuiste a otra vista, no se repinta la que estés mirando.
     if (leidas && Router.name === 'ajustes') { Router.refresh(); return; }
-    if (b.isConnected) { b.disabled = false; swap(b, reposo, { relevo: true }); }
+    if (b.isConnected) { b.disabled = false; ocupar(b, false, reposo); }
   });
 }
 
@@ -648,8 +701,9 @@ function cablearShell() {
 
   document.getElementById('btn-abrir')?.addEventListener('click', abrirConDialogo);
 
-  /* La vista Convertir produce PDFs y quiere abrirlos, pero no maneja pestañas:
-     lo pide por acá y el shell lo abre como si lo hubieras elegido vos. */
+  /* La vista Convertir produce PDFs y quiere abrirlos, y los recientes del
+     lector (abrirReciente) también, pero ninguno maneja pestañas: lo piden por
+     acá y el shell lo abre como si lo hubieras elegido vos. */
   window.addEventListener('quire:abrir-ruta', (e) => {
     const ruta = e.detail?.ruta;
     if (ruta) abrirRuta(ruta);
@@ -675,10 +729,10 @@ function cablearShell() {
     /* Con un diálogo a la vista los atajos del shell no andan detrás del velo
        (auditoría 2F). Ctrl+W cerraba en silencio la pestaña cuyos cambios la
        pregunta de cierre estaba diciendo que se pierden, y Ctrl+O, Ctrl+Tab o
-       Ctrl+1..4 cambiaban lo de atrás. Peor: el cierre de una pestaña con
-       cambios abre su propio Modal, y un Modal nuevo pisa al que está abierto
-       sin contestarle (ver confirmarCierreConCambios). Los del lector se
-       cuidan solos (miran Modal.isOpen). */
+       Ctrl+1..4 cambiaban lo de atrás. Y el cierre de una pestaña con
+       cambios abre su propio Modal, que pisaba la pregunta de cierre (ver
+       confirmarCierreConCambios). Los del lector se cuidan solos (miran
+       Modal.isOpen). */
     const velo = Modal.isOpen;
 
     /* Ctrl+W cierra UNA, la que estabas mirando (shell-02). La tecla sostenida
@@ -788,18 +842,9 @@ function cablearShell() {
   cablearArrastre();
 }
 
-/** «2 páginas quitadas, 1 girada y el orden cambiado». */
-function describirCambios(c) {
-  const partes = [];
-  if (c.quitadas) partes.push(plural(c.quitadas, 'página quitada', 'páginas quitadas'));
-  if (c.giradas) {
-    partes.push(c.quitadas
-      ? plural(c.giradas, 'girada', 'giradas')
-      : plural(c.giradas, 'página girada', 'páginas giradas'));
-  }
-  if (c.reordenada) partes.push('el orden cambiado');
-  return partes.length > 1 ? `${partes.slice(0, -1).join(', ')} y ${partes.at(-1)}` : (partes[0] || '');
-}
+/* describirCambios y las palabras de la pregunta vienen de paginas.js: la
+   guardia de cerrar una pestaña y la de cerrar la app dicen lo mismo con las
+   mismas palabras (había dos copias que ya decían distinto, paquete 4A). */
 
 /** Las pestañas con cambios de Páginas sin guardar, con lo que tiene cada una. */
 const cambiosPendientes = () => S.pestanas.map((p) => ({ p, c: cambiosDePaginas(p) })).filter((x) => x.c);
@@ -813,56 +858,32 @@ const cambiosPendientes = () => S.pestanas.map((p) => ({ p, c: cambiosDePaginas(
  *
  * Si otro Modal ocupa el lugar mientras se pregunta (un Modal.show que llega
  * por su cuenta: el «volvé a cargar el fajo» del dúplex asistido, la guardia
- * de una pestaña), cuenta como Cancelar. Modal.show pisa al que está abierto
- * sin contestarle: esta promesa no resolvía nunca, su velo quedaba en el DOM
- * tapando la app, preguntandoCierre quedaba prendido para siempre y cada
- * cruz contestaba «sigo preguntando», que para el reloj del main: una ventana
- * que no se podía cerrar (auditoría 2F). Se vigila la capa de overlays, y el
- * velo y la caja huérfanos se van con su salida. Cuando Onyx conteste con
- * null al que pisa (anotado para el framework), esto resuelve por el camino
- * normal y da lo mismo.
+ * de una pestaña), cuenta como Cancelar: Modal.show pisa al que está abierto
+ * y le contesta null. Antes no le contestaba, y esta promesa no resolvía
+ * nunca: preguntandoCierre quedaba prendido y cada cruz contestaba «sigo
+ * preguntando», una ventana que no se podía cerrar (auditoría 2F). Acá se
+ * vigilaba la capa de overlays hasta que Onyx lo resolvió (auditoría 4B).
+ * Un diálogo que ya estaba abierto (un rango a medio escribir) se pisa igual:
+ * cerrar la app es lo que se pidió, y el velo pasa de uno al otro sin
+ * oscurecerse (con un Modal.close antes se apilaban dos velos).
  */
 async function confirmarCierreConCambios(lista, { instalar = false } = {}) {
-  // Un diálogo abierto (un rango a medio escribir) se cierra: cerrar la app es
-  // lo que se pidió, y dos modales apilados no tienen salida.
-  if (Modal.isOpen) Modal.close(null);
   const nombre = (p) => p.doc?.nombre || 'documento.pdf';
   const uno = lista.length === 1;
   const porQue = instalar ? 'Para instalar la actualización Quire se cierra, y' : 'Si cerrás Quire,';
-  const respuesta = Modal.show({
-    title: 'Hay cambios sin guardar en Páginas',
+  const r = await Modal.show({
+    title: PREGUNTA_CAMBIOS.titulo,
     sub: uno
-      ? `${nombre(lista[0].p)}: ${describirCambios(lista[0].c)}. ${porQue} se pierden.`
+      ? PREGUNTA_CAMBIOS.frase(nombre(lista[0].p), lista[0].c, porQue)
       : `${porQue} se pierden los de estos documentos:`,
     body: uno ? '' : `<ul class="qr-cierre-lista">${lista.map(({ p, c }) => `
       <li><span class="ox-label">${esc(nombre(p))}</span><span class="ox-meta">${esc(describirCambios(c))}</span></li>`).join('')}
     </ul>`,
     actions: [
       { label: 'Cancelar', value: false, autofocus: true },
-      { label: instalar ? 'Instalar sin guardar' : 'Cerrar sin guardar', value: true, variant: 'danger-solid' },
+      { label: instalar ? 'Instalar sin guardar' : PREGUNTA_CAMBIOS.boton, value: true, variant: 'danger-solid' },
     ],
   });
-
-  /* Lo que Modal.show acaba de poner, en la misma tarea: el velo y la caja son
-     los dos últimos hijos de la capa. */
-  const capa = document.getElementById('ox-layer');
-  const propios = capa ? [capa.lastElementChild?.previousElementSibling, capa.lastElementChild] : [];
-  let vigia = null;
-  const pisado = new Promise((resolver) => {
-    if (!capa) return;
-    vigia = new MutationObserver(() => {
-      const otro = [...capa.children].some((n) => n.classList.contains('ox-modal__anim')
-        && !propios.includes(n) && n.dataset.state !== 'closing');
-      if (otro) resolver('pisado');
-    });
-    vigia.observe(capa, { childList: true });
-  });
-  const r = await Promise.race([respuesta, pisado]);
-  vigia?.disconnect();
-  if (r === 'pisado') {
-    for (const n of propios) if (n?.isConnected) exit(n, { fallback: 300 });
-    return false;
-  }
   return r === true;
 }
 
@@ -916,29 +937,6 @@ async function cerrarDocumento() {
      la vista que elegiste sería tratar el cierre como si fuera un cambio de
      tarea, y no lo es. */
   if (!S.doc) Router.go('lector');
-}
-
-/* Un contador del rail (las páginas del documento, lo que falta convertir).
-   Nace vacío en el HTML y vacío quiere decir que no hay nada que contar.
-   Se escribía con textContent: saltaba de 4 a 12 al cambiar de pestaña y
-   entraba o se iba en un cuadro (shell-25, herr-30). Ahora:
-   · aparece (vacío → n) o se va (n → vacío) con swap(): se funde;
-   · cambia (n → m) en su lugar, con destello.
-   No se mezclan swap() y numero() sobre el nodo: cada uno lleva su memoria,
-   y numero() compara contra el textContent —que durante una salida todavía
-   tiene el número que se va— (corrección 8 del plan). La memoria es una sola,
-   la de acá (`__cuenta`), y el número que cambia se escribe en el span vivo
-   que dejó swap(), no en el nodo entero: así no corta una salida en curso. */
-function contador(el, n) {
-  if (!el) return;
-  const v = n ? String(n) : '';
-  const antes = el.__cuenta ?? el.textContent.trim();
-  if (v === antes) return;
-  el.__cuenta = v;
-  if (!v || !antes) { swap(el, v); return; }
-  const vivo = el.querySelector(':scope > :not(.ox-swap-out)');
-  if (vivo) vivo.textContent = v; else el.textContent = v;
-  tick(el);
 }
 
 /* Una frase de la statusbar que cambia (el nombre del documento, la

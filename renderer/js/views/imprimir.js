@@ -29,11 +29,13 @@ import { Toast, Menu, Modal } from '../overlays.js';
 import Router from '../router.js';
 import { paint, head, empty, esc } from '../ui.js';
 import {
-  raf2, exit, swap, bindStepper, bindSwitcher, numero, frase, valor, deslizarAncho, tick,
+  raf2, exit, swap, bindStepper, bindSwitcher, numero, frase, valor, deslizarAncho, deslizarAlto, tick,
 } from '../motion.js';
 import { plural, fmtDec } from '../format.js';
 import { planCon, mm, aMM, papelParaElDriver, calcularHojas, paginasDelPlan } from '../imposicion/plan.js';
-import { imponer, partirDuplex, extraerCaras, limpiarCacheOrigen } from '../imposicion/motor.js';
+import {
+  imponer, partirDuplex, extraerCaras, limpiarCacheOrigen, CLAVE, tituloClave, queFaltaClave,
+} from '../imposicion/motor.js';
 import { aplanarTinta, contarTinta } from '../tinta/aplanar.js';
 import { abrirDocumento } from '../pdf/documento.js';
 
@@ -84,6 +86,22 @@ const ATRAS = 2;
    se dice cuántas por copia. */
 const MUCHAS_HOJAS = 20;
 
+/* ── Un PDF con contraseña no se imprime (todavía) ───────────────────────────
+   Sus bytes están cifrados y la imposición los arma con pdf-lib, que no los
+   descifra: el preview y el papel salían en blanco. Lo decidió Fran (paquete
+   4A): avisar y bloquear, sin rasterizar. El cálculo de hojas no toca los
+   bytes, así que el resumen sigue diciendo cuántas serían; lo que no hay es
+   preview ni botón, y el botón apagado dice por qué en su tooltip.
+   El motor frena además cualquier cifrado que llegue sin marca (el de solo
+   lectura, que pdf.js abre sin pedir contraseña), y ese error pinta este
+   mismo aviso. `cifrado` es la marca que documento.js puede ponerles de
+   antemano (pdf.js informa EncryptFilterName en getMetadata; está pedido
+   en el «afuera» del paquete 4A): mientras no exista, vale undefined. */
+const conClave = () => !!(S.doc?.conClave || S.doc?.cifrado);
+const QUE_FALTA = 'imprimirlo';
+const TIP_IMPRIMIR = 'Mandar a la impresora';
+const tipBloqueado = () => `${tituloClave()}: Quire todavía no puede ${QUE_FALTA}`;
+
 const V = {
   doc: null,          // el PDF impuesto (la ventana), abierto con pdf.js
   calculo: null,      // el cálculo con el que se impuso V.doc
@@ -99,6 +117,8 @@ const V = {
   otraVez: false,
   montada: false,     // la vista está a la vista (ver rehacerImposicion)
   imprimiendo: false,
+  bloqueado: false,   // el PDF tiene contraseña: ni preview ni botón (ver conClave)
+  naciendo: false,    // montando, antes del primer cuadro (ver ponerAviso)
   pliego: null,       // el que se ve
   entrante: null,     // el que se está pintando debajo
   render: null,
@@ -191,6 +211,8 @@ function ponerAlDia() {
   ponerNavegacion();
   pintarResumen();
   avisarPapel();
+  // Si un plan sin páginas había puesto su error, vuelve el aviso (swap no rehace el mismo).
+  if (V.bloqueado) avisoClave();
 }
 
 /* ── Imposición: una en vuelo y a lo sumo una pendiente ──────────────────────
@@ -201,6 +223,7 @@ function ponerAlDia() {
    vuelo, y si hay una corriendo, espera a que termine: corre solo la última. */
 
 function programarImposicion({ ya = false } = {}) {
+  if (conClave() || V.bloqueado) return;   // no hay nada que imponer: ver arriba
   clearTimeout(V.pendiente);
   V.generacion += 1;
   marcarTrabajando(true);
@@ -219,7 +242,7 @@ async function rehacerImposicion() {
      dos toques seguidos) se largaba igual desde el finally, imponía el
      documento entero y dejaba en V.doc un PDF de pdf.js que nadie destruía
      (revisión del 2C). */
-  if (!S.doc || !V.montada) return;
+  if (!S.doc || !V.montada || conClave() || V.bloqueado) return;
   if (V.enVuelo) { V.otraVez = true; return; }
   V.enVuelo = true;
   const mio = V.generacion;
@@ -255,6 +278,7 @@ async function rehacerImposicion() {
     if (viejo && viejo !== V.doc) viejo.destruir();
   } catch (err) {
     if (mio !== V.generacion) return;
+    if (err?.code === CLAVE) { mostrarBloqueo(); return; }
     console.error('[imprimir]', err);
     mostrarError(err.message);
     marcarTrabajando(false);
@@ -275,6 +299,50 @@ function marcarTrabajando(si) {
    navegación se apaga y el mensaje entra con un relevo; cuando vuelve a
    andar, sale igual. */
 function mostrarError(mensaje) {
+  invalidarPreview();
+  ponerAviso(`<div class="qr-preview__error">${Icons.svg('alert')}
+    <span class="ox-label">No se pudo armar el pliego</span>
+    <span class="ox-meta ox-copyable">${esc(mensaje)}</span></div>`);
+}
+
+/* El aviso del preview (el error o el candado). Con la vista ya a la vista
+   entra con un relevo. Al montar, en cambio, nace escrito: todo eso pasa
+   debajo del calco del router, que pide la vista nueva entera y quieta
+   (motion-timing §2, el fundido), y el relevo lo dejaba invisible tres
+   cuadros y entero recién a los ~250 ms, cuando el calco ya se había ido: el
+   «llega al rato» que imprimir-12 había sacado (revisión del 4A). El swap sin
+   relevo sobre lo recién escrito no anima nada: lo reescribe en el lugar y
+   deja anotado el HTML, así el próximo pedido igual no hace un relevo de lo
+   mismo. */
+function ponerAviso(html) {
+  const el = $('qr-preview-aviso');
+  if (!el) return;
+  if (V.naciendo) { el.innerHTML = html; swap(el, html); return; }
+  swap(el, html, { relevo: true });
+}
+
+/* El PDF tiene contraseña: lo mismo que un error para la hoja (se esfuma, no
+   queda una que no se va a imprimir), pero el plan sigue valiendo y el
+   resumen dice cuántas hojas serían. El aviso no es rojo: no falló nada, es
+   algo que Quire todavía no sabe hacer. Queda hasta que se monte la vista con
+   otro documento. */
+function mostrarBloqueo() {
+  V.bloqueado = true;
+  const plano = V.plano;
+  invalidarPreview();
+  V.plano = plano;
+  ponerNavegacion();
+  pintarResumen();
+  avisoClave();
+}
+
+function avisoClave() {
+  ponerAviso(`<div class="qr-clave-aviso">${Icons.svg('lock')}
+    <span class="ox-label">${esc(tituloClave())}</span>
+    <span class="ox-meta">${esc(queFaltaClave(QUE_FALTA))}</span></div>`);
+}
+
+function invalidarPreview() {
   clearTimeout(V.pendiente);
   V.generacion += 1;
   marcarTrabajando(false);   // el cartel no se lee atenuado
@@ -286,9 +354,6 @@ function mostrarError(mensaje) {
   Object.assign(V, { doc: null, calculo: null, plano: null, alDia: false, desde: 0, generadas: 0 });
   ponerNavegacion();
   pintarResumen();
-  swap($('qr-preview-aviso'), `<div class="qr-preview__error">${Icons.svg('alert')}
-    <span class="ox-label">No se pudo armar el pliego</span>
-    <span class="ox-meta ox-copyable">${esc(mensaje)}</span></div>`, { relevo: true });
 }
 
 function sacarError() {
@@ -515,7 +580,11 @@ function etiquetaDe(hoja, n) {
 
 function ponerNavegacion() {
   const c = V.plano;
-  const total = c?.hojas.length || 0;
+  /* Bloqueado (contraseña) no hay hojas que mirar, aunque el plan las cuente
+     para el resumen: ni flechas, ni cuenta, ni chip. Antes solo se apagaban
+     las flechas y al lado del candado seguía «1 de 4 · frente de la hoja 1»,
+     el mismo defecto que imprimir-15 arregló para el error (revisión del 4A). */
+  const total = V.bloqueado ? 0 : (c?.hojas.length || 0);
   const prev = $('qr-hoja-prev');
   const next = $('qr-hoja-next');
   if (!prev || !next) return;
@@ -525,7 +594,7 @@ function ponerNavegacion() {
 
   const chip = $('qr-nav-chip');
   const texto = $('qr-nav-chip-texto');
-  const etiqueta = esc(etiquetaDe(c?.hojas[V.hoja - 1], V.hoja));
+  const etiqueta = total ? esc(etiquetaDe(c?.hojas[V.hoja - 1], V.hoja)) : '';
   if (!etiqueta) { chip.hidden = true; return; }
   if (chip.hidden) {
     // Plegado no se ve: se escribe en el lugar y el chip se despliega con él.
@@ -559,7 +628,9 @@ function ponerCuenta(total) {
 
 function irAHoja(n) {
   const total = V.plano?.hojas.length || 0;
-  if (!total) return;
+  // Bloqueado, el plan cuenta hojas pero no hay ninguna que mirar: las teclas
+  // movían V.hoja y la cuenta con las flechas apagadas (revisión del 4A).
+  if (!total || V.bloqueado) return;
   const h = Math.max(1, Math.min(total, n));
   if (h === V.hoja) return;
   V.hoja = h;
@@ -617,6 +688,7 @@ function pintarResumen() {
     frase($('qr-res-papel'), esc(p.papel.nombre));
     $('qr-res-aviso').hidden = true;
     if (boton && !V.imprimiendo) boton.disabled = true;
+    ponerBotonBloqueado(boton);
     return;
   }
 
@@ -639,7 +711,18 @@ function pintarResumen() {
 
   if (r.desborde) frase($('qr-res-aviso-texto'), textoDesborde(p));
   $('qr-res-aviso').hidden = !r.desborde;
-  if (boton && !V.imprimiendo) boton.disabled = false;
+  if (boton && !V.imprimiendo) boton.disabled = V.bloqueado;
+  ponerBotonBloqueado(boton);
+}
+
+/* El tooltip del botón dice por qué está apagado. Sin el atajo: Ctrl+Enter
+   tampoco imprime, y verlo al lado de «todavía no puede» confunde. */
+function ponerBotonBloqueado(boton) {
+  if (!boton) return;
+  boton.classList.toggle('qr-explica', V.bloqueado);
+  boton.dataset.tip = V.bloqueado ? tipBloqueado() : TIP_IMPRIMIR;
+  if (V.bloqueado) delete boton.dataset.tipKey;
+  else boton.dataset.tipKey = 'Ctrl Enter';
 }
 
 /* ── Opciones ────────────────────────────────────────────────────────────── */
@@ -666,7 +749,7 @@ const ORDENES = {
 };
 
 /* El mismo texto que Ajustes para «no hay impresoras» (ux-20): dice qué hacer. */
-const SIN_IMPRESORAS = 'Instalá una impresora en Windows y tocá Releer impresoras en Ajustes.';
+export const SIN_IMPRESORAS = 'Instalá una impresora en Windows y tocá Releer impresoras en Ajustes.';
 
 const nombreImpresora = () => impresoraActual()?.etiqueta || S.impresora || 'Ninguna';
 const textoRango = (p) => (p.rango === 'todo' ? 'Todas las páginas' : p.rango);
@@ -923,7 +1006,7 @@ function sincronizarOpciones() {
   const bloque = $('op-modo-bloque');
   if (bloque.__modo !== p.modo) {
     bloque.__modo = p.modo;
-    deslizarBloque(bloque, () => swap(bloque, opcionesDelModo(p), { relevo: true }));
+    deslizarAlto(bloque, () => swap(bloque, opcionesDelModo(p), { relevo: true }));
     Icons.mount(bloque);
     cablearBloque();
   } else sincronizarBloque(p);
@@ -936,39 +1019,6 @@ function sincronizarOpciones() {
   $('op-duplex-nota').hidden = p.duplex === 'simplex';
   $('op-margen').classList.toggle('is-on', !!p.respetarNoImprimible);
   frase($('op-margen-nota'), notaMargen(p));
-}
-
-/* deslizarAlto (motion.js) con una diferencia: al ACHICARSE, la caja espera
-   a que lo de adentro casi no se vea antes de plegarse. deslizarAlto pliega
-   en el acto, al mismo tiempo que el calco de lo viejo se esfuma, y al pasar
-   de Múltiple a Simple cortaba la grilla mientras se veía: a los 87 ms la
-   caja iba por 104 de 158 px con lo viejo al 51 %, hasta tapar el 17 % de lo
-   visible (lo midió la revisión del 2C; motion-timing §10: al achicarse,
-   primero se va lo de adentro y después se pliega la caja). La caja espera
-   100 ms y se pliega in-out, que en sus primeros cuadros casi no se mueve;
-   `fill: backwards` la tiene en el alto viejo durante la espera. Medido por
-   cuadro: el calco va 100 → 93 → 71 → 50 → 28 → 15 → 7 % y la caja sigue
-   en 158 px hasta el 28 %, 157 con el 15 % y 156 con el 7 %. Crecer va sin
-   espera: primero se abre y después entra lo nuevo. Comparte `__glide` con
-   deslizarAlto, así uno corta al otro. Si sirve en otro lado, va a Onyx. */
-const ESPERA_PLIEGUE = 100;
-const DURACION_ALTO = 180;                        // T.size de motion.js
-const EASE_BOTH = 'cubic-bezier(.65, 0, .35, 1)'; // --ox-ease-both
-const reducido = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-
-function deslizarBloque(el, cambio) {
-  const h0 = el.getBoundingClientRect().height;
-  el.__glide?.cancel();
-  cambio();
-  const h1 = el.getBoundingClientRect().height;
-  if (Math.abs(h1 - h0) < 1 || reducido() || typeof el.animate !== 'function') return;
-  const achica = h1 < h0;
-  el.__glide = el.animate(
-    [{ height: `${h0}px`, overflow: 'clip' }, { height: `${h1}px`, overflow: 'clip' }],
-    achica
-      ? { duration: DURACION_ALTO, delay: ESPERA_PLIEGUE, easing: EASE_BOTH, fill: 'backwards' }
-      : { duration: DURACION_ALTO, easing: EASE_BOTH },
-  );
 }
 
 function sincronizarBloque(p) {
@@ -1246,7 +1296,7 @@ function paso(nombre) {
 
 async function imprimirAhora() {
   // Sin plano no hay nada que imprimir: el botón ya está apagado.
-  if (V.imprimiendo || !S.doc || !V.plano) return;
+  if (V.imprimiendo || !S.doc || !V.plano || V.bloqueado || conClave()) return;
   if (!S.impresoras.length) return Toast.error('No hay impresoras', SIN_IMPRESORAS);
   if (!S.impresora) return Toast.error('No hay impresora elegida', 'Elegí una arriba de todo, en Impresora.');
 
@@ -1477,7 +1527,7 @@ function alTeclado(e) {
     ArrowLeft: V.hoja - 1, PageUp: V.hoja - 1, ArrowRight: V.hoja + 1, PageDown: V.hoja + 1,
     Home: 1, End: total,
   }[e.key];
-  if (destino == null || !total) return;
+  if (destino == null || !total || V.bloqueado) return;
   e.preventDefault();
   irAHoja(destino);
 }
@@ -1511,6 +1561,7 @@ export function viewImprimir() {
   Object.assign(V, {
     doc: null, calculo: null, impuesto: null, desde: 0, generadas: 0, plano: null, alDia: false,
     hoja: 1, pliego: null, entrante: null, otraVez: false, segmentos: new Map(), montada: true,
+    bloqueado: conClave(),
   });
   const p = plan();
 
@@ -1560,7 +1611,7 @@ export function viewImprimir() {
             </div>
           </div>
           <button class="ox-btn ox-btn--primary ox-flashable qr-pie__boton" id="qr-imprimir"
-                  data-tip="Mandar a la impresora" data-tip-key="Ctrl Enter">
+                  data-tip="${TIP_IMPRIMIR}" data-tip-key="Ctrl Enter">
             <span class="qr-pie__rotulo" id="qr-imprimir-rotulo"><span class="qr-pie__paso"><i data-icon="printer"></i><span>Imprimir</span></span></span>
           </button>
         </div>
@@ -1579,11 +1630,20 @@ export function viewImprimir() {
      imposición arrancaba en raf2: el calco del router se esfumaba sobre un
      preview gris y la hoja llegaba de golpe al rato (imprimir-12). Lo único
      que llega tarde es el contenido del canvas, con su fundido. */
+  V.naciendo = true;
   ponerAlDia();
-  const m = V.plano && medidas(V.plano);
-  if (m) V.pliego = nuevoPliego(m, { relevo: false, p, calculo: V.plano });
-  const gen = V.generacion;
-  raf2(() => { if (gen === V.generacion && V.plano) rehacerImposicion(); });
+  if (V.bloqueado) {
+    /* Con contraseña, en el mismo tick: el aviso en lugar del pliego en
+       blanco, que prometía una hoja que no va a salir. Nace escrito (ver
+       ponerAviso); el relevo queda para cuando el freno llega del motor. */
+    if (V.plano) mostrarBloqueo();
+  } else {
+    const m = V.plano && medidas(V.plano);
+    if (m) V.pliego = nuevoPliego(m, { relevo: false, p, calculo: V.plano });
+    const gen = V.generacion;
+    raf2(() => { if (gen === V.generacion && V.plano) rehacerImposicion(); });
+  }
+  V.naciendo = false;
 
   /* El preview se re-encaja cuando cambia el tamaño disponible. Al frame
      siguiente y no adentro del callback, por lo mismo que en el lector:

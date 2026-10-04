@@ -128,6 +128,44 @@
    cerrar la app (app.js, confirmarCierreConCambios). */
 .qr-cierre-lista { display: flex; flex-direction: column; gap: var(--ox-2); margin: 0; padding: 0; list-style: none; }
 .qr-cierre-lista li { display: flex; flex-direction: column; gap: calc(var(--ox-1) / 2); }
+
+/* ── Un PDF con contraseña: lo que Quire todavía no hace ────────────────────
+   Imprimir, Dividir, Combinar y Guardar en Páginas reescriben los bytes con
+   pdf-lib, que no los descifra (motor.js, exigirSinCifrar). Lo decidió Fran:
+   avisar y bloquear. El aviso no es rojo: no falló nada, el rojo es para lo
+   que falla. El candado y dos renglones: qué tiene y qué no se puede.
+   · Suelto (el preview de Imprimir): centrado, como el cartel de error.
+   · --fila: una franja en el panel de la herramienta o en el pie. */
+.qr-clave-aviso {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ox-2);
+  max-width: 320px;
+  text-align: center;
+  color: var(--ox-text-2);
+}
+.qr-clave-aviso svg { width: 20px; height: 20px; color: var(--ox-text-3); }
+.qr-clave-aviso .ox-meta { color: var(--ox-text-3); }
+.qr-clave-aviso--fila {
+  flex-direction: row;
+  align-items: flex-start;
+  max-width: none;
+  padding: var(--ox-2) var(--ox-3);
+  border-radius: var(--ox-r-sm);
+  background: var(--ox-wash-1);
+  text-align: left;
+}
+.qr-clave-aviso--fila svg { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 1px; }
+.qr-clave-aviso--fila > span { display: flex; flex-direction: column; gap: calc(var(--ox-1) / 2); }
+
+/* El botón apagado que dice por qué. Un .ox-btn:disabled corta el puntero
+   (controls.css) y su tooltip nunca salía: se veía apagado sin explicación.
+   Este lo recibe; el hover ya lo neutraliza :disabled, que va después en
+   controls.css, y el apretón se apaga acá. El clic no llega: un <button>
+   deshabilitado no lo dispara. */
+.ox-btn.qr-explica:disabled { pointer-events: auto; }
+.ox-btn.qr-explica:disabled:active { transform: none; }
 /* ── Pestañas ────────────────────────────────────────────────────────────────
    Una fila más en el chasis, entre el titlebar y el cuerpo. La declaración
    completa se repite acá en vez de editar shell.css, por la misma razón que

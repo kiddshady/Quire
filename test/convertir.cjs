@@ -32,6 +32,22 @@ const RAIZ = path.join(__dirname, '..');
 
 // Datos propios, antes de requerir src/ (el porqué, en datos-propios.cjs).
 require('./datos-propios.cjs')('convertir');
+
+/* La red (tests-07): un rechazo, una excepción o pasarse de tiempo terminan
+   la suite diciendo por qué, en vez de dejar a Electron colgado. Y la carpeta
+   de salida se borra en TODAS las salidas (tests-11): se acumulaban
+   quire-convertir-* en %TEMP%, una por corrida. Va envolviendo app.exit,
+   como datos-propios, porque todas las salidas pasan por ahí. */
+const { abandono } = require('./_comun.cjs');
+abandono({ ms: 180000 });
+let carpeta = null;
+const salirApp = app.exit.bind(app);
+app.exit = (codigo) => {
+  if (carpeta) {
+    try { fs.rmSync(carpeta, { recursive: true, force: true }); } catch { /* Electron todavía tiene el PDF abierto */ }
+  }
+  salirApp(codigo);
+};
 const MOODLE = path.join(__dirname, 'fixtures', 'ejemplo-moodle.htm');
 
 const problemas = [];
@@ -44,7 +60,7 @@ app.whenReady().then(async () => {
   const conversion = require(path.join(RAIZ, 'src', 'conversion.cjs'));
   ipc.register();
 
-  const carpeta = fs.mkdtempSync(path.join(os.tmpdir(), 'quire-convertir-'));
+  carpeta = fs.mkdtempSync(path.join(os.tmpdir(), 'quire-convertir-'));
 
   // ── 1. Moodle → PDF con printToPDF ─────────────────────────────────────────
   {

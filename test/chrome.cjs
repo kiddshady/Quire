@@ -45,7 +45,7 @@ if (MODO !== 'chrome') {
   if (!process.argv.includes('--dev')) process.argv.push('--dev');
 }
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeImage } = require('electron');
 const { vigilarConsola } = require('./consola.cjs');
 
 const PDFS = ['uno', 'dos', 'tres', 'cuatro', 'cinco'].map((n) => {
@@ -422,6 +422,77 @@ async function chrome() {
     ok('«Repetir entradas» anima', piezas.durante.anims > 0, JSON.stringify(piezas.durante));
     ok('sin dejar una animación en línea retenida', !piezas.durante.enLinea && !piezas.despues.enLinea
       && piezas.despues.transform === 'none' && piezas.despues.opacidad === '1', JSON.stringify(piezas.despues));
+  }
+
+  /* ── 6-ter. Soltar fuera de Combinar, y «no hay impresoras» ─────────────── */
+  console.log('\n6-ter. Soltar imágenes en otra vista (ux-13) y el aviso sin impresoras (ux-20)');
+  {
+    /* ux-13: soltar imágenes en el lector daba «Acá se abren PDFs» y mandaba
+       a buscar Combinar a mano. Ahora llevan a Herramientas, sección
+       Combinar, con las imágenes ya en la lista (como un .docx lleva a
+       Convertir). Un PDF soltado en el lector se sigue abriendo: no va a la
+       lista. Por soltarArchivos de app.js, lo que llama el 'drop' de la
+       ventana: un File fabricado en la página no tiene ruta en disco. */
+    const png = nativeImage.createFromBitmap(Buffer.alloc(8 * 6 * 4, 0xc8), { width: 8, height: 6 }).toPNG();
+    const fotos = ['lamina-1.png', 'lamina-2.png'].map((n) => { const r = path.join(TMP, n); fs.writeFileSync(r, png); return r; });
+    const r = await js(`(async () => {
+      const { soltarArchivos } = await import('./js/app.js');
+      const { seccionActual } = await import('./js/views/herramientas.js');
+      const est = await import('./js/estado.js');
+      const router = (await import('./js/router.js')).default;
+      const nombres = () => [...document.querySelectorAll('#qr-cola > .ox-listitem:not([data-state=closing]) .ox-listitem__title')].map((t) => t.textContent.trim());
+      document.querySelectorAll('.ox-toast').forEach((t) => t.remove());
+      router.go('lector');
+      await new Promise((r) => setTimeout(r, 600));
+      const pestanas = est.S.pestanas.length;
+      await soltarArchivos(${JSON.stringify(fotos.map((ruta) => ({ nombre: path.basename(ruta), ruta })))});
+      await new Promise((r) => setTimeout(r, 1200));
+      const imagenes = { vista: router.name, seccion: seccionActual(), nombres: nombres(), toasts: __toasts(), pestanas: est.S.pestanas.length - pestanas };
+
+      document.querySelectorAll('.ox-toast').forEach((t) => t.remove());
+      router.go('lector');
+      await new Promise((r) => setTimeout(r, 600));
+      await soltarArchivos([{ nombre: 'uno.pdf', ruta: ${JSON.stringify(PDFS[0])} }]);
+      await new Promise((r) => setTimeout(r, 700));
+      const pdf = { vista: router.name, activa: est.S.doc?.nombre, toasts: __toasts(), pestanas: est.S.pestanas.length - pestanas };
+      return { imagenes, pdf };
+    })()`);
+    const i = r.imagenes;
+    ok('imágenes soltadas en el lector llevan a Herramientas, sección Combinar', i.vista === 'herramientas' && i.seccion === 'combinar', JSON.stringify(i));
+    ok('con las imágenes ya en la lista', ['lamina-1.png', 'lamina-2.png'].every((n) => i.nombres.includes(n)), JSON.stringify(i.nombres));
+    ok('sin el «Acá se abren PDFs» que mandaba a buscar Combinar', !i.toasts.some((t) => /Acá se abren PDFs|Eso no es un PDF/.test(t)) && i.pestanas === 0, i.toasts.join(' | '));
+    ok('un PDF soltado en el lector se sigue abriendo como documento, no va a la lista', r.pdf.vista === 'lector' && r.pdf.activa === 'uno.pdf' && r.pdf.toasts.some((t) => /Ya estaba abierto/.test(t)),
+      JSON.stringify(r.pdf));
+
+    /* ux-20: Ajustes e Imprimir dicen lo mismo cuando no hay impresoras, y
+       sale de la misma constante (SIN_IMPRESORAS, imprimir.js): eran dos
+       copias y ya decían distinto. */
+    const textos = await js(`(async () => {
+      const est = await import('./js/estado.js');
+      const router = (await import('./js/router.js')).default;
+      const guardadas = est.S.impresoras;
+      const aviso = async (ir, boton) => {
+        document.querySelectorAll('.ox-toast').forEach((t) => t.remove());
+        router.go(ir);
+        await new Promise((r) => setTimeout(r, 700));
+        document.getElementById(boton).click();
+        await new Promise((r) => setTimeout(r, 300));
+        const t = document.querySelector('.ox-toast:not([data-state="closing"])');
+        return t ? { titulo: t.querySelector('.ox-toast__title')?.textContent.trim(), texto: t.querySelector('.ox-toast__text, .ox-toast__body, .ox-toast__msg')?.textContent.trim() || t.textContent.trim() } : null;
+      };
+      try {
+        est.S.impresoras = [];
+        return { ajustes: await aviso('ajustes', 'set-impresora'), imprimir: await aviso('imprimir', 'op-impresora') };
+      } finally {
+        est.S.impresoras = guardadas;
+        document.querySelectorAll('.ox-toast').forEach((t) => t.remove());
+        router.go('lector');
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    })()`);
+    ok('sin impresoras, Ajustes e Imprimir dicen lo mismo (ux-20)', textos.ajustes && textos.imprimir
+      && textos.ajustes.titulo === textos.imprimir.titulo && textos.ajustes.texto === textos.imprimir.texto && /Releer impresoras/.test(textos.ajustes.texto || ''),
+      JSON.stringify(textos));
   }
 
   /* ── 7. Abrir lo que ya está, y abrir varios ────────────────────────────── */

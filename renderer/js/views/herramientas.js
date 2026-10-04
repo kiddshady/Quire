@@ -33,9 +33,9 @@ import Router from '../router.js';
 import { paint, head, empty, esc, attempt } from '../ui.js';
 import { fmtBytes, plural } from '../format.js';
 import {
-  bindSwitcher, bindStepper, swap, frase, valor, numero, reconcile, deslizarAncho, asentarPlegables,
+  bindSwitcher, bindStepper, swap, frase, valor, numero, reconcile, ocupar, asentarPlegables,
 } from '../motion.js';
-import { combinar, dividir, reorganizar } from '../imposicion/motor.js';
+import { combinar, dividir, reorganizar, tituloClave, queFaltaClave } from '../imposicion/motor.js';
 import { aplanarTinta, contarTinta } from '../tinta/aplanar.js';
 import { exportarImagenes, FORMATOS, DPIS, medidaAlDPI, paginasQueNoEntran, nombrarPaginas } from '../exportar.js';
 import { resolverRango, aMM } from '../imposicion/plan.js';
@@ -79,6 +79,41 @@ const BOTONES = {
   'qr-div-hacer': { icono: 'dividir', libre: 'Dividir y guardar', ocupado: 'Dividiendo…' },
   'qr-exp-hacer': { icono: 'download', libre: 'Exportar', ocupado: 'Exportando…' },
 };
+
+/* ── Un PDF con contraseña ───────────────────────────────────────────────────
+   Combinar y Dividir copian páginas con pdf-lib, que no descifra: con un PDF
+   que se abrió con contraseña salían hojas en blanco. Lo decidió Fran
+   (paquete 4A): avisar y bloquear. El aviso vive siempre en el panel, plegado
+   cuando no hace falta, y el botón apagado dice por qué en su tooltip.
+   Exportar sigue andando: rasteriza con pdf.js, que sí sabe leerlo, y no toca
+   los bytes. Lo que no se sabe de antemano (un archivo cifrado que entró
+   desde el disco) lo frena el motor con su propio mensaje. */
+// `cifrado`: la marca de los de solo lectura, si documento.js la pone (ver imprimir.js).
+const conClave = (doc) => !!(doc?.conClave || doc?.cifrado);
+const FALTA = { combinar: 'combinarlo', dividir: 'dividirlo' };
+
+/* El que frena la cola: el primero que está abierto con contraseña (en
+   cualquier pestaña: el de la memoria es el que se combinaría). */
+const bloqueaCombinar = (cola) => cola.find((d) => conClave(pestanaDe(d)?.doc) || conClave(d.doc)) || null;
+
+function avisoClave(id, nombre, accion, visible) {
+  return `
+      <div class="qr-clave-aviso qr-clave-aviso--fila ox-plegable" id="${id}"${visible ? '' : ' hidden'}>
+        ${Icons.svg('lock')}
+        <span><span class="ox-label" id="${id}-titulo">${esc(tituloClave(nombre))}</span><span class="ox-meta">${esc(queFaltaClave(accion))}</span></span>
+      </div>`;
+}
+
+const tipClave = (bloqueo, accion) => `${tituloClave(bloqueo.nombre)}: Quire todavía no puede ${accion}`;
+
+/* El botón que hace el trabajo, apagado por la contraseña: el tooltip dice
+   por qué (.qr-explica le devuelve el puntero, ver quire.css). */
+function explicarBoton(boton, bloqueo, accion) {
+  if (!boton) return;
+  boton.classList.toggle('qr-explica', !!bloqueo);
+  if (bloqueo) boton.dataset.tip = tipClave(bloqueo, accion);
+  else delete boton.dataset.tip;
+}
 
 /* ── Vista ───────────────────────────────────────────────────────────────── */
 
@@ -270,6 +305,7 @@ const LISTA_COLA = '<div class="ox-list qr-cola" id="qr-cola"></div>';
 
 function htmlCombinar() {
   const cola = colaEfectiva();
+  const bloqueo = bloqueaCombinar(cola);
   return `
     <div class="qr-herr__panel">
       <p class="qr-herr__intro">
@@ -277,6 +313,7 @@ function htmlCombinar() {
         copian tal cual: el texto sigue siendo texto, no se rasteriza nada. Una
         imagen entra como una página del tamaño que le da su resolución.
       </p>
+${avisoClave('qr-comb-clave', bloqueo?.nombre, FALTA.combinar, !!bloqueo)}
 
       <div class="qr-comb__lista" id="qr-comb-lista" data-modo="${cola.length ? 'lista' : 'vacio'}">${cola.length ? LISTA_COLA : vacioCombinar()}</div>
 
@@ -286,7 +323,7 @@ function htmlCombinar() {
         </button>
         <div class="ox-spacer"></div>
         <span class="ox-meta" id="qr-comb-resumen">${resumenCombinar(cola)}</span>
-        ${botonHacer('qr-comb-hacer', sePuedeCombinar(cola))}
+        ${botonHacer('qr-comb-hacer', sePuedeCombinar(cola) && !bloqueo, bloqueo, FALTA.combinar)}
       </div>
     </div>`;
 }
@@ -422,8 +459,25 @@ function actualizarCombinar({ montando = false } = {}) {
   }
 
   frase(document.getElementById('qr-comb-resumen'), resumenCombinar(cola));
+  const bloqueo = bloqueaCombinar(cola);
+  const aviso = document.getElementById('qr-comb-clave');
+  if (aviso) {
+    /* Plegado no se ve: el nombre se repone en el lugar, sin relevo, y
+       recién después se despliega (lo mismo que el rótulo de Cancelar en
+       convertir.js). Con frase() siempre, sacar un A cifrado y sumar un B
+       desplegaba el aviso con «A» esfumándose encima de «B» (revisión del
+       4A). __frase se anota igual: es contra lo que compara el próximo
+       frase(), y sin eso releva desde el nombre de antes. */
+    const titulo = document.getElementById('qr-comb-clave-titulo');
+    if (bloqueo && titulo) {
+      const html = esc(tituloClave(bloqueo.nombre));
+      if (aviso.hidden) { swap(titulo, html); titulo.__frase = html; } else frase(titulo, html);
+    }
+    aviso.hidden = !bloqueo;
+  }
   const hacer = document.getElementById('qr-comb-hacer');
-  if (hacer) hacer.disabled = !!V.trabajando || !sePuedeCombinar(cola);
+  if (hacer) hacer.disabled = !!V.trabajando || !sePuedeCombinar(cola) || !!bloqueo;
+  explicarBoton(hacer, bloqueo, FALTA.combinar);
 }
 
 /* Mover un nodo (insertBefore) le saca el foco, aunque sea la misma fila: se
@@ -650,7 +704,7 @@ export async function bytesParaCombinar(cola) {
 
 async function hacerCombinar() {
   const cola = colaEfectiva();
-  if (!sePuedeCombinar(cola)) return;
+  if (!sePuedeCombinar(cola) || bloqueaCombinar(cola)) return;
 
   await conTrabajo('qr-comb-hacer', async () => {
     const { bytes, indice } = await combinar(await bytesParaCombinar(cola));
@@ -675,6 +729,8 @@ function htmlDividir() {
 
   const c = V.corte;
   const { partes, malos } = calcularPartes();
+  // «Este PDF», como el aviso: es el que está abierto, no hace falta nombrarlo.
+  const bloqueo = conClave(S.doc) ? { nombre: '' } : null;
 
   /* Los dos campos viven siempre: el que no va está plegado. Cambiar de tipo
      pliega uno y despliega el otro, en vez de rehacer el panel. */
@@ -684,6 +740,7 @@ function htmlDividir() {
         Cada parte sale como un PDF independiente, con las páginas copiadas sin
         re-renderizar. El original no se toca.
       </p>
+${bloqueo ? avisoClave('qr-div-clave', '', FALTA.dividir, true) : ''}
 
       <div class="ox-segmented qr-angosto" id="qr-div-tipo">
         <button class="ox-segmented__opt${c.tipo === 'cada' ? ' is-active' : ''}" data-value="cada">Cada N páginas</button>
@@ -712,7 +769,7 @@ function htmlDividir() {
 
       <div class="qr-herr__acciones">
         <div class="ox-spacer"></div>
-        ${botonHacer('qr-div-hacer', partes.length > 0)}
+        ${botonHacer('qr-div-hacer', partes.length > 0 && !bloqueo, bloqueo, FALTA.dividir)}
       </div>
     </div>`;
 }
@@ -778,7 +835,7 @@ function actualizarDividir({ montando = false } = {}) {
   }
   frase(document.getElementById('qr-div-hint'), hintRangos(malos));
   const hacer = document.getElementById('qr-div-hacer');
-  if (hacer) hacer.disabled = !!V.trabajando || !partes.length;
+  if (hacer) hacer.disabled = !!V.trabajando || !partes.length || conClave(S.doc);
 }
 
 /** Un tramo de Dividir: «5», «2-7» o «7-» (de la 7 al final). */
@@ -815,7 +872,7 @@ function calcularPartes() {
 
 async function hacerDividir() {
   const { partes } = calcularPartes();
-  if (!partes.length || V.trabajando) return;
+  if (!partes.length || V.trabajando || conClave(S.doc)) return;
 
   const carpeta = await attempt(() => api.docs.elegirCarpeta());
   if (!carpeta) return;
@@ -1054,22 +1111,20 @@ const rotulo = (id) => {
   return V.trabajando === id ? `${Icons.spinner('qr-girando')} ${b.ocupado}` : `${Icons.svg(b.icono)} ${b.libre}`;
 };
 
-/** El botón que hace el trabajo, ya ocupado si su trabajo está en curso. */
-function botonHacer(id, puede) {
+/** El botón que hace el trabajo, ya ocupado si su trabajo está en curso.
+    Con `bloqueo` (un PDF con contraseña) nace apagado y diciendo por qué. */
+function botonHacer(id, puede, bloqueo = null, accion = '') {
   const ocupado = V.trabajando === id;
-  return `<button class="ox-btn ox-btn--primary ox-flashable" id="${id}" data-ocupado="${ocupado ? 1 : 0}"${puede && !V.trabajando ? '' : ' disabled'}>${rotulo(id)}</button>`;
+  const clase = bloqueo ? ' qr-explica' : '';
+  const tip = bloqueo ? ` data-tip="${esc(tipClave(bloqueo, accion))}"` : '';
+  return `<button class="ox-btn ox-btn--primary ox-flashable${clase}" id="${id}"${tip} data-ocupado="${ocupado ? 1 : 0}"${puede && !V.trabajando ? '' : ' disabled'}>${rotulo(id)}</button>`;
 }
 
 /* Libre ↔ ocupado es un estado por otro: relevo en el lugar, y el ancho del
    botón viaja en vez de saltar (herr-14). Se busca por id cada vez: si la
    vista se repintó en el medio, el nodo es otro. */
 function ponerOcupado(id) {
-  const b = document.getElementById(id);
-  if (!b) return;
-  const ocupado = V.trabajando === id ? '1' : '0';
-  if (b.dataset.ocupado === ocupado) return;
-  b.dataset.ocupado = ocupado;
-  deslizarAncho(b, () => swap(b, rotulo(id), { relevo: true }));
+  ocupar(document.getElementById(id), V.trabajando === id, rotulo(id));
 }
 
 /** Ocupa el botón mientras dura la operación y muestra el error si falla. */

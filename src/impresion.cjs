@@ -296,13 +296,14 @@ function rutaDelAyudante() {
    si el driver lo usa. La P1102w dice «A4», «A5», «Letter»…, y por eso
    paper=A5 sale A5 (la medición de arriba).
 
-   De ahí sale la lista (imprimir-19): la unión de lo que nombra el plan
-   (renderer/js/imposicion/plan.js, PAPELES_CON_NOMBRE) y los nombres de
-   Windows de siempre. Sumar uno que la impresora no tiene no cambia nada: cae
-   al papel del driver, que es lo mismo que mandar el trabajo sin `paper=`. Por
-   eso entran A0 y A1, que solo un plotter reporta, y Statement y Executive,
-   que el plan todavía no nombra. El renderer la pide con papelesConNombre()
-   para saber cuándo un papel no se va a poder pedir y avisarlo. */
+   De ahí sale la lista (imprimir-19): la misma que nombra el plan
+   (renderer/js/imposicion/plan.js, PAPELES_CON_NOMBRE, que exporta
+   NOMBRES_DE_PAPEL). Sumar uno que la impresora no tiene no cambia nada: cae
+   al papel del driver, que es lo mismo que mandar el trabajo sin `paper=`.
+   Por eso entran A0 y A1, que solo un plotter reporta. Las dos listas son la
+   misma: plan.test.mjs §10 cuida que no se separen. El renderer la pide con
+   papelesConNombre() para saber cuándo un papel no se va a poder pedir y
+   avisarlo. */
 const PAPELES_CON_NOMBRE = new Set([
   'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6',
   'Letter', 'Legal', 'Tabloid', 'Statement', 'Executive',

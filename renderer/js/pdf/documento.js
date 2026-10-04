@@ -117,6 +117,11 @@ class Documento {
        en blanco o roto. Antes de ux-11 estos PDF ni abrían, así que nadie lo
        miraba; ahora Imprimir y Exportar tienen que mirarlo y avisar. */
     this.conClave = !!meta.conClave;
+    /* Cifrado aunque nadie haya pedido contraseña: los PDF con contraseña de
+       PROPIETARIO (restricciones de imprimir o copiar) pdf.js los abre sin
+       preguntar, pero sus bytes también están cifrados y pdf-lib los copia en
+       blanco. Las vistas miran las dos marcas para avisar de antemano. */
+    this.cifrado = !!meta.cifrado || this.conClave;
 
     this._cachePaginas = new Map();
     this._cacheGeometria = new Map();
@@ -536,7 +541,7 @@ class Documento {
       creador: info?.Creator || null,
       productor: info?.Producer || null,
       version: info?.PDFFormatVersion || null,
-      cifrado: !!info?.IsEncrypted,
+      cifrado: !!(info?.EncryptFilterName || info?.IsEncrypted),
     };
   }
 
@@ -626,7 +631,10 @@ export async function abrirDocumento(bytes, meta = {}) {
     tarea.destroy().catch(() => {});
     throw traducirError(err, { cancelada });
   }
-  return new Documento(pdf, { ...meta, bytes: origen, conClave });
+  // pdf.js informa el filtro de cifrado en los metadatos (EncryptFilterName).
+  const info = (await pdf.getMetadata().catch(() => null))?.info;
+  const cifrado = !!(info?.EncryptFilterName || info?.IsEncrypted);
+  return new Documento(pdf, { ...meta, bytes: origen, conClave, cifrado });
 }
 
 export { Documento };

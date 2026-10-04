@@ -40,10 +40,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let pass = 0; let fail = 0;
 const ok = (n, c, x = '') => { if (c) { pass++; console.log(`  ok   ${n}`); } else { fail++; console.log(`  FALLA ${n} ${x}`); } };
-const bail = (w, e) => { console.log(`ABORTADO ${w}`, e?.stack || e || ''); app.exit(3); };
-process.on('unhandledRejection', (e) => bail('rechazo', e));
-process.on('uncaughtException', (e) => bail('excepción', e));
-setTimeout(() => bail('timeout de 60s'), 60000);
+/* La red de _comun.cjs (tests-07): la misma que esta suite tenía escrita a
+   mano, con su timeout de 60 s, ahora en un solo lugar para todas. */
+const { abandono } = require('./_comun.cjs');
+abandono({ ms: 60000 });
 
 app.whenReady().then(async () => {
   require(path.join(ROOT, 'src', 'ipc.cjs')).register();

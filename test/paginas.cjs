@@ -844,7 +844,12 @@ async function correr() {
       return { modal, cerro, sigue: est.S.pestanas.includes(p), estado: __estado() };
     })()`);
     notas.push(['guardia', r]);
-    ok('cerrar la pestaña con cambios pregunta antes (ux-03)', r.modal.titulo === '¿Cerrar sin guardar?' && /Física & Química\.pdf/.test(r.modal.sub || '') && /1 página quitada/.test(r.modal.sub || ''), JSON.stringify(r.modal));
+    /* Con las palabras de la pregunta de cerrar la app (paginas.js,
+       PREGUNTA_CAMBIOS; chrome.cjs §12 mira la otra): el mismo título, la
+       misma frase con lo que se pierde y el mismo botón (paquete 4A). */
+    ok('cerrar la pestaña con cambios pregunta antes, con las palabras del cierre de la app (ux-03)',
+      r.modal.titulo === 'Hay cambios sin guardar en Páginas' && /^Física & Química\.pdf: 1 página quitada\. Si cerrás la pestaña, se pierden\.$/.test(r.modal.sub || ''),
+      JSON.stringify(r.modal));
     ok('y si se cancela, la pestaña sigue abierta con sus cambios', r.cerro === false && r.sigue && r.estado === '1 página quitada', JSON.stringify(r));
 
     const s = await js(`(async () => {
@@ -852,7 +857,7 @@ async function correr() {
       const p = est.S.pestana;
       const cierre = est.cerrarPestana(p.id);
       await new Promise((r) => setTimeout(r, 300));
-      [...document.querySelectorAll('.ox-modal__foot .ox-btn')].find((b) => b.textContent === 'Cerrar igual')?.click();
+      [...document.querySelectorAll('.ox-modal__foot .ox-btn')].find((b) => b.textContent === 'Cerrar sin guardar')?.click();
       const cerro = await cierre;
       const sinCambios = est.S.pestana;
       const sinModal = est.cerrarPestana(sinCambios.id);
@@ -958,6 +963,87 @@ async function correr() {
   }
   // Cerrar sin la guardia: no hay a quién preguntarle.
   await js(`(async () => { const est = await import('./js/estado.js'); est.S.pestana.organizar = null; await est.cerrar(); })()`);
+
+  /* ── 16. Un PDF con contraseña: se ordena y se mira, no se escribe ─────────
+     Guardar y Extraer reescriben los bytes con pdf-lib, que no descifra: con
+     un PDF abierto con contraseña salían hojas en blanco. Lo decidió Fran
+     (paquete 4A): avisar y bloquear. Se fabrica el estado (conClave en el
+     documento abierto, como lo deja el lector tras pedir la contraseña) y se
+     espía pdf-lib en la MISMA instancia de módulo que usa el motor: ninguna
+     acción puede llegar a cargar ni a crear un PDF. Exportar como PNG sale de
+     pdf.js y sigue andando. */
+  console.log('\n16. Un PDF con contraseña');
+  await abrir(CORTO);
+  await js(`(async () => {
+    const est = await import('./js/estado.js');
+    est.S.doc.conClave = true;
+    // Ya estaba en Páginas (abrir() la repintó sin la marca): se repinta con ella.
+    const router = (await import('./js/router.js')).default;
+    if (router.name === 'paginas') router.refresh(); else router.go('paginas');
+  })()`);
+  await esperar(1200);
+  {
+    const r = await js(`(async () => {
+      const { PDFDocument } = await import('./vendor/pdf-lib/pdf-lib.mjs');
+      const cargar = PDFDocument.load; const crear = PDFDocument.create;
+      let cargas = 0;
+      PDFDocument.load = function (...a) { cargas++; return cargar.apply(this, a); };
+      PDFDocument.create = function (...a) { cargas++; return crear.apply(this, a); };
+      try {
+        const aviso = document.getElementById('org-clave');
+        const guardar = document.getElementById('org-guardar');
+        const extraer = document.getElementById('org-extraer');
+        const png = document.getElementById('org-exportar-png');
+        const filas = __filas();
+        filas[0].click();
+        document.getElementById('org-rotar-der').click();
+        filas[1].click();
+        document.getElementById('org-borrar').click();
+        await new Promise((r) => setTimeout(r, 400));
+        __filas()[0].click();
+        await new Promise((r) => setTimeout(r, 100));
+        const estado = __estado();
+        /* .click() sobre un botón deshabilitado no despacha nada (medido en
+           Electron 40): no llegaba a ningún handler y no probaba las guardias
+           conClave(p) de guardar() y extraer(), solo que estaban apagados
+           (revisión del 4A). Un evento despachado sí llega al listener. */
+        guardar.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        extraer.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 600));
+        return {
+          aviso: aviso ? __vivo(aviso) : null,
+          avisoAlto: aviso ? Math.round(aviso.getBoundingClientRect().height) : 0,
+          estado, filas: __filas().length,
+          guardar: { apagado: guardar.disabled, explica: guardar.classList.contains('qr-explica'), tip: guardar.dataset.tip || null, puntero: getComputedStyle(guardar).pointerEvents },
+          extraer: { apagado: extraer.disabled, tip: extraer.dataset.tip || null },
+          png: { apagado: png.disabled },
+          cargas,
+          modales: document.querySelectorAll('.ox-modal:not([data-state=closing])').length,
+        };
+      } finally {
+        PDFDocument.load = cargar; PDFDocument.create = crear;
+      }
+    })()`);
+    /* El tooltip del botón apagado, con el puntero de verdad: un .ox-btn
+       deshabilitado no recibía el puntero y nunca decía por qué. */
+    const caja = await js(`(() => { const b = document.getElementById('org-guardar').getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: caja.x, y: caja.y });
+    await esperar(700);
+    const tip = await js(`document.querySelector('#ox-layer .ox-tooltip:not([data-state=closing])')?.textContent || null`);
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: 5, y: 450 });
+    await esperar(300);
+    notas.push(['con-clave', { ...r, tip }]);
+    ok('arriba de la grilla, el aviso dice qué tiene y qué no se puede', /Este PDF tiene contraseña/.test(r.aviso || '') && /todavía no guardar sus cambios ni extraer sus páginas/.test(r.aviso || '') && r.avisoAlto > 20, `${r.aviso} (${r.avisoAlto} px)`);
+    ok('ordenar, girar y quitar siguen andando', /1 página quitada/.test(r.estado || '') && r.filas === 3, `${r.estado} · ${r.filas}`);
+    ok('Guardar queda apagado aunque haya cambios, y su tooltip dice por qué', r.guardar.apagado && r.guardar.explica && /tiene contraseña: Quire todavía no puede guardar sus cambios/.test(r.guardar.tip || ''), JSON.stringify(r.guardar));
+    ok('Extraer también, con el porqué en su tooltip', r.extraer.apagado && /tiene contraseña: Quire todavía no puede extraer sus páginas/.test(r.extraer.tip || ''), JSON.stringify(r.extraer));
+    ok('Exportar como PNG sigue andando (sale de pdf.js)', !r.png.apagado, JSON.stringify(r.png));
+    ok('ninguna acción llegó a pdf-lib', r.cargas === 0 && r.modales === 0, `cargas ${r.cargas} · modales ${r.modales}`);
+    ok('pasando el puntero sobre «Guardar como…» apagado, sale el tooltip con el porqué', /tiene contraseña/.test(tip || ''), String(tip));
+  }
+  await js(`(async () => { const est = await import('./js/estado.js'); est.S.doc.conClave = false; est.S.pestana.organizar = null; await est.cerrar(); })()`);
+  // Cerrar recuerda la sesión en disco: que termine antes de borrar la carpeta de datos.
+  await esperar(800);
 
   console.log('\n===== NOTAS =====');
   for (const [k, v] of notas) console.log(k + ': ' + JSON.stringify(v));

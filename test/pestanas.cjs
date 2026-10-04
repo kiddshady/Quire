@@ -43,6 +43,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { vigilarConsola } = require('./consola.cjs');
 const { auditarAnillos } = require('./anillos.cjs');
+const { abandono, brillo, muestrearAca, vivo } = require('./_comun.cjs');
 
 const RAIZ = path.join(__dirname, '..');
 const ORIGEN = path.join(RAIZ, 'renderer', 'vendor', 'cobayo.pdf');
@@ -72,6 +73,15 @@ const PDFS = ['uno', 'dos', 'tres', 'cuatro', 'cinco'].map((n) => {
    Con cuatro de tope, eso corría todas las cuentas de acá abajo. */
 process.env.QUIRE_DATA = path.join(TMP, 'datos');
 fs.mkdirSync(process.env.QUIRE_DATA, { recursive: true });
+
+/* La red (tests-07): sin timeout, un await que no vuelve —el render del
+   worker compartido de §6 es justo el caso que esta suite vigila— dejaba a
+   Electron colgado para siempre. Y la carpeta temporal (los PDF y los datos)
+   se borra en TODAS las salidas, también al abandonar: va envolviendo
+   app.exit, como datos-propios.cjs. */
+abandono({ ms: 180000 });
+const salirApp = app.exit.bind(app);
+app.exit = (codigo) => { limpiar(); salirApp(codigo); };
 
 const problemas = [];
 const notas = [];
@@ -203,7 +213,9 @@ async function correr() {
       activas: tabs.filter((t) => t.classList.contains('is-active')).length,
       activaEs: tabs.findIndex((t) => t.classList.contains('is-active')),
       nombres: tabs.map((t) => t.querySelector('.qr-tab__nombre').textContent),
-      contextoTitlebar: document.getElementById('titlebar-context').textContent.trim(),
+      // Lo vivo: el contexto se escribe con un relevo (app.js) y el calco de
+      // lo que se va suma su texto al textContent un rato (revisión del 4A).
+      contextoTitlebar: ${vivo('#titlebar-context')},
       hayMas: !!document.getElementById('qr-tab-mas') && !document.getElementById('qr-tab-mas').hidden,
       inerte: f.inert,
     };
@@ -375,6 +387,58 @@ async function correr() {
     ok('arrancó de cero, no es uno viejo colgado', n.reloj < 120, `${n.reloj} ms`);
     ok('la vista nueva queda quieta debajo', n.vistaQuieta);
     ok('sin salirse de Páginas', n.vista === 'paginas', n.vista);
+  }
+
+  /* ── 3-ter. El fundido tapa la pantalla todo el tiempo (tests-03) ──────────
+     3-bis mira que haya fundido; esto mira que no destape. En el lector, con
+     las hojas blancas, es donde se veía: la 0.9.4 hacía un relevo con espera
+     y el brillo medio de la vista iba 207 → 36 → 50, más oscuro que las dos
+     (motion-timing §2). Dos series a la vez: en la página, cada 40 ms, cuánto
+     contenido se ve (el calco opaco encima, `viejo + (100 − viejo) × nuevo /
+     100`), con el calco opaco y por encima; y desde Electron, fotos de la zona
+     de la vista con su brillo medio, que no puede bajar de las dos puntas.
+     El cambio va en la MISMA tarea que la primera muestra. */
+  console.log('\n3-ter. El fundido no destapa la pantalla');
+  {
+    await js(`(async () => { (await import('./js/router.js')).default.go('lector'); })()`);
+    await esperar(1500);
+    const zona = await js(`(() => { const r = document.getElementById('view').getBoundingClientRect();
+      return { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) }; })()`);
+    const a = brillo(await win.webContents.capturePage(zona));
+    const enPagina = js(`(async () => {
+      const est = await import('./js/estado.js');
+      const vista = document.getElementById('view');
+      const alfa = (color) => { const c = document.createElement('canvas').getContext('2d');
+        c.fillStyle = color; c.fillRect(0, 0, 1, 1); return c.getImageData(0, 0, 1, 1).data[3]; };
+      est.activar(est.S.pestanas.find((p) => p !== est.S.pestana).id);
+      const filas = []; const t0 = performance.now();
+      for (;;) {
+        const t = Math.round(performance.now() - t0);
+        const calco = document.querySelector('.ox-main--saliente');
+        const cs = calco ? getComputedStyle(calco) : null;
+        const viejo = cs ? Math.round(+cs.opacity * 100) : null;
+        const nuevo = Math.round(+getComputedStyle(vista).opacity * 100);
+        filas.push({ t, viejo, nuevo,
+          tapado: Math.round(viejo == null ? nuevo : viejo + (100 - viejo) * nuevo / 100),
+          opaco: cs ? alfa(cs.backgroundColor) === 255 : null,
+          encima: cs ? (parseInt(cs.zIndex, 10) || 0) > 0 : null });
+        if (t >= 400) break;
+        await new Promise((r) => setTimeout(r, 40));
+      }
+      return filas;
+    })()`);
+    const fotos = await muestrearAca(async (t) => ({ t, b: brillo(await win.webContents.capturePage(zona)) }), 0, 400);
+    const filas = await enPagina;
+    await esperar(400);
+    const b = brillo(await win.webContents.capturePage(zona));
+    const conCalco = filas.filter((f) => f.viejo != null);
+    const piso = Math.min(a, b) - 8;
+    notas.push(['fundido-tapado', { a, b, filas: filas.map((f) => `${f.t}:${f.viejo ?? '-'}/${f.nuevo}=${f.tapado}`).join(' '), fotos: fotos.map((f) => `${f.t}:${f.b}`).join(' ') }]);
+    ok('hubo calco en la serie (si no, lo de abajo no prueba nada)', conCalco.length >= 2, `${conCalco.length} muestras con calco`);
+    ok('la pantalla queda tapada ≥ 97 en toda la serie', filas.every((f) => f.tapado >= 97), filas.map((f) => f.tapado).join(' '));
+    ok('el calco es opaco y va por encima de la vista nueva', conCalco.every((f) => f.opaco && f.encima), JSON.stringify(conCalco.find((f) => !f.opaco || !f.encima) || {}));
+    ok('el brillo de la vista no baja de las dos puntas (sin parpadeo oscuro)', fotos.every((f) => f.b >= piso),
+      `antes ${a}, después ${b}, serie ${fotos.map((f) => f.b).join(' ')}`);
   }
 
   /* ── 4. El mismo archivo no abre dos veces ──────────────────────────────── */
@@ -678,7 +742,12 @@ async function correr() {
     const canvas = document.createElement('canvas');
     let render = null;
     try {
-      const r = await S.doc.render(1, { canvas, escala: 0.5 }).promesa;
+      /* Con tope: si el worker murió, la promesa puede no volver nunca y
+         el try/catch no ataja un cuelgue (tests-07). */
+      const r = await Promise.race([
+        S.doc.render(1, { canvas, escala: 0.5 }).promesa,
+        new Promise((_, no) => setTimeout(() => no(new Error('el worker no contestó en 5 s')), 5000)),
+      ]);
       render = r && r.ancho > 0 && r.alto > 0;
     } catch (e) { render = 'error: ' + e.message; }
 
