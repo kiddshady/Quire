@@ -357,6 +357,18 @@ app.whenReady().then(async () => {
     ok('al soltar el láser se pliegan', await js(`document.querySelector('[data-tams-laser]').hidden`));
   });
 
+  await bloque('Ctrl no prende el láser', async () => {
+    // Era un láser mientras se lo apretaba; Fran no lo usaba y lo pidió sacar.
+    const c = await centroPrincipal();
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Control', modifiers: ['control'] });
+    raton('mouseMove', c.x + 60, c.y + 40, { modifiers: ['control'] });
+    await esperar(250);
+    ok('con Ctrl apretado, el láser sigue apagado', !(await js(`document.querySelector('.qr-esc--principal .qr-esc__laser').classList.contains('is-on')`)));
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Control' });
+    await esperar(60);
+    ok('y no cambia de diapositiva', (await estado()).n === 4);
+  });
+
   await bloque('la grilla', async () => {
     await tecla('G');
     await esperar(300);

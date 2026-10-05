@@ -135,7 +135,6 @@ const P = {
   esc: {},             // principal, sala, siguiente
   negro: false,
   modo: null,          // null | 'laser' | 'lapiz'
-  ctrl: false,
   puntero: null,       // dónde está el puntero sobre la principal (unidades de diapositiva)
   zoom: { k: 1, fx: 0.5, fy: 0.5 },   // el factor y el centro, en fracciones de la lámina
   zoomDestino: 1,      // adonde va el zoom que se está animando
@@ -542,12 +541,12 @@ function ponerNegro(on) {
   marcarBotones();
 }
 
-/* El láser se ve con su modo prendido, o mientras se aprieta Ctrl o el botón
+/* El láser se ve con su modo prendido, o mientras se aprieta el botón
    del costado de la lapicera (también dibujando: es un láser de paso). */
 function laserVisible() {
   const p = P.puntero;
   if (!p) return null;
-  return P.modo === 'laser' || P.ctrl || p.barril ? p : null;
+  return P.modo === 'laser' || p.barril ? p : null;
 }
 
 function ponerLaserEnTodos() {
@@ -742,7 +741,7 @@ function cablearPuntero(esc) {
         dibujarTintaEnTodos();
         return;
       }
-      if (P.modo === 'laser' || P.ctrl) { P.puntero = q; ponerLaserEnTodos(); return; }
+      if (P.modo === 'laser') { P.puntero = q; ponerLaserEnTodos(); return; }
       /* Con zoom, el clic espera a soltarse: si se arrastró, movió la lámina;
          si no, avanza como siempre. El botón del medio solo arrastra. */
       if (P.zoom.k > 1 && (mods.button === 0 || mods.button === 1)) {
@@ -1141,7 +1140,9 @@ function tecla(e) {
   if (Modal.isOpen) return;
   e.stopImmediatePropagation();
   const k = e.key;
-  if (k === 'Control') { if (!P.ctrl) { P.ctrl = true; ponerLaserEnTodos(); } return; }
+  /* Ctrl solo no hace nada: era un láser mientras se lo apretaba, y Fran no
+     lo usaba (lo usan Ctrl+rueda y Ctrl+0 del zoom). */
+  if (k === 'Control') return;
   // Alt+F4 y compañía son de Windows; lo demás no baja a la app.
   if (e.altKey) return;
   e.preventDefault();
@@ -1186,23 +1187,10 @@ function tecla(e) {
   }
 }
 
-function soltarTecla(e) {
-  if (!P.activa) return;
-  if (e.key === 'Control' && P.ctrl) { P.ctrl = false; ponerLaserEnTodos(); }
-}
-
-function perderFoco() {
-  if (P.ctrl) { P.ctrl = false; ponerLaserEnTodos(); }
-}
-
 function cablearVentana(win) {
   win.addEventListener('keydown', tecla, true);
-  win.addEventListener('keyup', soltarTecla, true);
-  win.addEventListener('blur', perderFoco);
   return () => {
     win.removeEventListener('keydown', tecla, true);
-    win.removeEventListener('keyup', soltarTecla, true);
-    win.removeEventListener('blur', perderFoco);
   };
 }
 
@@ -1281,8 +1269,7 @@ export async function presentar({ desde = 1, alTerminar = null } = {}) {
     esc: {},
     negro: false,
     modo: null,
-    ctrl: false,
-    puntero: null,
+      puntero: null,
     zoom: { k: 1, fx: 0.5, fy: 0.5 },
     zoomDestino: 1,
     zoomAncla: null,
@@ -1408,7 +1395,6 @@ window.__quirePresentacion = () => ({
   dual: P.dual,
   negro: P.negro,
   modo: P.modo,
-  ctrl: P.ctrl,
   trazos: P.trazos.length,
   grilla: !!P.grilla,
   sala: !!P.sala,

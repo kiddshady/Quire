@@ -65,8 +65,8 @@ siguiente, el cronómetro y la hora. Con una sola pantalla, la diapositiva
 ocupa la ventana y el cronómetro queda en un rincón. Se avanza con las
 flechas, AvPág/RePág (lo que mandan los presentadores de mano), Espacio, un
 clic o la rueda; un número y Enter van a esa diapositiva. **L** prende el
-puntero láser (o Ctrl mientras lo apretás, o el botón del costado de la
-lapicera), chico, mediano o grande según elijas en la botonera; **D** dibuja
+puntero láser (o el botón del costado de la lapicera mientras lo apretás),
+chico, mediano o grande según elijas en la botonera; **D** dibuja
 encima con la tablet, en el color y el grosor que elijas —tinta de paso, que
 se va al cambiar de diapositiva y no toca el PDF—, **E** la borra, **B** pone
 la sala en negro y **G** muestra todas las diapositivas. **+** y **−** (o

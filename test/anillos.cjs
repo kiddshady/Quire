@@ -67,6 +67,24 @@ const auditarAnillos = (alcance = null) => `(((scope) => {
       const det = g.map((x, i) => ['izq', 'arriba', 'der', 'abajo'][i] + ' ' + x.toFixed(1)).filter((_, i) => g[i] < R - e);
       if (det.length) { out.push(name(el) + '  roza ' + name(a) + '  [' + det.join(', ') + ']'); break; }
     }
+    /* Un vecino con superficie propia (fondo o sombra en reposo) a menos de
+       lo que sale el anillo: el anillo se le mete encima. Pasó en el rail,
+       donde los ítems van pegados y el de «Páginas» pisaba el fondo del
+       ítem activo de arriba. Ahí el anillo va hacia adentro. */
+    for (const v of el.parentElement ? el.parentElement.children : []) {
+      if (v === el) continue;
+      const vs = getComputedStyle(v);
+      if (vs.display === 'none' || vs.visibility === 'hidden') continue;
+      if (vs.backgroundColor === 'rgba(0, 0, 0, 0)' && vs.boxShadow === 'none') continue;
+      const vr = v.getBoundingClientRect();
+      if (vr.width < 2 || vr.height < 2) continue;
+      const enColumna = vr.left < r.right - e && vr.right > r.left + e;
+      const enFila = vr.top < r.bottom - e && vr.bottom > r.top + e;
+      let gap = null;
+      if (enColumna) gap = vr.bottom <= r.top + e ? r.top - vr.bottom : vr.top >= r.bottom - e ? vr.top - r.bottom : null;
+      else if (enFila) gap = vr.right <= r.left + e ? r.left - vr.right : vr.left >= r.right - e ? vr.left - r.right : null;
+      if (gap !== null && gap < R - e) { out.push(name(el) + '  pisa a ' + name(v) + '  [a ' + gap.toFixed(1) + 'px]'); break; }
+    }
     for (const bx of boxes) {
       const inside = r.left >= bx.l - e && r.top >= bx.t - e && r.right <= bx.r + e && r.bottom <= bx.b + e;
       if (!inside) break;

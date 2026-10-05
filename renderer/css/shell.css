@@ -151,6 +151,10 @@
   text-align: left;
   cursor: default;
   transition: var(--tr-color);
+  /* El anillo de foco va hacia adentro: los ítems van pegados (sin aire
+     entre uno y otro), y el de base.css, que sale 3,5px, se le metía
+     encima al fondo del activo de al lado. */
+  outline-offset: -1.5px;
 }
 .ox-navitem .ox-icon { color: var(--ox-text-3); transition: color var(--ox-t-1) var(--ox-ease-soft); }
 .ox-navitem:hover { background: var(--ox-wash-1); color: var(--ox-text); }
