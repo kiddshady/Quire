@@ -504,8 +504,48 @@ app.whenReady().then(async () => {
     await hasta(() => js(`!document.getElementById('qr-presentacion')`), 3000, 'la capa no se fue');
   });
 
+  /* El anillo de lo que tiene el foco cuando se vuelve: el outline de
+     base.css o uno propio (outline, o una sombra dura que no sea inset). */
+  const anilloDelFoco = () => js(`(() => {
+    const el = document.activeElement;
+    const s = getComputedStyle(el);
+    const sombra = s.boxShadow.split('), ').some((p) => !p.includes('inset') && p.includes(' 3.5px'));
+    const outline = s.outlineStyle !== 'none' && !s.outlineColor.includes('0, 0, 0, 0') && parseFloat(s.outlineWidth) > 0;
+    return { id: el.id, anillo: outline || sombra, visible: el.matches(':focus-visible'), marca: 'sinAnillo' in el.dataset, ventana: document.hasFocus(), outline: s.outlineColor };
+  })()`);
+
+  /* Sin el foco de la ventana, :focus-visible no se aplica nunca y «sin
+     anillo» pasaría con el bug puesto. El foco se EMULA por el protocolo de
+     DevTools, como en el smoke (tests-09): win.focus() activaba la ventana
+     de verdad, le robaba el teclado a Fran, y si él volvía a su ventana a
+     mitad de la prueba el anillo dejaba de aplicarse (falló así una vez en
+     verificar). Si el debugger no se engancha, queda el foco de verdad. */
+  let focoEmulado = false;
+  const enfocarVentana = async () => {
+    if (!focoEmulado) {
+      try {
+        if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3');
+        await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+        focoEmulado = true;
+      } catch {
+        win.focus();
+        win.webContents.focus();
+      }
+    }
+    await esperar(60);
+    return js('document.hasFocus()');
+  };
+  // El anillo entra con su transición: se mide asentado.
+  const anilloConVentana = async () => { await enfocarVentana(); await esperar(300); return anilloDelFoco(); };
+
   await bloque('el botón de la barra', async () => {
-    await js(`document.getElementById('qr-presentar').click()`);
+    ok('la ventana tiene el foco', await enfocarVentana());
+    // Un clic de verdad, como con el mouse: el foco queda en el botón sin anillo.
+    const b = await js(`T.caja('#qr-presentar')`);
+    raton('mouseMove', b.x + b.w / 2, b.y + b.h / 2);
+    await esperar(120);
+    raton('mouseDown', b.x + b.w / 2, b.y + b.h / 2);
+    raton('mouseUp', b.x + b.w / 2, b.y + b.h / 2);
     await listo();
     ok('el botón arranca desde el principio', await enDiapositiva(1));
     await tecla('D');
@@ -513,6 +553,36 @@ app.whenReady().then(async () => {
     await tecla('D');
     await tecla('Escape');
     await hasta(() => js(`!document.getElementById('qr-presentacion')`), 3000, 'la capa no se fue');
+    /* Se cerró con Escape: Chromium da el foco devuelto por foco de teclado
+       y el botón quedaba recuadrado. Vuelve como estaba (foco.js). */
+    const a = await anilloConVentana();
+    ok('al volver, el foco está en el botón', a.id === 'qr-presentar' && a.ventana, JSON.stringify(a));
+    ok('y sin el anillo pegado', !a.anillo, JSON.stringify(a));
+    raton('mouseMove', 5, b.y + 300);
+  });
+
+  await bloque('con el teclado, el anillo vuelve', async () => {
+    await enfocarVentana();
+    // Tab hasta el botón, como quien no usa el mouse.
+    await js(`document.activeElement?.blur()`);
+    let llego = false;
+    for (let i = 0; i < 80 && !llego; i++) {
+      await tecla('Tab');
+      llego = await js(`document.activeElement?.id === 'qr-presentar'`);
+    }
+    ok('Tab llega al botón', llego);
+    await esperar(300); // el anillo entra con transición
+    const antes = await anilloDelFoco();
+    ok('con su anillo', antes.anillo, JSON.stringify(antes));
+    // Enter con su keypress (tecla() no lo manda para Return): es el que activa el botón.
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
+    win.webContents.sendInputEvent({ type: 'char', keyCode: '\r' });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
+    await listo();
+    await tecla('Escape');
+    await hasta(() => js(`!document.getElementById('qr-presentacion')`), 3000, 'la capa no se fue');
+    const a = await anilloConVentana();
+    ok('al volver, el botón lo recupera', a.id === 'qr-presentar' && a.ventana && a.anillo, JSON.stringify(a));
   });
 
   /* ── 2 · Con sala ─────────────────────────────────────────────────────── */

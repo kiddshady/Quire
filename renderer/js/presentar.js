@@ -41,6 +41,7 @@ import { S, alCambiar } from './estado.js';
 import { Icons } from './icons.js';
 import { Modal } from './overlays.js';
 import { exit, raf2, asentarPlegables, valor } from './motion.js';
+import { tomarFoco, devolverFoco } from './foco.js';
 import { StrokeInput } from './tinta/stroke.js';
 import { contornoDeTrazo, trazoTocado } from './tinta/contorno.js';
 
@@ -1290,7 +1291,7 @@ export async function presentar({ desde = 1, alTerminar = null } = {}) {
     grilla: null,
     digitos: '',
     alTerminar,
-    foco: document.activeElement,
+    foco: tomarFoco(),
     quitar: [],
     listo: false,
     cambiando: false,
@@ -1395,7 +1396,8 @@ export async function terminar({ rapido = false } = {}) {
      completa: el parpadeo de «a veces» al terminar. */
   await new Promise((r) => raf2(r));
   exit(raiz, { fallback: 500 });
-  if (P.foco?.isConnected) P.foco.focus({ preventScroll: true });
+  // Como estaba: sin el anillo si se había llegado con el mouse (foco.js).
+  devolverFoco(P.foco);
   P.foco = null;
 }
 

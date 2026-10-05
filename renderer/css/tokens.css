@@ -192,7 +192,8 @@
      (que anima propiedades que no querías y cuesta caro en repaints). */
   --tr-color:   color var(--ox-t-1) var(--ox-ease-soft),
                 background-color var(--ox-t-1) var(--ox-ease-soft),
-                box-shadow var(--ox-t-1) var(--ox-ease-soft);
+                box-shadow var(--ox-t-1) var(--ox-ease-soft),
+                outline-color var(--ox-t-1) var(--ox-ease-soft);
   --tr-move:    transform var(--ox-t-2) var(--ox-ease);
   --tr-fade:    opacity var(--ox-t-2) var(--ox-ease-soft);
   --tr-surface: background-color var(--ox-t-2) var(--ox-ease-soft),

@@ -108,14 +108,39 @@ p, code, pre,
 
 /* ── Focus ring propio ───────────────────────────────────────────────────────
    Solo con teclado (:focus-visible), nunca el outline azul del sistema.
-   Doble anillo: uno del color del fondo que despega, otro de luz. */
-:focus { outline: none; }
-:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--ox-bg), 0 0 0 3.5px var(--ox-ring);
-  border-radius: var(--ox-r-sm);
-  transition: box-shadow var(--ox-t-1) var(--ox-ease-soft);
+   Un anillo de luz de 1,5px, despegado 2px del control: llega 3,5px afuera.
+
+   Es un OUTLINE y no una sombra. Hecho con box-shadow, la sombra propia de
+   un control (el filete y la elevación del botón secundario, la del
+   primario, la de un hover) le ganaba —misma especificidad, hoja posterior—
+   y ese control no mostraba nunca el anillo con Tab. El outline es otra
+   propiedad: ninguna sombra lo pisa, y la del control sigue debajo. El
+   espacio entre los dos es transparente: se ve la superficie de atrás, sea
+   el fondo de la app o una hoja más clara (un modal, la botonera).
+
+   Lo enfocable lo lleva puesto en transparente desde antes, y el foco solo
+   le cambia el color: así se puede transicionar (motion-timing §5; de
+   `none` a un outline no hay nada que animar). Viaja con --tr-color, que
+   lleva outline-color. Con :where, sin especificidad: un control que dibuja
+   su propio anillo (el visor, las pestañas, las filas, el segmentado) gana
+   con su regla de siempre.
+
+   Lo que tiene data-sin-anillo es un foco DEVUELTO (al cerrar un modal, al
+   terminar de presentar, al volver al documento desde un campo; ver
+   foco.js): Chromium lo da por foco de teclado porque se cerró con Escape,
+   pero quien lo tenía no había llegado con Tab. Se apaga el color; doble
+   atributo para ganarle a los anillos propios, que van después. */
+:where(a[href], button, input, select, textarea, summary, [tabindex], [contenteditable]) {
+  outline: 1.5px solid transparent;
+  outline-offset: 2px;
 }
+:focus-visible {
+  outline: 1.5px solid var(--ox-ring);
+  outline-offset: 2px;
+  border-radius: var(--ox-r-sm);
+  transition: outline-color var(--ox-t-1) var(--ox-ease-soft);
+}
+[data-sin-anillo][data-sin-anillo]:focus-visible { outline-color: transparent; }
 
 /* ── Tipografía utilitaria ─────────────────────────────────────────────────── */
 .ox-display {

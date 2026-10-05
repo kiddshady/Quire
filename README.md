@@ -206,9 +206,9 @@ npm run verificar     # npm test y todas las suites con Electron, en orden
 | `npm run cerrar` | Levanta la app entera y la cierra: que el último trazo llegue al disco **y que la ventana siga cerrándose** porque el renderer contestó, no por el timeout |
 | `npm run caida` | Tira el renderer a propósito: la primera caída se recarga sola con la sesión, la segunda no, y con el renderer caído cerrar no espera |
 | `npm run cartel` | El cartel de actualizaciones: cómo se **relevan** sus pasos, muestreados cuadro por cuadro (nunca dos legibles a la vez) |
-| `npm run chrome` | Lo que vive fuera de la vista (titlebar, rail, statusbar, Abrir), Ajustes y los atajos del shell, medidos por cuadro; **soltar imágenes** fuera de Combinar lleva a Combinar con ellas cargadas; y, con la app de verdad en un proceso aparte, cerrar con cambios en Páginas y reabrir la sesión |
+| `npm run chrome` | Lo que vive fuera de la vista (titlebar, rail, statusbar, Abrir), Ajustes y los atajos del shell, medidos por cuadro; **soltar imágenes** fuera de Combinar lleva a Combinar con ellas cargadas; y, con la app de verdad en un proceso aparte, cerrar con cambios en Páginas y reabrir la sesión; y que al cerrar un modal con Escape el foco vuelva como estaba (sin el anillo si se abrió con un clic, con él si se llegó con Tab) |
 | `npm run humo` | Monta la app, abre un PDF, dibuja con un stylus sintético, imprime, organiza, exporta, y **afirma** dónde cae cada cosa |
-| `npm run smoke` | Las piezas del framework sobre la vitrina (overlays, fuente, re-tintado, anillos de foco en las siete vistas) y **la curva del fundido** al navegar y al repintar |
+| `npm run smoke` | Las piezas del framework sobre la vitrina (overlays, fuente, re-tintado, y en las siete vistas que ningún anillo de foco se corte y que todo lo enfocable muestre el suyo) y **la curva del fundido** al navegar y al repintar |
 | `npm run apertura` | Lanza la app **como proceso**, con un PDF en la línea de comandos |
 
 Suelto, fuera de verificar: `npm run color-ventana` mira qué color le manda la app a

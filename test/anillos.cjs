@@ -85,4 +85,53 @@ const auditarAnillos = (alcance = null) => `(((scope) => {
   return out;
 }))(${alcance ? `document.querySelector(${JSON.stringify(alcance)})` : 'document'})`;
 
-module.exports = { auditarAnillos };
+/* Y el otro lado: que ningún control enfocable se quede SIN anillo.
+
+   El anillo de base.css era una sombra, y la sombra propia de un control (el
+   filete y la elevación del botón secundario, la del primario, la de un
+   switch, un select o una tarjeta de modo) le ganaba por ir en una hoja
+   posterior: 39 controles de las seis vistas no mostraban nada con Tab. El
+   anillo pasó a ser un outline, y esto lo cuida. Cuenta como anillo
+   cualquiera de los que hay en la casa: el outline (el de base.css y los
+   propios del visor, las pestañas, las filas), una sombra que aparece con el
+   foco (el inset del segmentado y de los ítems de lista) o la del ::before
+   (los controles de ventana). Los campos de texto quedan afuera: dicen el
+   foco con su halo, y se les ve también al hacer clic. */
+const auditarSinAnillo = (alcance = null) => `(((scope) => {
+  if (!document.getElementById('aud-notr')) document.head.insertAdjacentHTML('beforeend', '<style id="aud-notr">*,*::before,*::after{transition:none!important}</style>');
+  const SEL = 'a[href],button:not([disabled]):not([tabindex="-1"]),input:not([disabled]):not([type=hidden]),select,textarea,[tabindex]:not([tabindex="-1"]),[contenteditable="true"]';
+  const anillo = (el) => {
+    const s = getComputedStyle(el);
+    const b = getComputedStyle(el, '::before');
+    return { sombra: s.boxShadow, antes: b.boxShadow + '|' + b.outlineStyle + b.outlineColor,
+      outline: s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0 && !/rgba\\(0, 0, 0, 0\\)/.test(s.outlineColor) };
+  };
+  const name = (el) => {
+    const id = el.id ? '#' + el.id : '';
+    const cls = [...el.classList].slice(0, 2).map((c) => '.' + c).join('');
+    const txt = (el.getAttribute('aria-label') || el.dataset.tip || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 24);
+    return el.tagName.toLowerCase() + id + cls + (txt ? ' «' + txt + '»' : '');
+  };
+  const out = [];
+  const foco = document.activeElement;
+  for (const el of scope.querySelectorAll(SEL)) {
+    if (el.closest('[inert],[hidden],[aria-hidden="true"]')) continue;
+    if (el.matches('.ox-input, .ox-textarea')) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) continue;
+    el.blur();
+    const quieto = anillo(el);
+    el.focus({ focusVisible: true, preventScroll: true });
+    if (document.activeElement !== el || !el.matches(':focus-visible')) { el.blur(); continue; }
+    const enfocado = anillo(el);
+    el.blur();
+    if (!enfocado.outline && enfocado.sombra === quieto.sombra && enfocado.antes === quieto.antes) out.push(name(el));
+  }
+  foco?.focus?.({ preventScroll: true });
+  document.getElementById('aud-notr')?.remove();
+  return out;
+}))(${alcance ? `document.querySelector(${JSON.stringify(alcance)})` : 'document'})`;
+
+module.exports = { auditarAnillos, auditarSinAnillo };

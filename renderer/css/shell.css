@@ -97,7 +97,7 @@
 .ox-wincontrol:active::before { background: var(--ox-wash-2); }
 .ox-wincontrol--close:hover { color: #fff; }
 .ox-wincontrol--close:hover::before { background: var(--ox-danger-dim); }
-.ox-wincontrol:focus-visible { box-shadow: none; }
+.ox-wincontrol:focus-visible { outline-color: transparent; box-shadow: none; }
 .ox-wincontrol:focus-visible::before { box-shadow: 0 0 0 2px var(--ox-bg), 0 0 0 3.5px var(--ox-ring); }
 .ox-wincontrol .ox-icon { width: 11px; height: 11px; stroke-width: 1.2; }
 

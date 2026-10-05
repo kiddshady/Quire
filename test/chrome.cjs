@@ -704,6 +704,71 @@ async function chrome() {
     if (win.isDestroyed()) return terminarChrome();
   }
 
+  /* ── 12. El foco que vuelve de un modal ─────────────────────────────────── */
+  console.log('\n12. El foco que vuelve de un modal');
+  {
+    /* Se abre con un clic y se cierra con Escape: Chromium da el foco que
+       vuelve al botón por foco de teclado (la última interacción fue una
+       tecla), y el botón quedaba con el anillo como si se hubiera llegado
+       con Tab. Vuelve como estaba (foco.js). Con el foco de la ventana: sin
+       él, :focus-visible no se aplica y esto pasaría con el bug puesto.
+       Emulado por DevTools, como en el smoke: sin robarle el teclado a Fran. */
+    try {
+      if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3');
+      await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+    } catch {
+      win.focus();
+      win.webContents.focus();
+    }
+    await esperar(80);
+    const caja = await js(`(async () => {
+      const { Modal } = await import('./js/overlays.js');
+      const b = document.createElement('button');
+      b.id = 'prueba-modal';
+      b.className = 'ox-btn ox-btn--ghost';
+      b.textContent = 'Abrir el modal';
+      Object.assign(b.style, { position: 'fixed', left: '600px', top: '400px', zIndex: 50 });
+      b.addEventListener('click', () => Modal.confirm({ title: 'Prueba', sub: 'Del foco que vuelve' }));
+      document.body.append(b);
+      const r = b.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2, foco: document.hasFocus() };
+    })()`);
+    ok('la ventana tiene el foco', caja.foco);
+    const raton = (type) => win.webContents.sendInputEvent({ type, x: Math.round(caja.x), y: Math.round(caja.y), button: 'left', clickCount: 1 });
+    raton('mouseMove');
+    await esperar(60);
+    raton('mouseDown');
+    raton('mouseUp');
+    await esperar(400);
+    ok('el clic abre el modal', await js(`(async () => (await import('./js/overlays.js')).Modal.isOpen)()`));
+    tecla('Escape');
+    await esperar(500);
+    const anillo = await js(`(() => {
+      const el = document.activeElement;
+      const s = getComputedStyle(el); const anillo = (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0 && !s.outlineColor.includes('0, 0, 0, 0')) || s.boxShadow.split('), ').some((p) => !p.includes('inset') && p.includes(' 3.5px'));
+      return { id: el.id, anillo, outline: s.outlineColor };
+    })()`);
+    ok('Escape lo cierra y el foco vuelve al botón', anillo.id === 'prueba-modal', JSON.stringify(anillo));
+    ok('sin el anillo pegado', !anillo.anillo, JSON.stringify(anillo));
+    /* Y al revés: quien llegó con el teclado y abrió con Enter recupera el
+       anillo al cerrar. Es la guarda del otro lado: que apagarlo al volver
+       del mouse no lo apague también para quien no usa el mouse. */
+    await js(`(() => { const b = document.getElementById('prueba-modal'); b.blur(); b.focus({ focusVisible: true }); return true; })()`);
+    await esperar(300);
+    const conTeclado = await js(`(() => { const el = document.activeElement; const s = getComputedStyle(el); const anillo = (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0 && !s.outlineColor.includes('0, 0, 0, 0')) || s.boxShadow.split('), ').some((p) => !p.includes('inset') && p.includes(' 3.5px')); return anillo; })()`);
+    ok('con el teclado, el botón tiene su anillo', conTeclado);
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
+    win.webContents.sendInputEvent({ type: 'char', keyCode: String.fromCharCode(13) });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
+    await esperar(400);
+    ok('Enter abre el modal', await js(`(async () => (await import('./js/overlays.js')).Modal.isOpen)()`));
+    tecla('Escape');
+    await esperar(500);
+    const vuelta = await js(`(() => { const el = document.activeElement; const s = getComputedStyle(el); const anillo = (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0 && !s.outlineColor.includes('0, 0, 0, 0')) || s.boxShadow.split('), ').some((p) => !p.includes('inset') && p.includes(' 3.5px')); return { id: el.id, anillo, outline: s.outlineColor }; })()`);
+    ok('al cerrarlo, el botón recupera el anillo', vuelta.id === 'prueba-modal' && vuelta.anillo, JSON.stringify(vuelta));
+    await js(`document.getElementById('prueba-modal').remove(); true`);
+  }
+
   return terminarChrome(win, consola);
 }
 

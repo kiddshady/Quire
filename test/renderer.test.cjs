@@ -16,7 +16,7 @@
 
 const { app, BrowserWindow, nativeImage } = require('electron');
 const { abandono, hasta, vigilarConsola, brillo, muestrearAca } = require('./_comun.cjs');
-const { auditarAnillos } = require('./anillos.cjs');
+const { auditarAnillos, auditarSinAnillo } = require('./anillos.cjs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
@@ -301,6 +301,7 @@ app.whenReady().then(async () => {
      adentro cuentan cero. */
   console.log('\n9. Ningún anillo de foco se corta');
   const AUDITAR_ANILLOS = auditarAnillos();
+  const AUDITAR_SIN_ANILLO = auditarSinAnillo();
   /* Sin foco en la ventana, :focus-visible no se aplica y todo anillo mide
      cero: la auditoría pasaría sin haber medido nada. El foco se EMULA por el
      protocolo de DevTools (la página cree que tiene el foco) en vez de
@@ -341,6 +342,8 @@ app.whenReady().then(async () => {
     await js(`document.querySelectorAll('#view tbody tr').forEach((tr) => tr.tabIndex = 0)`);
     const cortes = await js(AUDITAR_ANILLOS);
     ok(`${v}: ningún anillo de foco se corta ni roza un canto`, cortes.length === 0, '\n      ' + cortes.join('\n      '));
+    const sinAnillo = await js(AUDITAR_SIN_ANILLO);
+    ok(`${v}: todo lo enfocable muestra su anillo`, sinAnillo.length === 0, '\n      ' + sinAnillo.join('\n      '));
   }
 
   /* Con un documento abierto. Sin él, el lector pinta su estado vacío y sale:
@@ -360,6 +363,8 @@ app.whenReady().then(async () => {
     await sleep(nombre === 'imprimir' ? 2200 : 1200);
     const cortes = await js(AUDITAR_ANILLOS);
     ok(`${nombre}, con documento: ningún anillo de foco se corta`, cortes.length === 0, '\n      ' + cortes.join('\n      '));
+    const sinAnillo = await js(AUDITAR_SIN_ANILLO);
+    ok(`${nombre}, con documento: todo lo enfocable muestra su anillo`, sinAnillo.length === 0, '\n      ' + sinAnillo.join('\n      '));
   }
   await js(`document.getElementById('aud-notr')?.remove()`);
 

@@ -168,6 +168,12 @@
   background: var(--ox-bg);
   box-shadow: inset 0 0 0 1px var(--ox-line-3), 0 0 0 3px var(--ox-wash-1);
 }
+/* Un campo dice que tiene el foco con ese halo, no con el anillo de la casa:
+   Chromium le da :focus-visible a un campo de texto también al hacer clic,
+   y con el anillo (un outline, base.css) cada clic en un campo lo recuadraba.
+   Antes no se veía porque la sombra del halo le ganaba a la del anillo. */
+.ox-input:focus-visible,
+.ox-textarea:focus-visible { outline-color: transparent; }
 .ox-input.is-invalid,
 .ox-textarea.is-invalid { box-shadow: inset 0 0 0 1px var(--ox-danger-ring); }
 .ox-textarea { min-height: 88px; resize: vertical; line-height: var(--ox-lh); }
@@ -398,7 +404,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
 /* El anillo va hacia adentro, con las esquinas de la cápsula: el de base.css
    sale 3.5px por fuera y acá hay 2px de carril, así que se pisaba con el
    canto del control y con las opciones vecinas. */
-.ox-segmented__opt:focus-visible { box-shadow: inset 0 0 0 1.5px var(--ox-ring); border-radius: var(--ox-r-xs); }
+.ox-segmented__opt:focus-visible { outline-color: transparent; box-shadow: inset 0 0 0 1.5px var(--ox-ring); border-radius: var(--ox-r-xs); }
 .ox-segmented__opt:hover { color: var(--ox-text-2); }
 .ox-segmented__opt.is-active { color: var(--ox-text); }
 .ox-segmented__opt .ox-icon { width: 12px; height: 12px; }

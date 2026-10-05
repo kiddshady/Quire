@@ -7,6 +7,7 @@
 
 import { Icons } from './icons.js';
 import { exit, scrollFade } from './motion.js';
+import { tomarFoco, devolverFoco } from './foco.js';
 
 const GAP = 8;      // separación entre el overlay y su ancla
 const EDGE = 10;    // margen mínimo contra el borde de la ventana
@@ -372,7 +373,8 @@ const Modal = (() => {
     if (pisado) anim.classList.add('ox-modal__anim--pisada');
     exit(anim, { fallback: 300 });
     if (!pisado) exit(scrim, { fallback: 300 });
-    restore?.focus?.();
+    // Como estaba: el botón que abrió con un clic no vuelve con el anillo (foco.js).
+    devolverFoco(restore);
     resolve(result);
   }
   const close = (result) => cerrar(result);
@@ -543,7 +545,7 @@ const Modal = (() => {
       Icons.mount(modal);
       scrollFade(bodyEl);
 
-      open = { scrim, anim, resolve, restore: document.activeElement, botones };
+      open = { scrim, anim, resolve, restore: tomarFoco(), botones };
       document.addEventListener('keydown', onKey, true);
       anim.addEventListener('keydown', alEnter);
       setTimeout(() => {

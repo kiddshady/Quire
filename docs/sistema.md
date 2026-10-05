@@ -358,6 +358,35 @@ mismo, y de paso separa el botón principal de la navegación. `npm run smoke`
 lo mide en cada vista (9-bis): si sumás una pieza que pega su anillo contra un
 borde, falla ahí.
 
+### Todo lo enfocable lo muestra
+
+El anillo es un **outline** (1,5px, despegado 2px), no una sombra. Hecho con
+`box-shadow`, la sombra propia de un control le ganaba por ir en una hoja
+posterior con la misma especificidad: los botones secundarios y primarios,
+los selects, los switches, los checks y las tarjetas de modo de Imprimir no
+mostraban nada con Tab (39 controles en las seis vistas). El outline es otra
+propiedad, ninguna sombra lo pisa y la del control sigue debajo. Lo enfocable
+lo lleva puesto en transparente desde antes y el foco solo le cambia el color,
+que viaja con `--tr-color` (lleva `outline-color`).
+
+Una pieza que dibuja su propio anillo (inset, con `::before`) le apaga el de
+la casa con `outline-color: transparent` en su `:focus-visible`, como el
+`.ox-segmented__opt`, la `.ox-listitem` y el `.ox-wincontrol`. Los campos de
+texto también: dicen el foco con su halo, y Chromium les da `:focus-visible`
+al hacer clic. El smoke lo mide en cada vista: si sumás un control cuyo foco
+no se ve, falla ahí.
+
+### El foco que vuelve
+
+Al cerrar algo que se lo había llevado (un modal, la presentación), el foco
+vuelve a quien lo tenía **como lo tenía**: `tomarFoco()` al abrir y
+`devolverFoco()` al cerrar (`foco.js`). Si se cerró con Escape, Chromium da el
+foco devuelto por foco de teclado, y el botón que abriste con un clic quedaba
+con el anillo pegado. Con la marca `data-sin-anillo` no se le ve hasta el
+próximo blur; quien había llegado con Tab lo recupera. `enfocar(el)` es lo
+mismo para un foco que pone la app sin que nadie lo pida (volver al visor
+desde el campo de página).
+
 ### Dentro de la vista
 
 `head({ title, sub, crumbs, actions, linea })` de `ui.js` arma el

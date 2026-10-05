@@ -27,6 +27,7 @@ import { registrar as registrarSeleccion, olvidar as olvidarSeleccion, olvidarTo
 import { buscadorDe, ubicar } from '../pdf/buscador.js';
 import { alPedirClave } from '../pdf/documento.js';
 import { presentar } from '../presentar.js';
+import { enfocar } from '../foco.js';
 
 /* Los tokens de motion.css que se usan desde acá (t-2, t-3 y la curva de
    entrada): el giro espera a que la hoja termine de apagarse y el pliegue del
@@ -2688,15 +2689,9 @@ function devolverLugar() {
 /* Devuelve el foco al documento desde un campo (Enter o Escape) sin el
    anillo. El foco llega por una tecla y Chromium lo da por foco de teclado:
    el visor quedaba recuadrado después de cada salto de página. El anillo es
-   para quien LLEGA al visor con Tab, no para quien vuelve a leer.
-   `focus({ focusVisible: false })` lo arreglaría, pero Electron 40 lo ignora:
-   la marca lo apaga mientras dure este foco y se va con el blur. */
+   para quien LLEGA al visor con Tab, no para quien vuelve a leer (foco.js). */
 function devolverAlVisor() {
-  const visor = V.visor;
-  if (!visor) return;
-  visor.dataset.sinAnillo = '';
-  visor.addEventListener('blur', () => { delete visor.dataset.sinAnillo; }, { once: true });
-  visor.focus({ preventScroll: true });
+  enfocar(V.visor);
 }
 
 function cablear() {
