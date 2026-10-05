@@ -24,6 +24,14 @@
    La tinta de paso no toca el PDF ni la capa de tinta del lector: se borra
    al cambiar de diapositiva.
 
+   El ZOOM también es de la diapositiva y no de una pantalla: un factor y el
+   punto de la lámina que queda en el centro, en fracciones de su ancho y su
+   alto. Cada escenario con zoom (la sala y la principal; la siguiente no) lo
+   lleva a su rectángulo, y como el láser, la tinta y el puntero ya pasaban
+   por ese rectángulo, siguen al zoom sin saber que existe. Mientras se
+   acerca, la lámina de siempre se estira (borrosa); quieto, se pinta encima
+   el DETALLE: solo el pedazo que se ve, a la resolución que pide.
+
    El cambio de diapositiva es un FUNDIDO (motion-timing, regla 2): la vieja
    queda encima como calco opaco y se apaga, con la nueva quieta debajo desde
    el primer cuadro. La pantalla nunca queda destapada.
@@ -32,7 +40,7 @@
 import { S, alCambiar } from './estado.js';
 import { Icons } from './icons.js';
 import { Modal } from './overlays.js';
-import { exit, raf2, asentarPlegables } from './motion.js';
+import { exit, raf2, asentarPlegables, valor } from './motion.js';
 import { StrokeInput } from './tinta/stroke.js';
 import { contornoDeTrazo, trazoTocado } from './tinta/contorno.js';
 
@@ -72,6 +80,41 @@ const GOMA_RADIO = 18;
 const lapiz = { color: COLORES_LAPIZ[0].hex, grosor: 'medio' };
 const anchoLapiz = () => (GROSORES.find((g) => g.id === lapiz.grosor) || GROSORES[1]).ancho;
 
+/* El tamaño del láser: un factor sobre el punto de siempre (presentar.css
+   lo mide según la pantalla). Dura lo que la app, igual que el lápiz. */
+const TAMANOS_LASER = [
+  { id: 'chico', nombre: 'Chico', k: 0.65, punto: 5 },
+  { id: 'medio', nombre: 'Mediano', k: 1, punto: 8 },
+  { id: 'grande', nombre: 'Grande', k: 1.8, punto: 11 },
+];
+const laser = { tamano: 'medio' };
+const factorLaser = () => (TAMANOS_LASER.find((t) => t.id === laser.tamano) || TAMANOS_LASER[1]).k;
+
+/* Los pasos del zoom con + y −, y hasta dónde llega con la rueda. */
+const ZOOMS = [1, 1.5, 2, 3, 4, 6];
+const ZOOM_MAX = ZOOMS[ZOOMS.length - 1];
+/* Lo que tiene que estar quieto el zoom antes de pintar el detalle. */
+const AFINAR_MS = 160;
+/* Lo que se puede correr el mouse en un clic antes de que sea arrastrar. */
+const ARRASTRE_PX = 4;
+
+/* La curva expo-out de motion.css (--ox-ease), para el zoom que se anima
+   desde acá: un cubic-bezier(.16, 1, .3, 1) resuelto a mano. */
+function bezier(x1, y1, x2, y2) {
+  const c = (a, b, t) => 3 * a * t * (1 - t) ** 2 + 3 * b * t * t * (1 - t) + t ** 3;
+  return (x) => {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    let lo = 0; let hi = 1; let t = x;
+    for (let i = 0; i < 24; i++) {
+      t = (lo + hi) / 2;
+      if (c(x1, x2, t) < x) lo = t; else hi = t;
+    }
+    return c(y1, y2, t);
+  };
+}
+const curvaEase = bezier(0.16, 1, 0.3, 1);
+
 /* Cuántas láminas ya pintadas se guardan. Cada escenario pide la suya a su
    tamaño, así que con la sala, la actual y la siguiente son ~3 por página. */
 const LAMINAS_MAX = 12;
@@ -93,6 +136,9 @@ const P = {
   modo: null,          // null | 'laser' | 'lapiz'
   ctrl: false,
   puntero: null,       // dónde está el puntero sobre la principal (unidades de diapositiva)
+  zoom: { k: 1, fx: 0.5, fy: 0.5 },   // el factor y el centro, en fracciones de la lámina
+  zoomDestino: 1,      // adonde va el zoom que se está animando
+  zoomAncla: null,     // y hacia dónde: el ancla de esa animación
   trazos: [],
   vivo: null,          // el trazo que se está dibujando
   grilla: null,
@@ -140,7 +186,8 @@ function lamina(n, w, h, dpr) {
   while (laminas.size > LAMINAS_MAX) {
     const [vieja, p] = laminas.entries().next().value;
     laminas.delete(vieja);
-    p.then((c) => { c.width = 0; c.height = 0; }, () => {});
+    // La que está en pantalla no se suelta: el zoom la vuelve a estirar en cada cuadro.
+    p.then((c) => { if (!escenarios().some((e) => e.lienzo === c)) { c.width = 0; c.height = 0; } }, () => {});
   }
   return promesa;
 }
@@ -158,6 +205,19 @@ function rectDe(m, w, h) {
   return { x: (w - rw) / 2, y: (h - rh) / 2, w: rw, h: rh };
 }
 
+/** La lámina con el zoom `z` en un escenario de w × h. Acotada: lo que pasa
+    del escenario no deja ver fondo de un lado mientras sobra del otro, y lo
+    que entra entero va centrado. Cada escenario acota por su cuenta (la sala
+    y la principal no tienen la misma forma). */
+function rectZoom(base, w, h, z) {
+  if (!base || z.k <= 1) return base;
+  const rw = base.w * z.k;
+  const rh = base.h * z.k;
+  const x = rw <= w ? (w - rw) / 2 : Math.min(0, Math.max(w - rw, w / 2 - z.fx * rw));
+  const y = rh <= h ? (h - rh) / 2 : Math.min(0, Math.max(h - rh, h / 2 - z.fy * rh));
+  return { x, y, w: rw, h: rh };
+}
+
 /* ── El escenario ─────────────────────────────────────────────────────────────
    Una pantalla que muestra una diapositiva, en el documento que sea. */
 class Escenario {
@@ -171,6 +231,7 @@ class Escenario {
     this.doc = raiz.ownerDocument;
     this.win = this.doc.defaultView;
     this.siguiente = siguiente;
+    this.conZoom = tinta && !siguiente;
     raiz.innerHTML = `
       <div class="qr-esc__laminas"></div>
       ${tinta ? '<canvas class="qr-esc__tinta"></canvas><div class="qr-esc__laser"></div>' : ''}
@@ -184,7 +245,13 @@ class Escenario {
     this.n = 0;          // la que se ve
     this.pedida = 0;     // la última que se pidió (puede estar pintándose)
     this.gen = 0;
-    this.rect = null;
+    this.rect = null;    // dónde cae la lámina, con el zoom (px CSS del escenario)
+    this.base = null;    // dónde cae sin zoom
+    this.lienzo = null;  // la lámina pintada que se está mostrando
+    this.m = null;       // su medida en puntos
+    this.dims = null;    // { w, h, dpr } con que se armó el lienzo de la pantalla
+    this.detalle = null; // el pedazo nítido del zoom (ver afinar)
+    this.tareaDetalle = null;
     this.medidas = '';
     this.ro = new this.win.ResizeObserver(() => this.alCambiarTamano());
     this.ro.observe(raiz);
@@ -217,33 +284,19 @@ class Escenario {
     nuevo.className = 'qr-esc__lamina';
     nuevo.width = Math.max(1, Math.round(w * dpr));
     nuevo.height = Math.max(1, Math.round(h * dpr));
-    const ctx = nuevo.getContext('2d', { alpha: false });
-    ctx.fillStyle = this.fondo;
-    ctx.fillRect(0, 0, nuevo.width, nuevo.height);
-    this.rect = null;
-    if (lienzo && m) {
-      const r = rectDe(m, w, h);
-      this.rect = r;
-      ctx.drawImage(lienzo, r.x * dpr, r.y * dpr, r.w * dpr, r.h * dpr);
-      if (this.filete) {
-        ctx.strokeStyle = 'rgb(255 255 255 / .1)';
-        ctx.lineWidth = dpr;
-        ctx.strokeRect(r.x * dpr - dpr / 2, r.y * dpr - dpr / 2, r.w * dpr + dpr, r.h * dpr + dpr);
-      }
-    }
-    // El negro tapa la diapositiva, no el fondo que la rodea.
-    const r = this.rect;
-    Object.assign(this.velo.style, r
-      ? { inset: 'auto', left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` }
-      : { inset: '', left: '', top: '', width: '', height: '' });
+    const cambio = this.n !== n;
+    if (cambio) this.soltarDetalle();
+    this.lienzo = lienzo && m ? lienzo : null;
+    this.m = m;
+    this.dims = { w, h, dpr };
+    this.n = n;
+    this.pintar(nuevo);
 
     const viejo = this.actual;
     // Lo que todavía se iba de un cambio anterior se va ya: quedan dos, nunca tres.
     for (const c of [...this.capa.children]) if (c !== viejo) c.remove();
     this.capa.prepend(nuevo);   // debajo de la vieja: la vieja es el calco
     this.actual = nuevo;
-    const cambio = this.n !== n;
-    this.n = n;
     this.raiz.classList.toggle('is-fin', n > P.doc.paginas);
     this.raiz.dataset.n = String(n);
     this.dibujarTinta();
@@ -265,6 +318,87 @@ class Escenario {
     } else {
       viejo.remove();
     }
+    if (this.conZoom && P.zoom.k > 1) this.afinar();
+  }
+
+  /** Pinta la pantalla: el fondo, la lámina donde cae con el zoom y, si lo
+      hay, el detalle nítido encima. Se llama en cada cuadro del zoom. */
+  pintar(canvas = this.actual) {
+    if (!canvas || !this.dims) return;
+    const { w, h, dpr } = this.dims;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.fillStyle = this.fondo;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    this.base = this.lienzo ? rectDe(this.m, w, h) : null;
+    const r = this.conZoom ? rectZoom(this.base, w, h, P.zoom) : this.base;
+    this.rect = r;
+    if (r) {
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(this.lienzo, r.x * dpr, r.y * dpr, r.w * dpr, r.h * dpr);
+      // El detalle va en fracciones de la lámina: se mueve con ella aunque
+      // el zoom haya cambiado, hasta que llegue el nuevo.
+      const d = this.detalle;
+      if (d) ctx.drawImage(d.canvas, (r.x + d.fx * r.w) * dpr, (r.y + d.fy * r.h) * dpr, d.fw * r.w * dpr, d.fh * r.h * dpr);
+      if (this.filete) {
+        ctx.strokeStyle = 'rgb(255 255 255 / .1)';
+        ctx.lineWidth = dpr;
+        ctx.strokeRect(r.x * dpr - dpr / 2, r.y * dpr - dpr / 2, r.w * dpr + dpr, r.h * dpr + dpr);
+      }
+    }
+    // El negro tapa la diapositiva, no el fondo que la rodea.
+    Object.assign(this.velo.style, r
+      ? { inset: 'auto', left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` }
+      : { inset: '', left: '', top: '', width: '', height: '' });
+  }
+
+  /** Lo que cambia con el zoom: la lámina, la tinta y el láser. */
+  repintar() {
+    this.pintar();
+    this.dibujarTinta();
+    this.ponerLaser();
+  }
+
+  /* El detalle: con zoom, la lámina de siempre estirada se ve borrosa. Quieto
+     el zoom, se pinta con pdf.js SOLO el pedazo que se ve, a la escala que se
+     ve, y va encima. Mide lo que mide la pantalla, sea 150 % o 600 %. */
+  async afinar() {
+    this.cancelarDetalle();
+    const r = this.rect;
+    if (!this.conZoom || P.zoom.k <= 1 || !r || !this.dims || !this.m) return;
+    const { w, h, dpr } = this.dims;
+    const x0 = Math.floor(Math.max(0, -r.x) * dpr);
+    const y0 = Math.floor(Math.max(0, -r.y) * dpr);
+    const x1 = Math.ceil((Math.min(w, r.x + r.w) - r.x) * dpr);
+    const y1 = Math.ceil((Math.min(h, r.y + r.h) - r.y) * dpr);
+    if (x1 <= x0 || y1 <= y0) return;
+    const n = this.n;
+    const canvas = document.createElement('canvas');
+    const tarea = P.doc.render(n, {
+      canvas, escala: r.w / this.m.ancho, dpr, rotacionExtra: P.rot,
+      recorte: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+    });
+    this.tareaDetalle = tarea;
+    const hecho = await tarea.promesa.catch(() => null);
+    if (this.tareaDetalle !== tarea) { canvas.width = 0; canvas.height = 0; return; }
+    this.tareaDetalle = null;
+    if (!hecho || n !== this.n || !P.activa) { canvas.width = 0; canvas.height = 0; return; }
+    const W = r.w * dpr;
+    const H = r.h * dpr;
+    const viejo = this.detalle;
+    this.detalle = { canvas, fx: x0 / W, fy: y0 / H, fw: canvas.width / W, fh: canvas.height / H };
+    if (viejo) { viejo.canvas.width = 0; viejo.canvas.height = 0; }
+    this.pintar();
+  }
+
+  cancelarDetalle() {
+    this.tareaDetalle?.cancelar();
+    this.tareaDetalle = null;
+  }
+
+  soltarDetalle() {
+    this.cancelarDetalle();
+    if (this.detalle) { this.detalle.canvas.width = 0; this.detalle.canvas.height = 0; }
+    this.detalle = null;
   }
 
   alCambiarTamano() {
@@ -318,6 +452,7 @@ class Escenario {
     const r = this.rect;
     const on = !!(p && r);
     if (on) this.punto.style.transform = `translate(${(r.x + (p.x / U) * r.w).toFixed(1)}px, ${(r.y + (p.y / U) * r.w).toFixed(1)}px)`;
+    this.punto.style.setProperty('--k', factorLaser());
     this.punto.classList.toggle('is-on', on);
   }
 
@@ -330,6 +465,8 @@ class Escenario {
 
   destruir() {
     this.ro.disconnect();
+    this.soltarDetalle();
+    this.lienzo = null;
     for (const c of this.capa.querySelectorAll('canvas')) { c.width = 0; c.height = 0; }
   }
 }
@@ -351,6 +488,13 @@ function ir(n) {
   P.trazos = [];
   P.vivo = null;
   P.n = n;
+  /* La diapositiva nueva llega sin zoom. La vieja se funde con el suyo: su
+     calco ya está pintado y no se vuelve a tocar. */
+  cortarZoom();
+  P.zoom = { k: 1, fx: 0.5, fy: 0.5 };
+  P.zoomDestino = 1;
+  P.raiz?.classList.remove('is-zoom');
+  marcarZoom();
   mostrarTodo();
   actualizarTextos();
   precargar();
@@ -437,13 +581,154 @@ function borrarTinta() {
   setTimeout(listo, T2 + 120);
 }
 
+/* ── El zoom ──────────────────────────────────────────────────────────────────
+   Con + y −, Ctrl+rueda (o el pellizco del trackpad, que llega igual) y la
+   botonera. Acerca hacia donde está el puntero si está sobre la diapositiva
+   —apuntás con el láser y apretás +— y si no, hacia el centro. Con zoom, la
+   rueda y arrastrar mueven la lámina; las flechas y el presentador siguen
+   pasando diapositivas, y cambiar de diapositiva lo vuelve a 100 %. */
+
+const conZoom = () => escenarios().filter((e) => e.conZoom);
+
+/** El zoom que deja el punto del ancla donde está, con factor k. Sin ancla,
+    el centro de la principal. Acotado como la principal lo puede mostrar:
+    es la que manda. */
+function zoomEn(k, ancla) {
+  const e = P.esc.principal;
+  const { w, h } = e.dims;
+  const r = e.rect;
+  const px = ancla ? ancla.px : w / 2;
+  const py = ancla ? ancla.py : h / 2;
+  const qx = ancla ? ancla.qx : (px - r.x) / r.w;
+  const qy = ancla ? ancla.qy : (py - r.y) / r.h;
+  return acotar({ k, fx: (w / 2 - px) / (e.base.w * k) + qx, fy: (h / 2 - py) / (e.base.h * k) + qy });
+}
+
+function acotar(z) {
+  const e = P.esc.principal;
+  const { w, h } = e.dims;
+  const k = Math.max(1, Math.min(ZOOM_MAX, z.k));
+  if (k <= 1) return { k: 1, fx: 0.5, fy: 0.5 };
+  const r = rectZoom(e.base, w, h, { ...z, k });
+  return { k, fx: (w / 2 - r.x) / r.w, fy: (h / 2 - r.y) / r.h };
+}
+
+/** El ancla: qué punto de la lámina (en fracciones) tiene que quedar bajo pt. */
+function anclar(pt) {
+  const r = P.esc.principal?.rect;
+  if (!pt || !r) return null;
+  return { px: pt.x, py: pt.y, qx: (pt.x - r.x) / r.w, qy: (pt.y - r.y) / r.h };
+}
+
+/* Dónde está el puntero sobre la principal, en sus px; null si no está. */
+function punteroEnPrincipal() {
+  const p = P.puntero;
+  const r = P.esc.principal?.rect;
+  if (!p || !r) return null;
+  return { x: r.x + (p.x / U) * r.w, y: r.y + (p.y / U) * r.w };
+}
+
+let afinarReloj = null;
+function ponerZoom(z) {
+  P.zoom = z;
+  for (const e of conZoom()) e.repintar();
+  P.raiz?.classList.toggle('is-zoom', z.k > 1);
+  /* El detalle, cuando el zoom se queda quieto. Sin zoom ya no hace falta:
+     a 100 % la lámina de siempre es nítida. */
+  clearTimeout(afinarReloj);
+  if (z.k > 1) afinarReloj = setTimeout(() => conZoom().forEach((e) => e.afinar()), AFINAR_MS);
+  else conZoom().forEach((e) => { if (e.detalle || e.tareaDetalle) { e.soltarDetalle(); e.pintar(); } });
+}
+
+/* El zoom que se anima (+, −, la botonera, volver a 100 %): el factor viaja
+   en escala logarítmica —cada cuadro acerca lo mismo— con la curva de
+   entrada, y el ancla queda quieta todo el camino. Con su plazo de red
+   (motion-timing, regla 1): si los cuadros no llegan, el zoom llega igual. */
+let zoomGen = 0;
+function cortarZoom() { zoomGen++; }
+
+function animarZoom(k1, ancla) {
+  if (!P.esc.principal?.rect) return;
+  const gen = ++zoomGen;
+  const k0 = P.zoom.k;
+  k1 = Math.max(1, Math.min(ZOOM_MAX, k1));
+  P.zoomDestino = k1;
+  P.zoomAncla = ancla;
+  marcarZoom();
+  const final = () => zoomEn(k1, ancla);
+  if (Math.abs(k1 - k0) < 1e-3) { ponerZoom(final()); return; }
+  const t0 = performance.now();
+  const paso = () => {
+    if (gen !== zoomGen || !P.activa) return;
+    const t = Math.min(1, (performance.now() - t0) / T3);
+    ponerZoom(t >= 1 ? final() : zoomEn(k0 * Math.pow(k1 / k0, curvaEase(t)), ancla));
+    if (t < 1) requestAnimationFrame(paso);
+  };
+  requestAnimationFrame(paso);
+  setTimeout(() => {
+    if (gen !== zoomGen || !P.activa) return;
+    zoomGen++;
+    ponerZoom(final());
+  }, T3 + 120);
+}
+
+/** Un paso del zoom: al que sigue de ZOOMS, desde adonde ya iba. */
+function zoomPaso(dir) {
+  const k = P.zoomDestino;
+  const sig = dir > 0 ? ZOOMS.find((z) => z > k + 1e-3) : [...ZOOMS].reverse().find((z) => z < k - 1e-3);
+  if (sig === undefined) return;
+  /* A mitad de una animación sigue con el ancla de la que corre: ese punto
+     de la lámina está quieto bajo el mismo lugar todo el camino, así que
+     + + + sigue acercando hacia donde apuntabas. */
+  const quieto = Math.abs(P.zoom.k - k) < 1e-3;
+  animarZoom(sig, quieto ? anclar(punteroEnPrincipal()) : P.zoomAncla);
+}
+
+function zoomCien() {
+  if (P.zoomDestino <= 1 && P.zoom.k <= 1) return;
+  animarZoom(1, null);
+}
+
+/* Ctrl+rueda y el pellizco: en vivo, sin animar (el gesto ya es continuo). */
+function zoomRueda(e, pt) {
+  if (!P.esc.principal?.rect) return;
+  cortarZoom();
+  const k = Math.max(1, Math.min(ZOOM_MAX, P.zoom.k * Math.exp(-e.deltaY * 0.0025)));
+  ponerZoom(zoomEn(k, anclar(pt)));
+  P.zoomDestino = P.zoom.k;
+  marcarZoom();
+}
+
+/** Corre la vista dx, dy px de la principal (la lámina va para el otro lado). */
+function correr(dx, dy) {
+  const e = P.esc.principal;
+  if (P.zoom.k <= 1 || !e?.rect) return;
+  cortarZoom();
+  P.zoomDestino = P.zoom.k;
+  ponerZoom(acotar({ k: P.zoom.k, fx: P.zoom.fx + dx / e.rect.w, fy: P.zoom.fy + dy / e.rect.h }));
+}
+
+/* El número de la botonera dice adonde va, no cada cuadro del camino. */
+function marcarZoom() {
+  if (!P.raiz) return;
+  const k = P.zoomDestino;
+  for (const el of P.raiz.querySelectorAll('[data-zoom]')) {
+    valor(el, `${Math.round(k * 100)}%`);
+    el.disabled = k <= 1;
+  }
+  for (const b of P.raiz.querySelectorAll('[data-act="alejar"]')) b.disabled = k <= 1;
+  for (const b of P.raiz.querySelectorAll('[data-act="acercar"]')) b.disabled = k >= ZOOM_MAX;
+}
+
 /* El puntero sobre la principal: el láser, la tinta y el clic que avanza. */
 function cablearPuntero(esc) {
   let dibujando = false;
   let borrando = false;
+  let arrastre = null;   // con zoom, arrastrar mueve la lámina
   const borrarEn = (q) => {
     const antes = P.trazos.length;
-    P.trazos = P.trazos.filter((t) => !trazoTocado(t, q.x, q.y, GOMA_RADIO));
+    // La goma y el lápiz miden lo mismo en pantalla con zoom o sin él.
+    P.trazos = P.trazos.filter((t) => !trazoTocado(t, q.x, q.y, GOMA_RADIO / P.zoom.k));
     if (P.trazos.length !== antes) dibujarTintaEnTodos();
   };
   const entrada = new StrokeInput(esc.raiz, {
@@ -452,14 +737,28 @@ function cablearPuntero(esc) {
       if (mods.eraser) { borrando = true; if (q) borrarEn(q); return; }
       if (P.modo === 'lapiz' && q && mods.button === 0) {
         dibujando = true;
-        P.vivo = { puntos: [[q.x, q.y, pt.p]], ancho: anchoLapiz(), color: lapiz.color };
+        P.vivo = { puntos: [[q.x, q.y, pt.p]], ancho: anchoLapiz() / P.zoom.k, color: lapiz.color };
         dibujarTintaEnTodos();
         return;
       }
       if (P.modo === 'laser' || P.ctrl) { P.puntero = q; ponerLaserEnTodos(); return; }
+      /* Con zoom, el clic espera a soltarse: si se arrastró, movió la lámina;
+         si no, avanza como siempre. El botón del medio solo arrastra. */
+      if (P.zoom.k > 1 && (mods.button === 0 || mods.button === 1)) {
+        arrastre = { x: pt.x, y: pt.y, x0: pt.x, y0: pt.y, boton: mods.button, movio: false };
+        P.raiz?.classList.add('is-arrastrando');
+        return;
+      }
       if (mods.button === 0) avanzar();
     },
     move(pt) {
+      if (arrastre) {
+        correr(arrastre.x - pt.x, arrastre.y - pt.y);
+        arrastre.x = pt.x;
+        arrastre.y = pt.y;
+        if (Math.hypot(pt.x - arrastre.x0, pt.y - arrastre.y0) > ARRASTRE_PX) arrastre.movio = true;
+        return;
+      }
       const q = esc.aDiapositiva(pt.x, pt.y);
       if (borrando) { if (q) borrarEn(q); return; }
       if (dibujando && q) {
@@ -471,6 +770,13 @@ function cablearPuntero(esc) {
       ponerLaserEnTodos();
     },
     end() {
+      if (arrastre) {
+        const clic = !arrastre.movio && arrastre.boton === 0;
+        arrastre = null;
+        P.raiz?.classList.remove('is-arrastrando');
+        if (clic) avanzar();
+        return;
+      }
       if (dibujando && P.vivo) {
         P.vivo.contorno = contorno(P.vivo);
         P.trazos.push(P.vivo);
@@ -487,17 +793,26 @@ function cablearPuntero(esc) {
       ponerLaserEnTodos();
     },
     leave() { P.puntero = null; ponerLaserEnTodos(); },
-    wheel: (e) => rueda(e),
+    wheel: (e, x, y) => rueda(e, { x, y }),
   });
   return entrada;
 }
 
 /* La rueda pasa diapositivas, una por gesto: un trackpad manda decenas de
-   eventos por cada deslizada. */
+   eventos por cada deslizada. Con Ctrl acerca, y con zoom mueve la lámina
+   (con Mayús, de costado). `pt` es dónde cayó en la principal; en la sala
+   no hay, y el zoom va hacia el centro. */
 let ruedaAcum = 0;
 let ruedaHasta = 0;
-function rueda(e) {
+function rueda(e, pt = null) {
   e.preventDefault?.();
+  if (!P.listo) return;
+  if (e.ctrlKey) { zoomRueda(e, pt); return; }
+  if (P.zoom.k > 1) {
+    const deCostado = e.shiftKey && !e.deltaX;
+    correr(deCostado ? e.deltaY : e.deltaX, deCostado ? 0 : e.deltaY);
+    return;
+  }
   const ahora = performance.now();
   if (ahora < ruedaHasta) return;
   ruedaAcum += e.deltaY;
@@ -558,6 +873,13 @@ function botonera() {
     ${boton('siguiente', 'chevronRight', 'Siguiente', '→')}
     <div class="ox-vr"></div>
     ${boton('laser', 'laser', 'Puntero láser', 'L', { toggle: true })}
+    <!-- El tamaño del láser, plegado igual que el color del lápiz: solo con
+         el láser prendido. -->
+    <div class="qr-pres__tams ox-plegable--ancho" data-tams-laser hidden>
+      <div class="ox-vr"></div>
+      ${TAMANOS_LASER.map((t) => `<button class="ox-iconbtn qr-tool qr-pres__grosor" data-tam-laser="${t.id}" data-tip="Láser ${t.nombre.toLowerCase()}" data-tip-side="top"><span style="--d:${t.punto}px"></span></button>`).join('')}
+      <div class="ox-vr"></div>
+    </div>
     ${boton('lapiz', 'tinta', 'Dibujar encima', 'D', { toggle: true })}
     <!-- El color y el grosor solo con el lápiz prendido: se despliegan a lo
          ancho al apretar D y se pliegan al soltarlo. -->
@@ -570,7 +892,11 @@ function botonera() {
     ${boton('borrar', 'borrador', 'Borrar lo dibujado', 'E')}
     <div class="ox-vr"></div>
     ${boton('negro', 'pantallaNegra', 'Pantalla en negro', 'B', { toggle: true })}
-    ${boton('grilla', 'grid', 'Todas las diapositivas', 'G')}`;
+    ${boton('grilla', 'grid', 'Todas las diapositivas', 'G')}
+    <div class="ox-vr"></div>
+    ${boton('alejar', 'zoomOut', 'Alejar', '-')}
+    <button class="ox-btn ox-btn--ghost ox-btn--sm qr-pres__zoom" data-act="cien" data-zoom data-tip="Volver al 100 %" data-tip-key="Esc" data-tip-side="top">${Math.round(P.zoomDestino * 100)}%</button>
+    ${boton('acercar', 'zoomIn', 'Acercar', '+')}`;
 }
 
 function htmlSola() {
@@ -633,6 +959,8 @@ function armar() {
   P.raiz.querySelector('.qr-pres__reloj')?.classList.toggle('is-oculto', !P.reloj.verlo);
   actualizarTextos();
   marcarBotones();
+  marcarZoom();
+  P.raiz.classList.toggle('is-zoom', P.zoom.k > 1);
   // Si se rearma con el lápiz prendido, su color y grosor nacen en su lugar.
   asentarPlegables(raiz);
   tic();
@@ -662,6 +990,8 @@ function marcarBotones() {
   for (const el of P.raiz.querySelectorAll('[data-lapiz]')) el.hidden = P.modo !== 'lapiz';
   for (const b of P.raiz.querySelectorAll('[data-color]')) b.classList.toggle('is-on', b.dataset.color === lapiz.color);
   for (const b of P.raiz.querySelectorAll('[data-grosor]')) b.classList.toggle('is-on', b.dataset.grosor === lapiz.grosor);
+  for (const el of P.raiz.querySelectorAll('[data-tams-laser]')) el.hidden = P.modo !== 'laser';
+  for (const b of P.raiz.querySelectorAll('[data-tam-laser]')) b.classList.toggle('is-on', b.dataset.tamLaser === laser.tamano);
   const pausa = P.raiz.querySelector('.qr-orador__reloj [data-act="pausar"]');
   if (pausa) {
     pausa.dataset.tip = P.reloj.pausa ? 'Seguir con el cronómetro' : 'Pausar el cronómetro';
@@ -686,6 +1016,9 @@ function accion(act) {
     case 'borrar': borrarTinta(); break;
     case 'negro': ponerNegro(!P.negro); break;
     case 'grilla': P.grilla ? cerrarGrilla() : abrirGrilla(); break;
+    case 'acercar': zoomPaso(1); break;
+    case 'alejar': zoomPaso(-1); break;
+    case 'cien': zoomCien(); break;
     case 'pausar': pausarReloj(); break;
     case 'reiniciar': reiniciarReloj(); break;
     case 'intercambiar': intercambiar(); break;
@@ -775,7 +1108,6 @@ function cerrarGrilla({ ir: destino = null } = {}) {
   const el = P.grilla;
   if (!el) return;
   P.grilla = null;
-  el.classList.remove('is-settled');
   exit(el, { fallback: 300 });
   if (destino) ir(destino);
   P.raiz?.focus({ preventScroll: true });
@@ -819,10 +1151,15 @@ function tecla(e) {
 
   if (P.grilla) { teclaGrilla(e); return; }
 
+  // El zoom, también con Ctrl (la costumbre del navegador y del lector).
+  if (k === '+' || k === '=') { zoomPaso(1); return; }
+  if (k === '-' || k === '_') { zoomPaso(-1); return; }
+  if (k === '0' && e.ctrlKey) { zoomCien(); return; }
   if (/^[0-9]$/.test(k) && !e.ctrlKey) { if (P.digitos.length < 4) ponerSalto(P.digitos + k); return; }
   if (k === 'Enter' && P.digitos) { const n = +P.digitos; ponerSalto(''); if (n) ir(n); return; }
   if (k === 'Escape') {
     if (P.digitos) ponerSalto('');
+    else if (P.zoomDestino > 1) zoomCien();
     else if (P.modo) ponerModo(P.modo);
     else terminar();
     return;
@@ -945,6 +1282,9 @@ export async function presentar({ desde = 1, alTerminar = null } = {}) {
     modo: null,
     ctrl: false,
     puntero: null,
+    zoom: { k: 1, fx: 0.5, fy: 0.5 },
+    zoomDestino: 1,
+    zoomAncla: null,
     trazos: [],
     vivo: null,
     grilla: null,
@@ -970,6 +1310,8 @@ export async function presentar({ desde = 1, alTerminar = null } = {}) {
     if (color) { lapiz.color = color.dataset.color; marcarBotones(); return; }
     const grosor = e.target.closest('[data-grosor]');
     if (grosor) { lapiz.grosor = grosor.dataset.grosor; marcarBotones(); return; }
+    const tam = e.target.closest('[data-tam-laser]');
+    if (tam) { laser.tamano = tam.dataset.tamLaser; marcarBotones(); ponerLaserEnTodos(); return; }
     const ir2 = e.target.closest('[data-ir]');
     if (ir2) { cerrarGrilla({ ir: +ir2.dataset.ir }); return; }
     const b = e.target.closest('[data-act]');
@@ -1023,6 +1365,8 @@ export async function terminar({ rapido = false } = {}) {
   cerrarGrilla();
   clearInterval(P.tic);
   clearTimeout(P.quieto);
+  clearTimeout(afinarReloj);
+  cortarZoom();
   ponerSalto('');
 
   if (!rapido) {
@@ -1043,7 +1387,12 @@ export async function terminar({ rapido = false } = {}) {
   if (S.doc === P.doc) P.alTerminar?.(final);
   P.doc = null;
   P.raiz = null;
-  raiz.classList.remove('is-settled');
+  /* Sin sacarle `is-settled`: la regla de salida ya le gana por orden
+     (presentar.css). Sacándola, la ENTRADA volvía a correr desde opacidad 0
+     los dos cuadros del raf2 —la capa invisible, el lector a pleno sobre el
+     negro— y la salida la volvía a poner opaca de golpe. Se veía o no según
+     Windows mostrara esos cuadros mientras la ventana salía de la pantalla
+     completa: el parpadeo de «a veces» al terminar. */
   await new Promise((r) => raf2(r));
   exit(raiz, { fallback: 500 });
   if (P.foco?.isConnected) P.foco.focus({ preventScroll: true });
@@ -1057,10 +1406,17 @@ window.__quirePresentacion = () => ({
   dual: P.dual,
   negro: P.negro,
   modo: P.modo,
+  ctrl: P.ctrl,
   trazos: P.trazos.length,
   grilla: !!P.grilla,
   sala: !!P.sala,
   pausado: !!P.reloj.pausa,
   laminas: laminas.size,
+  zoom: { ...P.zoom },
+  zoomDestino: P.zoomDestino,
+  laser: laser.tamano,
+  detalle: !!P.esc.principal?.detalle,
+  rect: P.esc.principal?.rect ? { ...P.esc.principal.rect } : null,
+  rectSala: P.esc.sala?.rect ? { ...P.esc.sala.rect } : null,
 });
 window.__quireSala = () => P.sala?.document || null;

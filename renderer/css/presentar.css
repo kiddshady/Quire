@@ -67,23 +67,35 @@
   pointer-events: none;
 }
 
-/* El láser: un punto rojo con su halo. Se mueve con transform (lo pone
-   presentar.js) y aparece y se va por opacidad. */
+/* El láser: un punto rojo con su halo. El elemento es solo el LUGAR (un
+   punto de 0 × 0 que presentar.js mueve con transform); el dibujo va en el
+   ::before, que crece y se achica con el tamaño elegido (--k) alrededor de
+   ese punto. Con `scale` en el mismo elemento que se traslada, el factor
+   multiplicaba también el corrimiento y el punto se iba de donde apuntabas. */
 .qr-esc__laser {
-  --d: clamp(12px, 1.9vmin, 30px);
   position: absolute;
   left: 0;
   top: 0;
-  width: var(--d);
-  height: var(--d);
-  margin: calc(var(--d) / -2) 0 0 calc(var(--d) / -2);
-  border-radius: 50%;
-  background: radial-gradient(circle, #fff 0 16%, #ff3030 42%, rgb(255 48 48 / 0) 72%);
-  box-shadow: 0 0 calc(var(--d) * .7) calc(var(--d) * .2) rgb(255 40 40 / .5);
+  width: 0;
+  height: 0;
   opacity: 0;
   pointer-events: none;
   will-change: transform;
   transition: opacity var(--ox-t-1) var(--ox-ease-soft);
+}
+.qr-esc__laser::before {
+  --d: clamp(12px, 1.9vmin, 30px);
+  content: '';
+  position: absolute;
+  left: calc(var(--d) / -2);
+  top: calc(var(--d) / -2);
+  width: var(--d);
+  height: var(--d);
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 16%, #ff3030 42%, rgb(255 48 48 / 0) 72%);
+  box-shadow: 0 0 calc(var(--d) * .7) calc(var(--d) * .2) rgb(255 40 40 / .5);
+  scale: var(--k, 1);
+  transition: scale var(--ox-t-2) var(--ox-ease);
 }
 .qr-esc__laser.is-on { opacity: 1; }
 
@@ -126,7 +138,10 @@
   font: var(--ox-w-medium) var(--ox-fs-12) / 1 var(--ox-font);
 }
 
-/* El cursor: el láser lo reemplaza, y para dibujar va la cruz. */
+/* El cursor: el láser lo reemplaza, y para dibujar va la cruz. Con zoom,
+   la mano: arrastrar mueve la lámina. */
+.qr-pres.is-zoom .qr-esc--principal { cursor: grab; }
+.qr-pres.is-arrastrando .qr-esc--principal { cursor: grabbing; }
 .qr-pres.is-laser .qr-esc--principal { cursor: none; }
 .qr-pres.is-lapiz .qr-esc--principal { cursor: crosshair; }
 
@@ -162,6 +177,22 @@
   color: var(--ox-text-2);
   font-size: var(--ox-fs-12);
   text-align: center;
+}
+
+/* El zoom: el número dice adonde va, y un clic lo vuelve a 100 %. Ancho
+   fijo para que 100 % y 150 % no corran los botones de al lado. */
+.qr-pres__zoom {
+  min-width: 52px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* El tamaño del láser, igual: plegado mientras el láser está apagado, con
+   un punto de cada tamaño. */
+.qr-pres__tams {
+  display: flex;
+  align-items: center;
+  gap: var(--ox-1);
 }
 
 /* El color y el grosor del lápiz, plegados a lo ancho mientras el lápiz está

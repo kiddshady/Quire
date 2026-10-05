@@ -327,6 +327,36 @@ app.whenReady().then(async () => {
     ok('al soltar el lápiz se pliegan', await js(`document.querySelector('[data-lapiz]').hidden`));
   });
 
+  await bloque('el tamaño del láser', async () => {
+    const tamano = () => js(`(() => {
+      const l = document.querySelector('.qr-esc--principal .qr-esc__laser');
+      return { scale: getComputedStyle(l, '::before').scale, transform: l.style.transform };
+    })()`);
+    ok('con el láser apagado no hay tamaños', await js(`document.querySelector('[data-tams-laser]').hidden`));
+    await tecla('L');
+    await esperar(400);
+    const abierto = await js(`(() => { const el = document.querySelector('[data-tams-laser]'); return { hidden: el.hidden, ancho: el.getBoundingClientRect().width }; })()`);
+    ok('L despliega los tamaños', !abierto.hidden && abierto.ancho > 80, JSON.stringify(abierto));
+    ok('arranca mediano', await js(`!!document.querySelector('[data-tam-laser="medio"].is-on')`));
+    await clicEn('[data-tam-laser="grande"]');
+    const c = await centroPrincipal();
+    raton('mouseMove', c.x + 100, c.y + 50);
+    await esperar(400);
+    const grande = await tamano();
+    ok('el grande agranda el punto', grande.scale === '1.8', JSON.stringify(grande));
+    const m = /translate\(([\d.]+)px, ([\d.]+)px\)/.exec(grande.transform);
+    ok('y sigue donde está el mouse', m && Math.abs(+m[1] - (c.b.w / 2 + 100)) < 2 && Math.abs(+m[2] - (c.b.h / 2 + 50)) < 2, grande.transform);
+    await clicEn('[data-tam-laser="chico"]');
+    raton('mouseMove', c.x + 100, c.y + 50);
+    await esperar(400);
+    ok('el chico lo achica', (await tamano()).scale === '0.65');
+    ok('elegir no cambia de diapositiva', (await estado()).n === 4 && (await estado()).laser === 'chico');
+    await clicEn('[data-tam-laser="medio"]');
+    await tecla('L');
+    await esperar(400);
+    ok('al soltar el láser se pliegan', await js(`document.querySelector('[data-tams-laser]').hidden`));
+  });
+
   await bloque('la grilla', async () => {
     await tecla('G');
     await esperar(300);
@@ -359,10 +389,108 @@ app.whenReady().then(async () => {
     ok('Ctrl+W no cierra el documento de atrás', await js(`(async () => !!(await import('./js/estado.js')).S.doc)()`));
   });
 
+  /* El cuadrado blanco de cada lámina: x 40–100 e y 40–100 de 960 × 540,
+     contando desde arriba. Su centro es la mira del zoom. */
+  const miraBlanca = async () => {
+    const r = (await estado()).rect;
+    const b = await js(`T.caja('.qr-esc--principal')`);
+    return { x: r.x + r.w * 70 / 960, y: r.y + r.h * 70 / 540, b };
+  };
+  const blanco = (px) => px && px[0] > 235 && px[1] > 235 && px[2] > 235;
+
+  await bloque('el zoom', async () => {
+    const a = await miraBlanca();
+    // 120 px a la derecha de la mira: lámina de color a 100 %, cuadrado blanco a 400 %.
+    const costado = () => js(`T.pixel('.qr-esc--principal', ${(a.x + 120) / a.b.w}, ${a.y / a.b.h})`);
+    ok('a 100 %, al costado del cuadrado hay color', !blanco(await costado()), JSON.stringify(await costado()));
+    raton('mouseMove', a.b.x + a.x, a.b.y + a.y);
+    await esperar(120);
+    await tecla('=');
+    ok('+ dice adonde va', (await js(`document.querySelector('[data-zoom]').textContent`)).includes('150%'));
+    await esperar(450);
+    let e = await estado();
+    ok('+ acerca a 150 %', Math.abs(e.zoom.k - 1.5) < 1e-6, JSON.stringify(e.zoom));
+    const q = { x: (a.x - e.rect.x) / e.rect.w, y: (a.y - e.rect.y) / e.rect.h };
+    ok('hacia donde está el mouse: el punto de abajo no se mueve', Math.abs(q.x - 70 / 960) < 0.002 && Math.abs(q.y - 70 / 540) < 0.002, JSON.stringify(q));
+    for (let i = 0; i < 3; i++) await tecla('=');
+    await esperar(500);
+    e = await estado();
+    ok('tres pasos más llegan a 400 %', Math.abs(e.zoom.k - 4) < 1e-6 && e.zoomDestino === 4, JSON.stringify(e.zoom));
+    ok('y al costado del mouse ya es el cuadrado', blanco(await costado()), JSON.stringify(await costado()));
+    await hasta(async () => (await estado()).detalle, 3000, 'no llegó el detalle').catch(() => {});
+    ok('quieto, se pinta el detalle nítido', (await estado()).detalle);
+    /* Nítido de verdad: el borde del cuadrado pasa de blanco a color en
+       pocos píxeles. Estirada, la lámina de 1280 px a 400 % lo desparrama. */
+    const borde = await js(`(() => {
+      const r = window.__quirePresentacion().rect;
+      const cs = [...document.querySelectorAll('.qr-esc--principal .qr-esc__lamina')];
+      const c = cs[cs.length - 1];
+      const k = c.width / document.querySelector('.qr-esc--principal').getBoundingClientRect().width;
+      const x = Math.round((r.x + r.w * 100 / 960) * k);
+      const y = Math.round((r.y + r.h * 70 / 540) * k);
+      const d = c.getContext('2d').getImageData(x - 20, y, 40, 1).data;
+      let medios = 0;
+      for (let i = 0; i < 40; i++) { const g = d[i * 4 + 2]; if (g > 50 && g < 235) medios++; }
+      return medios;
+    })()`);
+    ok('el borde del cuadrado queda nítido', borde <= 3, `${borde} px a medio camino`);
+    const fx = e.zoom.fx;
+    raton('mouseDown', a.b.x + a.x, a.b.y + a.y);
+    // Hacia adentro: un mouseUp sintético fuera de la ventana se pierde.
+    for (let i = 1; i <= 8; i++) raton('mouseMove', a.b.x + a.x + i * 25, a.b.y + a.y, { button: 'left' });
+    raton('mouseUp', a.b.x + a.x + 200, a.b.y + a.y);
+    await esperar(150);
+    e = await estado();
+    ok('arrastrar mueve la lámina', e.zoom.fx < fx - 0.01 && e.zoom.k === 4, `${fx} → ${e.zoom.fx}`);
+    ok('y no pasa de diapositiva', e.n === 4);
+    const fy = e.zoom.fy;
+    win.webContents.sendInputEvent({ type: 'mouseWheel', x: Math.round(a.b.x + a.x), y: Math.round(a.b.y + a.y), deltaX: 0, deltaY: -120 });
+    await esperar(200);
+    e = await estado();
+    ok('con zoom, la rueda mueve en vez de pasar', e.zoom.fy > fy && e.n === 4, `${fy} → ${e.zoom.fy}`);
+    await tecla('Escape');
+    await esperar(450);
+    e = await estado();
+    ok('Escape vuelve a 100 % sin terminar', e.zoom.k === 1 && e.activa && !e.detalle, JSON.stringify(e.zoom));
+    ok('y el número también', (await js(`document.querySelector('[data-zoom]').textContent`)).trim() === '100%');
+    win.webContents.sendInputEvent({ type: 'mouseWheel', x: Math.round(a.b.x + a.x), y: Math.round(a.b.y + a.y), deltaX: 0, deltaY: 240, modifiers: ['control'] });
+    await esperar(200);
+    e = await estado();
+    ok('Ctrl+rueda acerca', e.zoom.k > 1.2 && e.n === 4, JSON.stringify(e.zoom));
+    raton('mouseMove', a.b.x + a.x, a.b.y + a.y);
+    await esperar(80);
+    raton('mouseDown', a.b.x + a.x, a.b.y + a.y);
+    raton('mouseUp', a.b.x + a.x, a.b.y + a.y);
+    const avanzo = await enDiapositiva(5);
+    ok('con zoom, un clic sin arrastrar sigue avanzando', avanzo, JSON.stringify(await estado()));
+    e = await estado();
+    ok('y la diapositiva nueva llega a 100 %', e.zoom.k === 1 && e.zoomDestino === 1);
+    await tecla('Left');
+    ok('vuelve a la 4', await enDiapositiva(4));
+  });
+
   await bloque('terminar', async () => {
+    /* La opacidad de la capa en cada cuadro de la salida: tiene que bajar y
+       nada más. Con la entrada vuelta a correr (sacarle is-settled antes del
+       raf2), la capa caía a 0 —el lector a la vista— y volvía a 1 de golpe:
+       el parpadeo de «a veces» al terminar. */
+    await js(`(() => {
+      const raiz = document.getElementById('qr-presentacion');
+      window.__salida = [];
+      const tomar = () => {
+        if (!raiz.isConnected) return;
+        window.__salida.push(+getComputedStyle(raiz).opacity);
+        requestAnimationFrame(tomar);
+      };
+      requestAnimationFrame(tomar);
+      return true;
+    })()`);
     await tecla('Escape');
     await hasta(() => js(`!document.getElementById('qr-presentacion')`), 3000, 'la capa no se fue');
     ok('Escape termina', !(await estado()).activa);
+    const salida = await js('window.__salida');
+    const sube = salida.findIndex((v, i) => i > 0 && v > salida[i - 1] + 0.02);
+    ok('al terminar la capa se apaga sin parpadear', salida.length > 5 && salida[0] > 0.98 && sube < 0, salida.map((v) => v.toFixed(2)).join(' '));
     await esperar(300);
     ok('el lector queda en la diapositiva donde se terminó', await js(`(async () => (await import('./js/estado.js')).S.pagina === 4)()`));
     ok('el foco vuelve al lector', await js(`document.activeElement !== document.body`));
@@ -443,6 +571,17 @@ app.whenReady().then(async () => {
     ok('lo que se dibuja en el orador se ve en la sala', (await js(`T.tintaRoja('.qr-esc--sala', ${SALA})`)) > 200);
     await tecla('E');
     await tecla('D');
+  });
+
+  await bloque('el zoom va a la sala', async () => {
+    await tecla('=');
+    await esperar(450);
+    let e = await estado();
+    ok('el zoom del orador se ve en la sala', e.rectSala && Math.abs(e.rectSala.w - 1280 * 1.5) < 2, JSON.stringify(e.rectSala));
+    await tecla('Escape');
+    await esperar(450);
+    e = await estado();
+    ok('y vuelve con él', e.rectSala && Math.abs(e.rectSala.w - 1280) < 2 && e.activa, JSON.stringify(e.rectSala));
   });
 
   await bloque('el cronómetro', async () => {

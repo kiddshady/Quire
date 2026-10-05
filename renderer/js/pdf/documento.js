@@ -203,8 +203,13 @@ class Documento {
    * responsable de cancelarlo si la página se fue de pantalla antes de que
    * termine. Un render cancelado rechaza con RenderingCancelledException, que
    * NO es un error que haya que mostrar.
+   *
+   * Con `recorte` ({x, y, w, h} en píxeles del bitmap a esa escala) se pinta
+   * solo ese pedazo de la página: el zoom de Presentar, que a 600 % pediría
+   * una lámina de cientos de megapíxeles para mostrar una pantalla. El tope
+   * no corre ahí: el recorte ya mide lo que mide la pantalla.
    */
-  render(n, { canvas, escala = 1, rotacionExtra = 0, dpr = window.devicePixelRatio || 1, preservar = false, tope = MAX_PIXELES }) {
+  render(n, { canvas, escala = 1, rotacionExtra = 0, dpr = window.devicePixelRatio || 1, preservar = false, tope = MAX_PIXELES, recorte = null }) {
     let tarea = null;
     let cancelado = false;
 
@@ -216,11 +221,11 @@ class Documento {
       let viewport = page.getViewport({ scale: escala * dpr, rotation: rotacion });
       // El tope de píxeles (ver MAX_PIXELES): se baja la resolución, no el tamaño.
       const area = viewport.width * viewport.height;
-      if (area > tope) {
+      if (!recorte && area > tope) {
         viewport = page.getViewport({ scale: escala * dpr * Math.sqrt(tope / area) * 0.999, rotation: rotacion });
       }
-      const ancho = Math.max(1, Math.floor(viewport.width));
-      const alto = Math.max(1, Math.floor(viewport.height));
+      const ancho = Math.max(1, Math.floor(recorte ? recorte.w : viewport.width));
+      const alto = Math.max(1, Math.floor(recorte ? recorte.h : viewport.height));
 
       /* Con `preservar`, se dibuja en un lienzo aparte y recién al final se
          vuelca al visible. Asignar `width` a un canvas lo BORRA, así que
@@ -241,7 +246,8 @@ class Documento {
          primer cuadro, que es lo que promete el doble buffer de abajo. */
 
       const ctx = destino.getContext('2d', { alpha: false });
-      tarea = page.render({ canvasContext: ctx, viewport, canvas: destino, background: '#ffffff' });
+      const transform = recorte ? [1, 0, 0, 1, -recorte.x, -recorte.y] : null;
+      tarea = page.render({ canvasContext: ctx, viewport, canvas: destino, transform, background: '#ffffff' });
       await tarea.promise;
 
       if (preservar) {
