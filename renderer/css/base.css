@@ -92,7 +92,7 @@ p, code, pre,
 /* ── Scrollbar propia ────────────────────────────────────────────────────────
    Fina, sin flechas, y el thumb se materializa con el hover del contenedor.
    Nunca la gris de Windows. */
-::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar { width: 10px; height: 10px; }   /* = --ox-sb de .ox-scroll */
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
@@ -300,13 +300,23 @@ p, code, pre,
   --ox-fade-bottom: var(--ox-fade);
   transition: --ox-fade-top var(--ox-t-3) var(--ox-ease-soft),
               --ox-fade-bottom var(--ox-t-3) var(--ox-ease-soft);
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    #000 var(--ox-fade-top),
-    #000 calc(100% - var(--ox-fade-bottom)),
-    transparent 100%
-  );
+  /* El esfumado es del contenido, no de la scrollbar: la franja de la
+     derecha (--ox-sb, el ancho de ::-webkit-scrollbar) va sin máscara. Con la
+     máscara entera, al llegar arriba el thumb quedaba tapado y recién
+     aparecía cuando el fade terminaba de retirarse. */
+  --ox-sb: 10px;
+  mask-image:
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--ox-fade-top),
+      #000 calc(100% - var(--ox-fade-bottom)),
+      transparent 100%
+    ),
+    linear-gradient(#000, #000);
+  mask-size: calc(100% - var(--ox-sb)) 100%, var(--ox-sb) 100%;
+  mask-position: left top, right top;
+  mask-repeat: no-repeat;
 }
 /* Pegado arriba: no esfumamos arriba. Pegado abajo: no esfumamos abajo. */
 .ox-scroll.is-top    { --ox-fade-top: 0px; }
