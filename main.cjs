@@ -103,12 +103,31 @@ function centered(w, h) {
   return { x: Math.round(a.x + (a.width - w) / 2), y: Math.round(a.y + (a.height - h) / 2) };
 }
 
+/* La ventana tiene que ENTRAR en el área útil de la pantalla donde cae. En una
+   1366×768 con la barra de tareas (área útil 1366×720), los 820 px por defecto
+   no entraban: centered() daba y = (720 - 820) / 2 = -50, Windows recortaba el
+   alto a 720 pero dejaba esa y, y la titlebar quedaba 50 px por arriba de la
+   pantalla, sin forma de agarrarla. Lo mismo con un tamaño guardado en un
+   monitor más grande. Por eso se achica al área útil y se empuja adentro. */
+function fitIn(w, h, pos) {
+  const a = pos ? screen.getDisplayMatching({ ...pos, width: w, height: h }).workArea
+                : screen.getPrimaryDisplay().workArea;
+  const width = Math.min(w, a.width);
+  const height = Math.min(h, a.height);
+  const p = pos ?? centered(width, height);
+  return {
+    width, height,
+    x: Math.max(a.x, Math.min(p.x, a.x + a.width - width)),
+    y: Math.max(a.y, Math.min(p.y, a.y + a.height - height)),
+  };
+}
+
 async function loadWindowState() {
   const s = await winState.read().catch(() => null);
   const w = Math.max(MIN_W, Number(s?.width) || DEFAULT_W);
   const h = Math.max(MIN_H, Number(s?.height) || DEFAULT_H);
   const hasPos = Number.isFinite(s?.x) && Number.isFinite(s?.y) && visibleOn(s.x, s.y, w, h);
-  return { width: w, height: h, maximized: !!s?.maximized, ...(hasPos ? { x: s.x, y: s.y } : centered(w, h)) };
+  return { maximized: !!s?.maximized, ...fitIn(w, h, hasPos ? { x: s.x, y: s.y } : null) };
 }
 
 let saveTimer = null;
