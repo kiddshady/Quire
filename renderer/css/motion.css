@@ -118,10 +118,24 @@
 .ox-reveal {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--ox-t-3) var(--ox-ease);
+  /* Plegado es también FUERA DEL TAB: con alto 0 los botones de adentro
+     seguían enfocables, el foco desaparecía en un panel cerrado y su tooltip
+     aparecía flotando sobre la nada (Chem Engine, el panel del átomo: catorce
+     paradas invisibles). `visibility` se apaga cuando terminó de plegarse —el
+     delay— y vuelve en el acto al abrir. */
+  visibility: hidden;
+  transition: grid-template-rows var(--ox-t-3) var(--ox-ease), visibility 0s linear var(--ox-t-3);
 }
 .ox-reveal > * { min-height: 0; overflow: hidden; }
-.ox-reveal.is-open { grid-template-rows: 1fr; }
+.ox-reveal.is-open {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition: grid-template-rows var(--ox-t-3) var(--ox-ease), visibility 0s;
+}
+/* Asentado (asentarPlegables): lo que ya estaba abierto al pintar no se vuelve
+   a desplegar desde 0, ni sus hijos a entrar. */
+.ox-reveal.is-placing,
+.ox-reveal.is-placing > * > * { transition: none; }
 
 /* ── Plegable: lo que se prende y se apaga con `hidden` ─────────────────────
    `.ox-reveal` es para cuando manejás una clase y tenés un envoltorio. Esto es

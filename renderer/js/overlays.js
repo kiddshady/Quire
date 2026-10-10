@@ -140,8 +140,11 @@ const Tooltip = (() => {
       else if (el) clearTimeout(timer);
     });
 
-    // Un tooltip flotando sobre un click o un scroll es basura visual.
-    root.addEventListener('pointerdown', () => { teclado = false; hide(true); });
+    /* Un tooltip flotando sobre un click o un scroll es basura visual. Al
+       click se va con su salida (110 ms): cortado con remove() desaparecía de
+       un cuadro al otro justo donde uno está mirando. Al scroll sí en el acto,
+       porque quedaría flotando separado de lo que señala. */
+    root.addEventListener('pointerdown', () => { teclado = false; hide(); });
     window.addEventListener('scroll', () => hide(true), true);
     // Volver a la ventana (Alt+Tab) le devuelve el foco al mismo botón: eso
     // no es tabular hasta él.

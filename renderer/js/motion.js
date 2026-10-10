@@ -99,11 +99,17 @@ export function swap(el, html, { relevo = false, fundido = false } = {}) {
     .filter((a) => a.effect?.getTiming().iterations !== Infinity);
 
   if (antes && despues && !relevo && !fundido) {
-    const enCurso = finitas().filter((a) => a.playState === 'running').map((a) => a.currentTime);
+    /* Solo lo de los HIJOS: el destello del propio `el` (el ox-tick que pone
+       valor()) no es una entrada en curso. Contado, un cambio a menos de
+       700 ms del anterior hacía nacer a los hijos nuevos a mitad de su
+       fundido: con Ctrl+Z sostenido, los <sub> de la fórmula titilaban a
+       0,6-0,8 de opacidad (Chem Engine, octubre de 2026). */
+    const entradas = () => finitas().filter((a) => a.effect?.target !== el);
+    const enCurso = entradas().filter((a) => a.playState === 'running').map((a) => a.currentTime);
     const t = enCurso.length ? Math.max(...enCurso) : null;
     el.innerHTML = html;
     if (t != null) for (const n of el.children) entrar(n);
-    for (const a of finitas()) { if (t != null) a.currentTime = t; else a.cancel(); }
+    for (const a of entradas()) { if (t != null) a.currentTime = t; else a.cancel(); }
     return;
   }
 
@@ -611,12 +617,19 @@ const PLEGABLE = '.ox-plegable, .ox-plegable--ancho';
  */
 export function asentarPlegables(root) {
   if (!root) return;
-  const sel = '.ox-plegable:not([hidden]), .ox-plegable--ancho:not([hidden])';
+  /* Y los `.ox-reveal` abiertos, por lo mismo: un panel que ya estaba abierto
+     volvía a crecer de 0 en cada vuelta a la vista (Chem Engine, el nombre
+     IUPAC). Con ellos sus hijos directos de contenido, que suelen entrar con
+     su propia opacidad. */
+  const sel = '.ox-plegable:not([hidden]), .ox-plegable--ancho:not([hidden]), .ox-reveal.is-open';
   const todos = [...root.querySelectorAll(sel)];
   if (root.matches?.(sel)) todos.unshift(root);
   if (!todos.length) return;
   for (const el of todos) el.classList.add('is-placing');
-  for (const el of todos) void getComputedStyle(el).height;
+  for (const el of todos) {
+    void getComputedStyle(el).height;
+    if (el.classList.contains('ox-reveal')) for (const c of el.querySelectorAll(':scope > * > *')) void getComputedStyle(c).opacity;
+  }
   for (const el of todos) el.classList.remove('is-placing');
 }
 

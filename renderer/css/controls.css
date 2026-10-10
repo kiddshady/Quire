@@ -58,6 +58,11 @@
 /* Ghost: sin superficie hasta que lo tocás. */
 .ox-btn--ghost:hover { background: var(--ox-wash-1); color: var(--ox-text); }
 .ox-btn--ghost:active { background: var(--ox-wash-2); }
+/* Un ghost que es un INTERRUPTOR (el «H» y el «3D» de Chem Engine) dice que está
+   prendido. Sin esta regla `is-active` no pintaba nada: el botón quedaba igual
+   prendido o apagado y había que mirar el lienzo para saberlo. Viaja con
+   --tr-color, como el hover. */
+.ox-btn--ghost.is-active { background: var(--ox-wash-2); color: var(--ox-text); }
 
 /* Danger: el rojo solo para lo destructivo. */
 .ox-btn--danger { color: var(--ox-danger); }
