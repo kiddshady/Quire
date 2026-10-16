@@ -97,8 +97,7 @@
   flex: 0 0 auto;
   box-shadow: inset 0 1px 0 var(--ox-line);
   background: var(--ox-bg);
-  /* Comparte alto con el pie del rail, que queda pegado a su izquierda: las dos
-     líneas de arriba tienen que ser la misma. Ver --qr-pie. */
+  /* El alto lo manda la navegación del preview. Ver --qr-pie. */
   min-height: var(--qr-pie);
   /* El chip de la cara se pliega a lo ancho y se come su hueco del gap. */
   --ox-plegable-gap: var(--ox-3);

@@ -93,7 +93,7 @@
      la línea: ahí el reservado pasa a 5ch y esto a 243px. */
   --qr-panel-w: 236px;
   /* Recorta al panel cuando se va: sin esto se desliza FUERA de su área y
-     pasa por encima del rail, que no tiene nada que ver con él. El panel se
+     pasa por el borde de la ventana, que no tiene nada que ver con él. El panel se
      mete en su hueco y desaparece ahí, como un cajón. */
   overflow: hidden;
 }
@@ -916,7 +916,7 @@
 .qr-puck[data-hover="nucleo"] .qr-puck__lupa   { stroke: var(--ox-text); }
 
 /* Mientras el gesto corre, el acento marca cuál de las dos zonas está mandando
-   — y se queda SOLO en los glifos, como en el rail: cuatro trazos de 2 px se
+   — y se queda SOLO en los glifos, como en las vistas de la titlebar: cuatro trazos de 2 px se
    leen igual que un disco entero teñido y no compiten con la hoja. La otra
    zona se apaga, que es la mitad de la señal. */
 .qr-puck[data-activo="anillo"] .qr-puck__anillo { stroke: var(--puck-on); }

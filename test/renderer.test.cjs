@@ -94,7 +94,7 @@ app.whenReady().then(async () => {
 
   console.log('\n1. Arranque');
   ok('el splash se fue', !(await js(`!!document.getElementById('boot-splash')`)));
-  ok('el shell está montado', await js(`!!document.querySelector('.ox-titlebar') && !!document.querySelector('.ox-rail')`));
+  ok('el shell está montado', await js(`!!document.querySelector('.ox-titlebar') && !!document.querySelector('.qr-vistas')`));
   ok('los <i data-icon> se reemplazaron por SVG', !(await js(`!!document.querySelector('i[data-icon]')`)));
   ok('la vista inicial pintó algo', (await js(`document.getElementById('view').children.length`)) > 0);
   /* Los ítems de la statusbar son flex, y una regla de clase le ganaba al

@@ -12,17 +12,8 @@
    Sobrescriben clases `ox-` desde acá y no editando shell.css, para que una
    versión nueva de Onyx se pueda seguir trayendo copiando el archivo.
 
-   Las dos son la misma decisión mirada de los dos lados: la línea horizontal
-   de abajo a la izquierda se va, y aparece una arriba, cerrando el encabezado.
-
-   El pie del rail llevaba una línea que lo separaba de la columna para
-   enmarcar el nombre del documento. Ese nombre ya no se dibuja —lo dice la
-   statusbar justo abajo, y dos filas apiladas con el mismo dato se leen como
-   un error de maquetado— así que la línea quedaba partiendo el rail en dos
-   para enmarcar un hueco. Sin ella el riel baja entero, de un color solo.
-
-   El encabezado de la vista tenía el problema opuesto: el título flotaba sobre
-   el contenido sin nada que dijera dónde termina. */
+   El encabezado de la vista lleva línea: el título flotaba sobre el contenido
+   sin nada que dijera dónde termina. */
 
 /* Los tokens propios de Quire. Vivían en tokens.css con prefijo ox-, y eso
    impedía traer el tokens.css de Onyx copiando el archivo. */
@@ -37,14 +28,11 @@
   --qr-statusbar-icono: 12px;
   --qr-statusbar-texto: calc(var(--ox-4) + var(--ox-1) + var(--qr-statusbar-icono) + var(--ox-2));
 
-  /* La franja que va pegada ARRIBA de la statusbar: el pie del rail y la barra
-     de la vista que esté abierta. Son componentes distintos —uno del shell,
-     otro de cada vista— pero quedan uno al lado del otro y sus líneas de arriba
-     se leen como UNA sola línea cruzando la ventana. Si no miden lo mismo se ve
-     el escalón, y se ve mucho: son dos líneas paralelas a pocos píxeles.
-
-     El número lo manda el contenido más alto, que son los botones redondos de
-     la navegación del preview (28 px + 12 de aire arriba y abajo). */
+  /* El alto de la barra de abajo de Imprimir y de Páginas. Nació para que
+     coincidiera con el pie del rail, que les quedaba pegado a la izquierda;
+     el rail ya no está, y el número queda porque es el que pide el contenido
+     más alto: los botones redondos de la navegación del preview (28 px + 12
+     de aire arriba y abajo). */
   --qr-pie: 52px;
 
   /* El velo que oscurece la app mientras arrastrás un archivo encima (ver
@@ -53,38 +41,95 @@
   --qr-velo-soltar: rgb(0 0 0 / .28);
 }
 
-/* Pie del rail.
+/* ── Sin rail: las vistas en la titlebar (1.2.0) ─────────────────────────────
+   El rail le cobraba 224 px al documento todo el tiempo, también cuando solo
+   estabas leyendo. Las vistas subieron a la titlebar, que ya existía y estaba
+   casi vacía, y el cuerpo queda de una sola columna. Fran la eligió entre
+   cinco variantes (S:\mockups\quire\sin-rail.html) por el espacio y porque
+   se ve mejor.
 
-   La sangría de la izquierda NO es la del rail: es la columna de los valores
-   de la statusbar, que va pegada justo abajo. Las dos filas suelen decir lo
-   mismo —el nombre del documento abierto— y apiladas con dos arranques
-   distintos se lee como un error de maquetado antes que como dos datos. Ver
-   --qr-statusbar-texto.
+   Los botones siguen siendo .ox-navitem —el router marca el activo por esa
+   clase— y acá se les pone piel de pestaña. Todo va con .ox-titlebar delante
+   para ganarle a shell.css sin tocarlo. */
+.ox-body { grid-template-columns: minmax(0, 1fr); }
+/* motion.css clava la vista (y su calco, durante el fundido) en la columna 2,
+   la que quedaba al lado del rail. Con una sola columna, eso creaba una
+   implícita y la vista caía en la mitad derecha con un hueco vacío a la
+   izquierda. Las dos siguen en la misma celda, que es lo que importa. */
+.ox-body > .ox-main { grid-column: 1; }
 
-   El alto NO sale del padding: sale de --qr-pie, porque tiene que ser el mismo
-   que el de la barra de la vista de al lado. */
-.ox-rail__foot {
-  display: flex;
-  align-items: center;
-  min-height: var(--qr-pie);
-  min-width: 0;
-  padding: 0 var(--ox-3) 0 var(--qr-statusbar-texto);
-  box-shadow: none;
-}
-/* Onyx apaga el esfumado de abajo del nav cuando hay pie, porque su pie trae
-   línea y la línea es el límite. Acá el pie no la lleva: el nav corta al aire y
-   el fade vuelve. Salvo al llegar al fondo: sin el :not, esta regla le ganaba
-   por orden a `.ox-scroll.is-bottom` (misma especificidad) y «Ajustes» quedaba
-   esfumado aunque no hubiera nada más abajo (css-25c). */
-.ox-rail__nav:has(~ .ox-rail__foot):not(.is-bottom) { --ox-fade-bottom: var(--ox-fade); }
-
-/* El rail esconde ítems con `hidden` (Piezas, fuera del modo desarrollo), y
-   `.ox-navitem` declara su display: sin esto el `hidden` del navegador pierde. */
+/* Piezas se esconde con `hidden` fuera del modo desarrollo, y `.ox-navitem`
+   declara su display: sin esto el `hidden` del navegador pierde. */
 .ox-navitem[hidden] { display: none; }
 
-/* El botón Abrir ocupa el ancho del rail. Era un style="width:100%" suelto en
-   el HTML. */
-.qr-abrir { width: 100%; }
+.qr-tb-vr { align-self: center; height: 16px; }
+
+.qr-vistas {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--ox-1) / 2);
+  min-width: 0;
+}
+
+.ox-titlebar .qr-vista {
+  width: auto;
+  height: 28px;
+  flex: 0 0 auto;
+  gap: var(--ox-2);
+  padding: 0 var(--ox-2);
+  font-size: var(--ox-fs-12);
+  color: var(--ox-text-3);
+  white-space: nowrap;
+  /* El contador se pliega a lo ancho y se come su hueco del gap. */
+  --ox-plegable-gap: var(--ox-2);
+}
+.ox-titlebar .qr-vista .ox-icon { width: 14px; height: 14px; color: var(--ox-text-4); }
+.ox-titlebar .qr-vista:hover { color: var(--ox-text-2); }
+.ox-titlebar .qr-vista:hover .ox-icon { color: var(--ox-text-3); }
+/* La activa no lleva fondo: la dice el indicador de abajo, el texto pleno y el
+   ícono en acento, igual que la pestaña de un documento. Con fondo, la fila
+   de arriba y la franja de pestañas de abajo se leerían como dos cosas
+   elegidas que compiten. */
+.ox-titlebar .qr-vista.is-active { background: transparent; color: var(--ox-text); font-weight: var(--ox-w-regular); }
+.ox-titlebar .qr-vista.is-active:hover { background: var(--ox-wash-1); }
+.ox-titlebar .qr-vista.is-active .ox-icon { color: var(--ox-accent); }
+/* El indicador vertical del rail no tiene lugar acá: lo reemplaza el de abajo. */
+.ox-titlebar .qr-vista::before { content: none; }
+
+.ox-titlebar .qr-vista .ox-navitem__count { margin-left: 0; }
+.ox-titlebar .qr-vista .ox-navitem__count:not([hidden]) { display: inline-block; }
+
+/* Ajustes: solo el ícono, contra los botones de ventana. */
+.ox-titlebar .qr-vista--ajustes { margin-left: auto; width: 28px; padding: 0; justify-content: center; }
+.qr-vista--ajustes ~ .ox-wincontrols { margin-left: 0; }
+
+/* El indicador: uno solo para todas las vistas, que viaja de una a otra. Se
+   ubica con transform (posición y escala horizontal sobre una base de 100 px),
+   nunca con left/width: es lo único que se mueve en cada navegación y no
+   tiene por qué remaquetar la titlebar. Nace apagado y se prende con la
+   primera ubicación, que va sin viaje (app.js, ubicarIndicador). */
+.qr-vistas__ind {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100px;
+  height: 2px;
+  border-radius: var(--ox-r-pill);
+  background: var(--ox-accent);
+  transform-origin: 0 50%;
+  pointer-events: none;
+  opacity: 0;
+  transition: transform var(--ox-t-3) var(--ox-ease), opacity var(--ox-t-2) var(--ox-ease-soft);
+}
+.qr-vistas__ind.is-visible { opacity: 1; }
+.qr-vistas__ind.is-quieto { transition: opacity var(--ox-t-2) var(--ox-ease-soft); }
+
+/* Con la ventana angosta no entran los nombres: quedan los íconos, y el nombre
+   pasa al tooltip (app.js lo pone y lo saca con el mismo corte). El ancho
+   mínimo de la ventana es 900 px; con nombres, la fila pide unos 860. */
+@media (max-width: 1080px) {
+  .ox-titlebar .qr-vista__nombre { display: none; }
+}
 
 /* Hairline como sombra interior y nunca como `border`: un border deja hilacha
    en las esquinas cuando el contenedor recorta. Es la regla de la casa. */

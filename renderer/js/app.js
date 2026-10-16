@@ -950,7 +950,7 @@ function fraseEnFila(item, el, html) {
   else frase(el, html);
 }
 
-/** Todo lo que vive fuera de la vista: statusbar, contadores del rail, contexto. */
+/** Todo lo que vive fuera de la vista: statusbar y contadores de las vistas. */
 function actualizarChrome() {
   const $ = (id) => document.getElementById(id);
 
@@ -961,8 +961,8 @@ function actualizarChrome() {
   const statDoc = $('stat-doc');
   if (statDoc) statDoc.dataset.tip = S.doc ? (S.doc.ruta || S.doc.nombre) : 'Documento abierto';
 
-  contador($('nav-paginas-count'), S.doc ? S.doc.paginas : 0);
-  contador($('nav-convertir-count'), convertiblesPendientes());
+  cuenta($('nav-paginas-count'), S.doc ? S.doc.paginas : 0);
+  cuenta($('nav-convertir-count'), convertiblesPendientes());
 
   /* La página y la medida las escribe el lector mientras scrolleás. Fuera del
      lector nadie las ponía al día: con Ctrl+Tab en Imprimir la statusbar
@@ -991,27 +991,70 @@ function actualizarChrome() {
     imp.hidden = !S.impresora;
   }
 
-  /* El pie del rail queda vacío A PROPÓSITO: decía el nombre del documento, que
-     es exactamente lo que dice la statusbar tres píxeles más abajo. Dos filas
-     apiladas con el mismo dato se leen como un error de maquetado, no como dos
-     datos. Sin texto y sin la línea de arriba (ver quire.css), el rail baja
-     entero de un color solo. El div sigue existiendo porque le marca el piso al
-     rail y porque alinea con la barra del preview — ver --qr-pie. */
+  /* El nombre del documento ya no va en el centro de la titlebar: desde la
+     1.2.0 ahí viven las vistas, y centrado se les encimaba con la ventana
+     angosta. Lo dicen la statusbar y, con dos o más abiertos, la pestaña. */
+}
 
-  /* El nombre del documento en el titlebar solo mientras NO haya franja. Con
-     las pestañas a la vista lo estaría diciendo tres veces en veinte píxeles
-     —pestaña, titlebar, statusbar— y eso ya no se lee como tres datos sino
-     como un error de maquetado. Es la misma razón por la que el pie del rail
-     quedó vacío.
+/* El contador de una vista de la titlebar: se pliega a lo ancho cuando no hay
+   nada que contar. En el rail un contador vacío no ocupaba nada a la vista
+   (quedaba a la derecha, en aire); en una pestaña que se ajusta a su texto,
+   vacío igual sumaba el hueco del gap. El número entra y sale con contador()
+   y el ancho viaja con .ox-plegable--ancho; la pestaña de al lado se corre
+   sola, y el indicador la sigue (ubicarIndicador). */
+function cuenta(el, n) {
+  if (!el) return;
+  if (n) el.hidden = false;
+  contador(el, n);
+  if (!n) el.hidden = true;
+}
 
-     Con swap() y relevo (shell-26, fw-09): aparece, se va (al abrir el
-     segundo, mientras la franja se despliega) o cambia de nombre fundiéndose.
-     Era un innerHTML en cada aviso —también en cada trazo de tinta— que
-     reemplazaba los nodos aunque dijeran lo mismo; con el mismo html, swap()
-     no toca nada. */
-  swap($('titlebar-context'), S.doc && S.pestanas.length < 2
-    ? `${Icons.svg('quire', 'ox-icon--sm')}<span>${esc(S.doc.nombre)}</span>`
-    : '', { relevo: true });
+/* ── El indicador de la vista activa ─────────────────────────────────────────
+   Un solo trazo debajo de la pestaña activa que VIAJA a la nueva al navegar:
+   con uno por pestaña (como el de las pestañas de documentos) se apagaría uno
+   y se prendería otro, y en una fila de seis se pierde de dónde viniste.
+
+   Se mide con getBoundingClientRect contra la titlebar, que es su contenedor
+   posicionado: así llega también a Ajustes, que no está en el mismo nav.
+
+   `viajar: false` lo pone en el lugar sin transición. Es para lo que no es
+   navegar —la ventana que cambia de ancho, un contador que ensancha una
+   pestaña de la izquierda, la fuente que termina de cargar—: ahí un viaje se
+   vería como el indicador persiguiendo a su pestaña. La primera ubicación
+   tampoco viaja: aparece fundiéndose, sin venir desde el borde. */
+let indicadorUbicado = false;
+
+function ubicarIndicador({ viajar = true } = {}) {
+  const ind = document.getElementById('qr-vistas-ind');
+  if (!ind) return;
+  const activa = document.querySelector('.ox-titlebar .qr-vista.is-active');
+  if (!activa || !activa.getClientRects().length || !ind.offsetParent) {
+    ind.classList.remove('is-visible');
+    return;
+  }
+  const barra = ind.offsetParent.getBoundingClientRect();
+  const r = activa.getBoundingClientRect();
+  /* El trazo es más corto que la pestaña, como el de los documentos: arranca
+     y termina donde lo hace el contenido, no el hover. */
+  const margen = parseFloat(getComputedStyle(activa).paddingLeft) || 0;
+  const ancho = Math.max(0, r.width - margen * 2);
+  ind.classList.toggle('is-quieto', !viajar || !indicadorUbicado);
+  ind.style.transform = `translateX(${r.left - barra.left + margen}px) scaleX(${ancho / 100})`;
+  ind.classList.add('is-visible');
+  indicadorUbicado = true;
+}
+
+/* Con la ventana angosta las pestañas quedan solo con el ícono (quire.css):
+   el nombre pasa al tooltip. Con el nombre a la vista, un tooltip que repite
+   lo mismo sobra. El corte es el mismo número que el @media. */
+const VENTANA_ANGOSTA = matchMedia('(max-width: 1080px)');
+
+function nombresDeVistas() {
+  document.querySelectorAll('.qr-vistas .qr-vista').forEach((b) => {
+    b.setAttribute('aria-label', b.dataset.nombre);
+    if (VENTANA_ANGOSTA.matches) b.dataset.tip = b.dataset.nombre;
+    else delete b.dataset.tip;
+  });
 }
 
 /* ── «Abriendo…» ─────────────────────────────────────────────────────────────
@@ -1058,7 +1101,10 @@ function ponerOcupado(on) {
   const btn = document.getElementById('btn-abrir');
   const mas = document.getElementById('qr-tab-mas');
   if (btn) {
-    swap(btn, on ? `${Icons.spinner()}<span>Abriendo…</span>` : abrirNormal, { relevo: true });
+    /* Desde la 1.2.0 Abrir es un ícono de la titlebar: el «Abriendo…» ya no
+       entra, y lo dice el tooltip. */
+    swap(btn, on ? Icons.spinner() : abrirNormal, { relevo: true });
+    btn.dataset.tip = on ? 'Abriendo…' : 'Abrir un PDF';
     btn.setAttribute('aria-busy', String(on));
   }
   if (mas) swap(mas, on ? Icons.spinner() : masNormal, { relevo: true });
@@ -1100,12 +1146,23 @@ async function boot() {
     return;
   }
 
-  /* Piezas es la vitrina del framework, no una función de Quire: en el rail
-     solo con --dev o QUIRE_DEV (ux-39, decisión de Fran). La ruta sigue
+  /* Piezas es la vitrina del framework, no una función de Quire: entre las
+     vistas solo con --dev o QUIRE_DEV (ux-39, decisión de Fran). La ruta sigue
      existiendo. Se decide antes de que se vaya el splash: no hay un cuadro
      con el ítem y otro sin él. */
   const piezas = document.getElementById('nav-piezas');
   if (piezas) piezas.hidden = !S.info?.dev;
+
+  /* Las vistas de la titlebar: los nombres según el ancho, y el indicador que
+     sigue a la activa. Navegar lo hace viajar; todo lo demás que mueve una
+     pestaña (el ancho de la ventana, un contador que aparece, la fuente que
+     termina de cargar) lo vuelve a poner en el lugar sin viaje. */
+  nombresDeVistas();
+  VENTANA_ANGOSTA.addEventListener('change', nombresDeVistas);
+  Router.onChange(() => ubicarIndicador());
+  const recolocar = new ResizeObserver(() => ubicarIndicador({ viajar: false }));
+  recolocar.observe(document.getElementById('qr-vistas'));
+  recolocar.observe(document.querySelector('.ox-titlebar'));
 
   /* Cómo están los botones de abrir cuando no están ocupados, para volver. */
   abrirNormal = document.getElementById('btn-abrir')?.innerHTML || '';

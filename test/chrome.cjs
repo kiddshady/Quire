@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   El chrome: lo que vive fuera de la vista (titlebar, rail, statusbar, el
-   botón Abrir), Ajustes, los atajos del shell y el cierre de la app.
+   El chrome: lo que vive fuera de la vista (titlebar con las vistas,
+   statusbar, el botón Abrir), Ajustes, los atajos del shell y el cierre de la app.
 
    Lo que se rompe acá casi nunca es "falta un nodo": es un cambio de golpe
    sobre algo que ya se ve (un innerHTML en cada aviso, un textContent que
@@ -154,7 +154,7 @@ async function chrome() {
     /* Un valor de relleno («—») haría que el primer dato real cuente como un
        cambio y destelle en acento (shell-39, css-27, tests-15). */
     const conRelleno = ['stat-pagina-value', 'stat-medida-value', 'stat-impresora-value', 'nav-paginas-count', 'nav-convertir-count']
-      .filter((id) => !new RegExp(`id="${id}"></span>`).test(html));
+      .filter((id) => !new RegExp(`id="${id}"[^>]*></span>`).test(html));
     ok('los valores del chrome nacen vacíos en el HTML', conRelleno.length === 0, conRelleno.join(', '));
     const n = await js(`(() => ({
       ticked: [...document.querySelectorAll(__CONTADORES)].filter((e) => e.classList.contains('ox-ticked')).map((e) => e.id),
@@ -164,7 +164,7 @@ async function chrome() {
     }))()`);
     ok('ningún contador del chrome destella al arrancar', n.ticked.length === 0, n.ticked.join(', '));
     /* ux-39: la vitrina del framework no es una función de Quire. */
-    ok('Piezas no está en el rail fuera del modo desarrollo', n.piezas.hidden === true && n.piezas.display === 'none', JSON.stringify(n.piezas));
+    ok('Piezas no está entre las vistas fuera del modo desarrollo', n.piezas.hidden === true && n.piezas.display === 'none', JSON.stringify(n.piezas));
     ok('la marca del titlebar no tiene un tooltip que repite el nombre', n.marcaTip === null, String(n.marcaTip));
     ok('Abrir dice su atajo en el tooltip', n.abrir.tip && n.abrir.tecla === 'Ctrl O', JSON.stringify(n.abrir));
   }
@@ -175,39 +175,37 @@ async function chrome() {
   await esperar(1400);
   {
     const n = await js(`(() => {
-      const ctx = document.getElementById('titlebar-context');
+      const cuentaEl = document.getElementById('nav-paginas-count');
       return {
         ticked: [...document.querySelectorAll(__CONTADORES)].filter((e) => e.classList.contains('ox-ticked')).map((e) => e.id),
-        ctx: ctx.textContent.trim(),
+        // Desde la 1.2.0 el nombre no va en la titlebar: ahí están las vistas.
+        nombreEnTitlebar: document.querySelector('.ox-titlebar').textContent.includes('uno.pdf'),
+        cuentaVisible: !cuentaEl.hidden && cuentaEl.getBoundingClientRect().width > 0,
         nombre: document.querySelector('#stat-doc-name > :not(.ox-swap-out)')?.textContent.trim() || document.getElementById('stat-doc-name').textContent.trim(),
         cuenta: document.getElementById('nav-paginas-count').textContent.trim(),
         impresora: document.getElementById('stat-impresora-value').textContent.trim(),
       };
     })()`);
     ok('ningún contador destella al abrir el primer documento', n.ticked.length === 0, n.ticked.join(', '));
-    ok('el titlebar dice el nombre', n.ctx === 'uno.pdf', n.ctx);
-    ok('la statusbar también', n.nombre === 'uno.pdf', n.nombre);
-    ok('y el rail cuenta las páginas', n.cuenta === '4', n.cuenta);
+    ok('el titlebar no repite el nombre', !n.nombreEnTitlebar);
+    ok('la statusbar lo dice', n.nombre === 'uno.pdf', n.nombre);
+    ok('y la pestaña de Páginas las cuenta', n.cuenta === '4', n.cuenta);
+    ok('con el contador desplegado (no plegado en 0 px)', n.cuentaVisible);
     ok('la impresora de la statusbar es la elegida', n.impresora === IMPRESORA.nombre, n.impresora);
 
     /* Un aviso que no cambia lo que se lee (un trazo de tinta) no reemplaza
-       nodos: el contexto era un innerHTML en cada aviso (shell-26, fw-09). */
+       nodos (shell-26, fw-09). */
     const mismo = await js(`(async () => {
       const est = await import('./js/estado.js');
-      const ctx = document.getElementById('titlebar-context');
-      const antes = [...ctx.childNodes];
       const cuenta = [...document.getElementById('nav-paginas-count').childNodes];
       est.emitir('tinta'); est.emitir('todo');
       await new Promise((r) => setTimeout(r, 50));
-      const ahora = [...ctx.childNodes];
       const cuentaAhora = [...document.getElementById('nav-paginas-count').childNodes];
       return {
-        ctx: antes.length > 0 && antes.length === ahora.length && antes.every((n, i) => n === ahora[i]),
         cuenta: cuenta.length === cuentaAhora.length && cuenta.every((n, i) => n === cuentaAhora[i]),
       };
     })()`);
-    ok('un aviso de tinta no reemplaza los nodos del contexto del titlebar', mismo.ctx);
-    ok('ni los del contador del rail', mismo.cuenta);
+    ok('un aviso de tinta no reemplaza los nodos del contador de Páginas', mismo.cuenta);
   }
 
   /* ── 3. «Abriendo…» ─────────────────────────────────────────────────────── */
@@ -217,8 +215,10 @@ async function chrome() {
     const n = await js(`(async () => {
       const est = await import('./js/estado.js');
       const btn = document.getElementById('btn-abrir');
-      // Lo vivo, con los textos sueltos: el botón nace con un nodo de texto (« Abrir»).
-      const vivo = () => [...btn.childNodes].filter((c) => !(c.nodeType === 1 && c.classList.contains('ox-swap-out'))).map((c) => c.textContent.trim()).join('').trim();
+      // Lo vivo: desde la 1.2.0 el botón es un ícono, y «ocupado» es el spinner
+      // entre lo que no se está yendo, con el tooltip diciéndolo.
+      const vivo = () => ([...btn.children].some((c) => !c.classList.contains('ox-swap-out') && (c.matches('svg') ? c : c.querySelector('svg'))?.querySelector('circle + circle'))
+        ? 'Abriendo…' : 'Abrir') + ' / ' + btn.dataset.tip;
       est.S.cargando += 1; est.emitir('cargando');
       await new Promise((r) => setTimeout(r, 60));
       const temprano = vivo();
@@ -229,10 +229,10 @@ async function chrome() {
       return { temprano, serie, ocupado, despues: vivo() };
     })()`);
     ok('un instante no alcanza para cambiar el botón (sin parpadeo en aperturas rápidas)', /Abrir/.test(n.temprano) && !/Abriendo/.test(n.temprano), n.temprano);
-    ok('abriendo, el botón dice «Abriendo…»', /Abriendo/.test(n.ocupado.txt), n.ocupado.txt);
+    ok('abriendo, el botón muestra el spinner y el tooltip dice «Abriendo…»', /^Abriendo… \/ Abriendo…$/.test(n.ocupado.txt), n.ocupado.txt);
     ok('con un relevo, no un corte (hubo un calco yéndose)', n.serie.some((f) => f.calco));
     ok('y el «+» de la franja muestra el spinner', n.ocupado.spinMas);
-    ok('al terminar vuelve a «Abrir»', /Abrir/.test(n.despues) && !/Abriendo/.test(n.despues), n.despues);
+    ok('al terminar vuelve a «Abrir»', n.despues === 'Abrir / Abrir un PDF', n.despues);
 
     /* Lo de verdad, sin fabricar nada: una tanda de dos con 450 ms de lectura
        cada uno. La lectura (traer el archivo por IPC) es lo que más tarda y
@@ -244,7 +244,8 @@ async function chrome() {
     const real = await js(`(async () => {
       const est = await import('./js/estado.js');
       const btn = document.getElementById('btn-abrir');
-      const vivo = () => [...btn.childNodes].filter((c) => !(c.nodeType === 1 && c.classList.contains('ox-swap-out'))).map((c) => c.textContent.trim()).join('').trim();
+      const vivo = () => [...btn.children].some((c) => !c.classList.contains('ox-swap-out') && (c.matches('svg') ? c : c.querySelector('svg'))?.querySelector('circle + circle'))
+        ? 'Abriendo…' : 'Abrir';
       btn.click();
       return __cuadros(() => ({ ocupado: /Abriendo/.test(vivo()), cargando: est.S.cargando, n: est.S.pestanas.length }), 3200);
     })()`);
@@ -391,13 +392,77 @@ async function chrome() {
     ok('y termina apagado', n.serie.at(-1).op === 0 || !n.serie.at(-1).existe);
   }
 
-  /* ── 6-bis. El rail, el ícono de maximizar y la vitrina ─────────────────── */
+  /* ── 6-bis. Las vistas de la titlebar, el ícono de maximizar y la vitrina ─ */
   console.log('\n6-bis. Detalles del shell');
   {
-    /* css-25c: con el nav del rail en el fondo, el esfumado de abajo se apaga. */
-    const rail = await js(`(() => { const n = document.querySelector('.ox-rail__nav');
-      return { fondo: n.classList.contains('is-bottom'), fade: getComputedStyle(n).getPropertyValue('--ox-fade-bottom').trim() }; })()`);
-    ok('el rail en el fondo no esfuma abajo', !rail.fondo || rail.fade === '0px', JSON.stringify(rail));
+    /* 1.2.0: sin rail. Las vistas viven en la titlebar y un solo indicador
+       marca la activa. Se mide dónde CAE (debajo de la pestaña, pegado al
+       borde de abajo de la titlebar) y que al navegar VIAJE: una serie de
+       posiciones intermedias, no un salto de un cuadro al otro. */
+    const ind = await js(`(async () => {
+      const el = document.getElementById('qr-vistas-ind');
+      const medir = () => {
+        const i = el.getBoundingClientRect();
+        const a = document.querySelector('.ox-titlebar .qr-vista.is-active');
+        const r = a.getBoundingClientRect();
+        const pad = parseFloat(getComputedStyle(a).paddingLeft);
+        const tb = document.querySelector('.ox-titlebar').getBoundingClientRect();
+        return { vista: a.dataset.view, dIzq: Math.abs(i.left - (r.left + pad)), dDer: Math.abs(i.right - (r.right - pad)),
+                 dAbajo: Math.abs(i.bottom - tb.bottom), op: +getComputedStyle(el).opacity };
+      };
+      // Arranca desde Documento: las secciones de antes pueden haber dejado otra.
+      document.querySelector('.ox-navitem[data-view="lector"]').click();
+      await new Promise((r) => setTimeout(r, 500));
+      const antes = medir();
+      const x0 = el.getBoundingClientRect().left;
+      document.querySelector('.ox-navitem[data-view="imprimir"]').click();
+      const serie = await __cuadros(() => ({ x: Math.round(el.getBoundingClientRect().left) }), 500);
+      const despues = medir();
+      const x1 = el.getBoundingClientRect().left;
+      const intermedios = serie.filter((f) => Math.abs(f.x - x0) > 2 && Math.abs(f.x - x1) > 2).length;
+      document.querySelector('.ox-navitem[data-view="lector"]').click();
+      await new Promise((r) => setTimeout(r, 500));
+      return { antes, despues, intermedios, final: medir() };
+    })()`);
+    const bajo = (m) => m.dIzq < 1.5 && m.dDer < 1.5 && m.dAbajo < 1 && m.op === 1;
+    /* Sin rail, la vista ocupa el cuerpo entero. motion.css clava .ox-main en
+       la columna 2 (la de al lado del rail): sin pisarlo, el grid inventaba una
+       columna implícita y la vista caía en la mitad derecha con un hueco a la
+       izquierda. Los 113 ok de antes no lo veían porque nada medía dónde cae. */
+    const cae = await js(`(() => {
+      const b = document.querySelector('.ox-body').getBoundingClientRect();
+      const m = document.querySelector('#view').getBoundingClientRect();
+      return { izq: Math.round(m.left - b.left), der: Math.round(b.right - m.right) };
+    })()`);
+    ok('la vista ocupa el cuerpo entero, de borde a borde', cae.izq === 0 && cae.der === 0, JSON.stringify(cae));
+    ok('el indicador cae debajo de la vista activa', bajo(ind.antes) && ind.antes.vista === 'lector', JSON.stringify(ind.antes));
+    ok('al navegar viaja (pasa por posiciones intermedias)', ind.intermedios >= 3, `${ind.intermedios} cuadros en el medio`);
+    ok('y llega debajo de la nueva', bajo(ind.despues) && ind.despues.vista === 'imprimir', JSON.stringify(ind.despues));
+    ok('al volver, debajo de Documento otra vez', bajo(ind.final), JSON.stringify(ind.final));
+
+    /* La ventana angosta: los nombres se van, el tooltip los dice, la fila
+       entra sin pisar a Ajustes y el indicador sigue a su pestaña. */
+    const [w0, h0] = win.getSize();
+    win.setSize(960, h0);
+    await esperar(500);
+    const ang = await js(`(() => {
+      const vistas = [...document.querySelectorAll('.qr-vistas .qr-vista')].filter((b) => !b.hidden);
+      const nombres = vistas.map((b) => getComputedStyle(b.querySelector('.qr-vista__nombre')).display);
+      const ultima = vistas.at(-1).getBoundingClientRect();
+      const ajustes = document.querySelector('.qr-vista--ajustes').getBoundingClientRect();
+      const i = document.getElementById('qr-vistas-ind').getBoundingClientRect();
+      const a = document.querySelector('.ox-titlebar .qr-vista.is-active').getBoundingClientRect();
+      return { ocultos: nombres.every((d) => d === 'none'), tips: vistas.every((b) => b.dataset.tip === b.dataset.nombre),
+               entra: ultima.right < ajustes.left, centrado: Math.abs((i.left + i.right) / 2 - (a.left + a.right) / 2) };
+    })()`);
+    win.setSize(w0, h0);
+    await esperar(500);
+    const ancha = await js(`[...document.querySelectorAll('.qr-vistas .qr-vista')].every((b) => !b.dataset.tip)`);
+    ok('con la ventana angosta las vistas quedan con el ícono', ang.ocultos);
+    ok('y el nombre pasa al tooltip', ang.tips);
+    ok('la fila entra sin pisar a Ajustes', ang.entra);
+    ok('el indicador sigue debajo de su pestaña', ang.centrado < 1.5, `${ang.centrado.toFixed(1)} px corrido`);
+    ok('con la ventana ancha el tooltip sobra y se va', ancha);
 
     /* shell-41: el ícono de maximizar se releva. */
     win.webContents.send('win:maximized', true);
@@ -862,7 +927,7 @@ async function cierre() {
     })()`);
 
     if (MODO === 'cierre') {
-      chk('en modo desarrollo (--dev) Piezas sí está en el rail', await js(`!document.getElementById('nav-piezas').hidden`));
+      chk('en modo desarrollo (--dev) Piezas sí está entre las vistas', await js(`!document.getElementById('nav-piezas').hidden`));
     }
 
     await js(`(async () => {

@@ -213,9 +213,9 @@ async function correr() {
       activas: tabs.filter((t) => t.classList.contains('is-active')).length,
       activaEs: tabs.findIndex((t) => t.classList.contains('is-active')),
       nombres: tabs.map((t) => t.querySelector('.qr-tab__nombre').textContent),
-      // Lo vivo: el contexto se escribe con un relevo (app.js) y el calco de
-      // lo que se va suma su texto al textContent un rato (revisión del 4A).
-      contextoTitlebar: ${vivo('#titlebar-context')},
+      // Desde la 1.2.0 la titlebar no dice el nombre del documento nunca: ahí
+      // viven las vistas. Que no aparezca ni con una ni con dos.
+      nombreEnTitlebar: tabs.some((t) => document.querySelector('.ox-titlebar').textContent.includes(t.querySelector('.qr-tab__nombre').textContent)),
       hayMas: !!document.getElementById('qr-tab-mas') && !document.getElementById('qr-tab-mas').hidden,
       inerte: f.inert,
     };
@@ -233,7 +233,7 @@ async function correr() {
     ok('con nombres distintos', n.nombres[0] !== n.nombres[1], n.nombres.join(' / '));
     ok('y exactamente una activa', n.activas === 1, `${n.activas}`);
     ok('la activa es la recién abierta', n.activaEs === 1, `índice ${n.activaEs}`);
-    ok('el titlebar deja de repetir el nombre', n.contextoTitlebar === '', n.contextoTitlebar);
+    ok('el titlebar no repite el nombre', !n.nombreEnTitlebar);
     ok('está el botón de abrir otro', n.hayMas);
     ok('con dos documentos la franja ya no es inerte', n.inerte === false, String(n.inerte));
   }

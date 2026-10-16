@@ -16,8 +16,11 @@ avisos para leer la segunda:
   (`test/renderer.test.cjs`) tiene sus propios números y mide menos: el
   relevo y el repintado de vistas (9-ter, 9-quater), los overlays, los
   anillos. Lo de cada zona lo miden sus suites (`npm run verificar`).
-- **Piezas** (la vitrina) solo está en el rail en modo desarrollo: `npm run
-  dev` o `QUIRE_DEV` en el entorno (ux-39). La ruta existe igual. Su
+- **Piezas** (la vitrina) solo está entre las vistas en modo desarrollo: `npm run
+  dev` o `QUIRE_DEV` en el entorno (ux-39).
+- **Quire no tiene rail** desde la 1.2.0: las vistas viven en la titlebar (ver
+  «Las vistas en la titlebar» más abajo). Lo que la referencia de Onyx dice
+  del rail vale para Onyx, no para esta app. La ruta existe igual. Su
   `design-view.js` es el de Onyx: si una sección que cita la referencia (por
   ejemplo «Ocupado y contadores») no aparece, es que esa copia quedó atrás.
 
@@ -52,15 +55,15 @@ con prefijo `ox-`, y eso impedía traer el de Onyx copiando el archivo, fw-18):
 
 | Token | Para qué |
 |---|---|
-| `--qr-pie` | El alto de la franja pegada arriba de la statusbar: el pie del rail y la barra de la vista de al lado. Son dos componentes, y sus líneas se leen como una sola: si no miden lo mismo se ve el escalón |
+| `--qr-pie` | El alto de la barra de abajo de Imprimir y de Páginas, el que pide la navegación del preview (28 px + 12 de aire arriba y abajo). Nació para coincidir con el pie del rail, que ya no está |
 | `--qr-statusbar-icono` · `--qr-statusbar-texto` | La columna donde arrancan los valores de la statusbar, para lo que se apila encima |
 | `--qr-velo-soltar` | El velo que oscurece la app mientras arrastrás un archivo encima |
 
 **Retoques al shell.** Sobrescriben clases `ox-` desde acá, nunca editando
-`shell.css`: el pie del rail sin línea y con el alto de `--qr-pie` (y el nav
-vuelve a esfumar abajo, salvo al llegar al fondo); `.ox-navitem[hidden]`, para
-que el `hidden` de Piezas le gane al `display` del ítem; y **todo
-`.ox-viewhead` cierra con su hairline**, así que arriba ninguna vista esfuma.
+`shell.css`: el cuerpo de una sola columna (sin rail); las vistas como
+pestañas de la titlebar (abajo); `.ox-navitem[hidden]`, para que el `hidden`
+de Piezas le gane al `display` del ítem; y **todo `.ox-viewhead` cierra con su
+hairline**, así que arriba ninguna vista esfuma.
 En Onyx eso lo pide cada vista con `head({ linea: true })`; en Quire es la
 regla general.
 
@@ -72,9 +75,42 @@ tarjeta de opciones), `.qr-col-chica` (rótulo, dato y explicación),
 `.qr-angosto` (un segmentado que no se estira), `.qr-remate` (aire al final de
 una página que scrollea), `.qr-ajustes` (la columna de Ajustes),
 `.qr-cierre-lista` (los documentos con cambios, en la pregunta antes de
-cerrar) y `.qr-abrir` (el botón Abrir, al ancho del rail). Más las pestañas
+cerrar) y `.qr-abrir` (el botón Abrir, un ícono de la titlebar). Más las pestañas
 (`.qr-tabs`, `.qr-tab`, `__nombre`, `__cerrar`, `.qr-tabs__mas`) y la caja del
 lector, `.qr-lector`.
+
+### Las vistas en la titlebar (1.2.0)
+
+El rail le cobraba 224 px al documento todo el tiempo. Fran eligió, entre
+cinco variantes de una maqueta (`S:\mockups\quire\sin-rail.html`), subir las
+vistas a la titlebar: usa un espacio que ya existía y no suma clicks.
+
+- **Siguen siendo `.ox-navitem`** (con `.qr-vista` encima): el router marca el
+  activo por esa clase, así `router.js` sigue siendo el de Onyx, y los tests
+  que clickean `.ox-navitem[data-view=…]` siguen andando. La piel de pestaña
+  va en `quire.css`, con `.ox-titlebar` delante para ganarle a `shell.css`.
+- **La activa no lleva fondo.** La dicen el texto pleno, el ícono en acento y
+  el indicador. El peso tampoco cambia: con 500 la pestaña se ensancha y corre
+  a las de al lado en cada navegación.
+- **Un solo indicador** (`.qr-vistas__ind`, hijo de la titlebar para llegar
+  también a Ajustes) que viaja con `transform` (posición y `scaleX` sobre una
+  base de 100 px). `ubicarIndicador()` en `app.js`: navegar lo hace viajar; lo
+  demás que mueve una pestaña (el ancho de la ventana, un contador, la fuente)
+  lo recoloca sin viaje desde un `ResizeObserver`.
+- **Los contadores se pliegan a lo ancho** (`.ox-plegable--ancho` + `hidden`,
+  con `cuenta()` en `app.js`): vacíos en una pestaña que se ajusta a su texto,
+  igual sumaban el hueco del gap.
+- **Abrir es un ícono** (`#btn-abrir`): ocupado pasa al spinner y el tooltip
+  dice «Abriendo…». **Ajustes** va solo con su ícono, contra los botones de
+  ventana.
+- **Ventana angosta** (`max-width: 1080px`, el mismo número en el `@media` y
+  en `VENTANA_ANGOSTA`): las pestañas quedan con el ícono y el nombre pasa al
+  tooltip. Con el nombre a la vista no hay tooltip.
+- **El nombre del documento ya no va en el centro de la titlebar**: lo dicen la
+  statusbar y, con dos o más abiertos, la franja de pestañas.
+
+Lo mide `npm run chrome` (6-bis): dónde cae el indicador, que viaje por
+cuadros intermedios, y la ventana angosta.
 
 ### La selección sobre una superficie clara: `--ox-select-claro`
 

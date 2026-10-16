@@ -152,7 +152,7 @@ app.whenReady().then(async () => {
   notas.push(['shell', await js(`(() => {
     const r = {};
     r.splashSeFue = !document.getElementById('boot-splash');
-    r.rail = document.querySelectorAll('.ox-navitem').length;
+    r.vistas = document.querySelectorAll('.ox-titlebar .ox-navitem').length;
     r.marca = !!document.querySelector('.ox-brand__mark path');
     r.vistaMontada = !!document.querySelector('#view').children.length;
     return r;
@@ -161,7 +161,7 @@ app.whenReady().then(async () => {
     const n = ultima();
     exigir('shell', n.splashSeFue, 'el splash no se fue');
     // Lector, Páginas, Imprimir, Herramientas, Convertir y Ajustes, como mínimo.
-    exigir('shell', n.rail >= 6, `el rail tiene ${n.rail} vistas`);
+    exigir('shell', n.vistas >= 6, `la titlebar tiene ${n.vistas} vistas`);
     exigir('shell', n.marca, 'la marca de la titlebar no tiene su SVG');
     exigir('shell', n.vistaMontada, 'la vista inicial no pintó nada');
   }
@@ -320,7 +320,8 @@ app.whenReady().then(async () => {
   }
 
   /* El panel a MITAD de camino, congelado: es el único frame donde se ve si
-     invade el rail. Se fija el transform a mano en vez de cazar el frame
+     se sale de su área. Desde la 1.2.0 no hay rail a su izquierda, pero sí el
+     borde de la ventana: sin recorte se pintaría por fuera del cuerpo. Se fija el transform a mano en vez de cazar el frame
      exacto, que sería una carrera contra la animación. */
   await js(`(() => {
     const p = document.getElementById('qr-panel');
@@ -333,15 +334,12 @@ app.whenReady().then(async () => {
   notas.push(['recorte', await js(`(() => {
     const cuerpo = document.querySelector('.qr-lector__cuerpo');
     const panel = document.getElementById('qr-panel');
-    const rail = document.querySelector('.ox-rail');
     const p = panel.getBoundingClientRect();
     const c = cuerpo.getBoundingClientRect();
-    const r = rail.getBoundingClientRect();
     const res = {
-      // A mitad de camino el panel SÍ se sale de su área (eso es la animación)
-      // y en geometría pisa el rail…
+      // A mitad de camino el panel SÍ se sale de su área (eso es la animación)…
       panelSeSale: Math.round(c.left - p.left),
-      pisaElRail: p.left < r.right,
+      seSale: p.left < c.left,
       // …pero el contenedor lo recorta, así que no se pinta encima de nada.
       overflow: getComputedStyle(cuerpo).overflow,
       opacidad: getComputedStyle(panel).opacity,
@@ -352,9 +350,9 @@ app.whenReady().then(async () => {
   })()`)]);
   {
     const n = ultima();
-    // Si se sale y pisa el rail, que el cuerpo lo recorte: si no, se pinta encima.
-    exigir('recorte', !n.pisaElRail || (n.overflow !== 'visible' && n.overflow !== ''),
-      `el panel a mitad de camino pisa el rail y el cuerpo no lo recorta (overflow ${n.overflow})`);
+    // Si se sale, que el cuerpo lo recorte: si no, se pinta fuera de su lugar.
+    exigir('recorte', !n.seSale || (n.overflow !== 'visible' && n.overflow !== ''),
+      `el panel a mitad de camino se sale del cuerpo y nadie lo recorta (overflow ${n.overflow})`);
   }
   await esperar(320);
 
@@ -717,25 +715,6 @@ app.whenReady().then(async () => {
       nav: ${vivo('#qr-preview-nav')},
       tintaEnElPreview,
       lienzo: cv ? { ancho: cv.width, alto: cv.height } : null,
-
-      /* El pie del rail y la barra de la vista quedan pegados uno al lado del
-         otro, arriba de la statusbar, y sus bordes superiores se leen como UNA
-         línea cruzando la ventana. Si no miden lo mismo se ve el escalón — eran
-         11,5 px, y en el DOM no se nota: los dos elementos existen, están
-         visibles y cada uno mide lo que le corresponde por su contenido. Solo
-         aparece comparando los dos. */
-      franjaInferior: (() => {
-        const pie = document.querySelector('.ox-rail__foot');
-        const barra = document.querySelector('#view .qr-preview__nav');
-        if (!pie || !barra) return { error: 'falta alguna de las dos barras' };
-        const a = pie.getBoundingClientRect();
-        const b = barra.getBoundingClientRect();
-        return {
-          altoPie: Math.round(a.height), altoBarra: Math.round(b.height),
-          escalonArriba: Math.round(Math.abs(a.top - b.top)),
-          escalonAbajo: Math.round(Math.abs(a.bottom - b.bottom)),
-        };
-      })(),
     };
   })()`)]);
 
@@ -756,14 +735,6 @@ app.whenReady().then(async () => {
     const area = n.lienzo ? n.lienzo.ancho * n.lienzo.alto : 0;
     const densidad = area ? Math.round(n.tintaEnElPreview / area * 100000) : 0;
     exigir('imprimir', densidad > 60, `la tinta del lector no llegó al PDF impuesto (${n.tintaEnElPreview} píxeles rojos en un canvas de ${n.lienzo ? n.lienzo.ancho + 'x' + n.lienzo.alto : 'nada'}: ${densidad} por 100k; sin el trazo daba 26 y con él 121: si cambió el trazo o la goma, volver a medir la base)`);
-    const f = n.franjaInferior;
-    if (f?.error) problemas.push('franja: ' + f.error);
-    else if (f) {
-      if (f.escalonArriba !== 0) {
-        problemas.push(`franja: el pie del rail (${f.altoPie} px) y la barra del preview (${f.altoBarra} px) no arrancan a la misma altura: ${f.escalonArriba} px de escalón`);
-      }
-      if (f.escalonAbajo !== 0) problemas.push(`franja: tampoco terminan igual (${f.escalonAbajo} px)`);
-    }
   }
 
   // Cambiar a folleto: el resumen y el papel tienen que cambiar solos.
