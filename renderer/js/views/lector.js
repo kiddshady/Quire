@@ -2213,10 +2213,20 @@ function alternarPanel() {
   const k = S.modoZoom === 'fijo' ? 1 : escalaActual() / V.escalaHecha;
   if (Math.abs(dx) < 0.5 && Math.abs(k - 1) < 1e-4) return;
 
+  /* Al abrir el panel el visor se achica y la hoja, todavía a la escala vieja,
+     ya no entra: los márgenes automáticos colapsan y queda apoyada a la
+     izquierda, no centrada. Escalar desde ahí la dejaba corrida, y al terminar
+     reescalar() la centraba de un salto (~75 px en ancho, 16 oct 2026). El
+     centro de la pista va al centro del visor en el mismo viaje: es donde
+     reescalar() la va a dejar. Sin desborde los dos centros coinciden y tx da
+     0, que es el caso de cerrar el panel. */
+  const vr = V.visor.getBoundingClientRect();
+  const pr = pista.getBoundingClientRect();
+  const tx = k * (vr.left + V.visor.clientLeft + V.visor.clientWidth / 2 - (pr.left + pr.width / 2));
   pista.style.transformOrigin = `${V.visor.scrollLeft + V.visor.clientWidth / 2}px ${V.visor.scrollTop + V.visor.clientHeight / 2}px`;
   pista.classList.add('is-escalando');
   const anim = pista.animate(
-    [{ transform: `translateX(${dx}px)` }, { transform: Math.abs(k - 1) < 1e-4 ? 'none' : `scale(${k})` }],
+    [{ transform: `translateX(${dx}px)` }, { transform: Math.abs(k - 1) < 1e-4 ? 'none' : `translateX(${tx}px) scale(${k})` }],
     { duration: T3, easing: EASE, fill: 'forwards' },
   );
   V.pliegue = { anim, pista, k, reloj: setTimeout(terminarPliegue, T3 + 200) };

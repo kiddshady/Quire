@@ -876,8 +876,23 @@ app.whenReady().then(async () => {
       Math.abs(s0.x - pliegue.antes.x) <= 2 && Math.abs(s0.w - pliegue.antes.w) <= 2, `${JSON.stringify(pliegue.antes)} → ${JSON.stringify(s0)}`);
     ok('y viaja sin volver para atrás hasta su lugar nuevo', monotona && xs.length > 5, JSON.stringify(xs.slice(0, 20)));
     ok('con un solo reescalado, al terminar', pliegue.reescalados === 1, `(${pliegue.reescalados})`);
-    await js(`document.getElementById('qr-toggle-panel').click()`);
-    await esperar(900);
+
+    /* Abrirlo en ancho: el visor se achica, la hoja vieja no entra y queda
+       apoyada a la izquierda. El viaje tenía que terminar donde la centra el
+       reescalado; terminaba ~75 px a la derecha y saltaba (16 oct 2026). A
+       partir de la mitad del viaje ningún cuadro se mueve de golpe. */
+    const apertura = await js(`(async () => {
+      const ref = () => { const v = T.visor().getBoundingClientRect(); for (const p of document.querySelectorAll('.qr-pliego')) { const r = p.getBoundingClientRect(); if (r.bottom > v.top) return r; } };
+      document.getElementById('qr-toggle-panel').click();
+      const serie = await T.cuadros((t) => [t, +ref().left.toFixed(1)], 700);
+      await new Promise((r) => setTimeout(r, 200));
+      return { serie, final: +ref().left.toFixed(1) };
+    })()`);
+    const tardios = apertura.serie.filter(([t]) => t >= 140);
+    const saltoMax = Math.max(...tardios.map(([, x], i) => (i ? Math.abs(x - tardios[i - 1][1]) : 0)));
+    ok('abrir el panel en ancho: la hoja termina el viaje donde queda, sin rebote', saltoMax < 3 && Math.abs(tardios.at(-1)[1] - apertura.final) < 1,
+      `salto ${saltoMax.toFixed(1)} px · ${JSON.stringify(apertura.serie.map(([, x]) => x).slice(-25))}`);
+    await esperar(400);
   });
 
   /* ── 4 · El panel ────────────────────────────────────────────────────────── */
