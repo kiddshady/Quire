@@ -886,11 +886,27 @@ app.whenReady().then(async () => {
     const apertura = await js(`(async () => {
       const ref = () => { const v = T.visor().getBoundingClientRect(); for (const p of document.querySelectorAll('.qr-pliego')) { const r = p.getBoundingClientRect(); if (r.bottom > v.top) return r; } };
       const alto = T.visor().clientHeight;
+      const zoom = document.getElementById('qr-zoom-valor');
+      const zoomAntes = T.vivo(zoom);
+      /* La clase ox-ticked queda puesta después de cada destello: lo que se
+         mira es si la animación está corriendo. */
+      const brilla = () => zoom.getAnimations().some((a) => a.animationName === 'ox-tick' && a.playState === 'running');
+      await new Promise((r) => setTimeout(r, 800));
+      let brillo = false;
       document.getElementById('qr-toggle-panel').click();
-      const serie = await T.cuadros((t) => [t, +ref().left.toFixed(1), T.visor().clientHeight], 700);
+      const serie = await T.cuadros((t) => {
+        brillo ||= brilla();
+        return [t, +ref().left.toFixed(1), T.visor().clientHeight];
+      }, 700);
       await new Promise((r) => setTimeout(r, 200));
-      return { serie, alto, final: +ref().left.toFixed(1) };
+      brillo ||= brilla();
+      return { serie, alto, final: +ref().left.toFixed(1), zoom: { antes: zoomAntes, despues: T.vivo(zoom), brillo } };
     })()`);
+    /* El zoom cambia de rebote (el panel le achica el lugar): se reescribe
+       sin destello. Brillar un segundo al tocar el panel se veía raro (Fran,
+       16 oct 2026). */
+    ok('al abrir el panel el zoom cambia sin brillar', apertura.zoom.antes !== apertura.zoom.despues && !apertura.zoom.brillo,
+      JSON.stringify(apertura.zoom));
     /* Y en todo el viaje el visor no pierde alto: el desborde sacaba la barra
        horizontal, una banda negra de 10 px abajo (16 oct 2026). */
     const altos = [...new Set(apertura.serie.map(([, , h]) => h))];
