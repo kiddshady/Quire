@@ -2381,6 +2381,142 @@ function soltarEstirado() {
   pista.classList.remove('is-escalando');
 }
 
+/* ── Las barras de scroll del visor, flotando (1.2.1) ────────────────────────
+   La barra nativa reserva su franja: 10 px que el visor le resta a la hoja.
+   Con el zoom fijo y el panel abierto la hoja ya no entra a lo ancho, aparece
+   la barra horizontal, y su franja se veía como una línea negra cortando la
+   hoja contra la statusbar (video de Fran, 16 oct 2026). Lo mismo a la
+   derecha con la vertical. Ninguna CSS hace que una scrollbar de Chromium
+   flote: el visor se queda sin las nativas (lector.css) y estas se dibujan en
+   una capa del tamaño exacto del visor, fuera de él para que el scroll no se
+   las lleve —el mismo truco que la capa del puck—.
+
+   Se portan como las de la casa: el pulgar aparece con el mouse sobre el
+   visor, destella un rato al scrollear, se arrastra, y un clic en la pista
+   avanza una pantalla. La rueda sobre la barra scrollea el visor (sobre la
+   horizontal, de costado). Una barra que no hace falta no recibe eventos: si
+   no, sus 10 px invisibles le robarían el lápiz al borde de la hoja.
+
+   De paso, sin franja el ancho del visor ya no cambia según haya o no barra,
+   que era lo que hacía medir dos escalas distintas (ver escalaHoja()). */
+const PULGAR_MIN = 28;           // px: un pulgar más corto no se agarra
+const DESTELLO_SCROLL = 900;     // ms que se queda a la vista después de scrollear
+
+function barrasFlotantes() {
+  const visor = V.visor;
+  const capa = document.getElementById('qr-barras');
+  const pista = visor?.querySelector('.qr-pista');
+  if (!visor || !capa || !pista) return;
+
+  capa.innerHTML = `
+    <div class="qr-sb qr-sb--v" data-eje="v"><div class="qr-sb__pulgar"></div></div>
+    <div class="qr-sb qr-sb--h" data-eje="h"><div class="qr-sb__pulgar"></div></div>`;
+  const ejes = {
+    v: { barra: capa.children[0], scroll: 'scrollTop', total: 'scrollHeight', vista: 'clientHeight', lado: 'clientHeight', mover: 'translateY', largo: 'height', punto: 'clientY' },
+    h: { barra: capa.children[1], scroll: 'scrollLeft', total: 'scrollWidth', vista: 'clientWidth', lado: 'clientWidth', mover: 'translateX', largo: 'width', punto: 'clientX' },
+  };
+  for (const e of Object.values(ejes)) e.pulgar = e.barra.firstElementChild;
+
+  const medir = (e) => {
+    const sobra = visor[e.total] - visor[e.vista];
+    const recorrido = e.barra[e.lado];
+    const largo = Math.min(recorrido, Math.max(PULGAR_MIN, Math.round(recorrido * visor[e.vista] / visor[e.total])));
+    return { sobra, recorrido, largo, libre: recorrido - largo };
+  };
+
+  const actualizar = () => {
+    if (!visor.isConnected) return;
+    /* Calzada sobre el visor: el panel lateral puede estar abierto o no. */
+    capa.style.left = `${visor.offsetLeft}px`;
+    capa.style.top = `${visor.offsetTop}px`;
+    capa.style.width = `${visor.offsetWidth}px`;
+    capa.style.height = `${visor.offsetHeight}px`;
+    const hace = {
+      v: visor.scrollHeight - visor.clientHeight > 1,
+      h: visor.scrollWidth - visor.clientWidth > 1,
+    };
+    capa.classList.toggle('con-v', hace.v);
+    capa.classList.toggle('con-h', hace.h);
+    for (const [k, e] of Object.entries(ejes)) {
+      e.barra.classList.toggle('is-necesaria', hace[k]);
+      if (!hace[k]) continue;
+      const m = medir(e);
+      const x = m.sobra > 0 ? m.libre * (visor[e.scroll] / m.sobra) : 0;
+      e.pulgar.style[e.largo] = `${m.largo}px`;
+      e.pulgar.style.transform = `${e.mover}(${Math.round(x)}px)`;
+    }
+  };
+
+  // Que se vean: el mouse cerca, o un scroll reciente.
+  let reloj = 0;
+  const alScroll = () => {
+    actualizar();
+    capa.classList.add('is-activa');
+    clearTimeout(reloj);
+    reloj = setTimeout(() => capa.classList.remove('is-activa'), DESTELLO_SCROLL);
+  };
+  const adentro = (n) => !!n && (visor.contains(n) || capa.contains(n));
+  const entrar = () => capa.classList.add('is-cerca');
+  const salir = (ev) => { if (!adentro(ev.relatedTarget)) capa.classList.remove('is-cerca'); };
+  visor.addEventListener('scroll', alScroll, { passive: true });
+  for (const n of [visor, capa]) {
+    n.addEventListener('pointerenter', entrar);
+    n.addEventListener('pointerleave', salir);
+  }
+
+  // Arrastrar el pulgar, o hacer clic en la pista para avanzar una pantalla.
+  for (const e of Object.values(ejes)) {
+    e.barra.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const m = medir(e);
+      if (ev.target === e.pulgar) {
+        const p0 = ev[e.punto];
+        const s0 = visor[e.scroll];
+        e.barra.setPointerCapture(ev.pointerId);
+        e.barra.classList.add('is-arrastrando');
+        const mover = (mv) => {
+          if (m.libre > 0) visor[e.scroll] = s0 + (mv[e.punto] - p0) * (m.sobra / m.libre);
+        };
+        const soltar = () => {
+          e.barra.classList.remove('is-arrastrando');
+          e.barra.removeEventListener('pointermove', mover);
+          e.barra.removeEventListener('pointerup', soltar);
+          e.barra.removeEventListener('pointercancel', soltar);
+        };
+        e.barra.addEventListener('pointermove', mover);
+        e.barra.addEventListener('pointerup', soltar);
+        e.barra.addEventListener('pointercancel', soltar);
+        return;
+      }
+      const r = e.pulgar.getBoundingClientRect();
+      const antes = e === ejes.v ? ev.clientY < r.top : ev.clientX < r.left;
+      const paso = visor[e.vista] * 0.9 * (antes ? -1 : 1);
+      visor.scrollBy({ [e === ejes.v ? 'top' : 'left']: paso, behavior: 'smooth' });
+    });
+    /* La rueda sobre una barra scrollea el visor: la barra está fuera de él, y
+       sin esto la rueda ahí no hacía nada. Sobre la horizontal, de costado. */
+    e.barra.addEventListener('wheel', (ev) => {
+      ev.preventDefault();
+      if (e === ejes.h) visor.scrollBy({ left: ev.deltaX || ev.deltaY });
+      else visor.scrollBy({ top: ev.deltaY, left: ev.deltaX });
+    }, { passive: false });
+  }
+
+  /* El tamaño: el del visor (la ventana, el panel) y el de la pista (el zoom). */
+  const ro = new ResizeObserver(actualizar);
+  ro.observe(visor);
+  ro.observe(pista);
+  actualizar();
+
+  Router.onLeave(() => {
+    ro.disconnect();
+    clearTimeout(reloj);
+    visor.removeEventListener('scroll', alScroll);
+  });
+}
+
 /* ── El inicio: sin documento, los recientes (ux-21) ───────────────────────────
    El main lleva una lista de recientes, con un chequeo de si cada archivo
    sigue existiendo (src/documentos.cjs), y el preload la publica desde
@@ -2648,6 +2784,9 @@ export function viewLector() {
         <!-- Donde vive el puck: una capa del tamaño exacto del visor, fuera
              de él para que el scroll no se la lleve. Ver lector.css. -->
         <div class="qr-puck-ancla" id="qr-puck-ancla"></div>
+        <!-- Las barras de scroll del visor, flotando encima de la hoja: ver
+             barrasFlotantes() y .qr-barras en lector.css. -->
+        <div class="qr-barras" id="qr-barras"></div>
       </div>
     </div>`);
 
@@ -2686,6 +2825,7 @@ export function viewLector() {
   cablear();
   cablearNavegacion();
   vigilarTamano();
+  barrasFlotantes();
 
   /* Un solo camino para refrescar la barra de tinta: la capa avisa que cambió
      y acá se responde. Antes también la actualizaba el editor al terminar un

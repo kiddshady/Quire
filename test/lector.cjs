@@ -743,6 +743,68 @@ app.whenReady().then(async () => {
     await esperar(800);
   });
 
+  await bloque('barras', async () => {
+    /* 1.2.1: el visor no tiene barras nativas. Su franja de 10 px se veía como
+       una línea negra cortando la hoja cuando el zoom fijo y el panel abierto
+       la hacían desbordar a lo ancho (video de Fran, 16 oct 2026). Las barras
+       flotan en .qr-barras: se mide que el visor no reserve nada, que la
+       horizontal aparezca y caiga sobre el borde de abajo del visor, y que el
+       pulgar recorra la pista de punta a punta. */
+    const n = await js(`(async () => {
+      const { S } = await import('./js/estado.js');
+      const { reescalar } = await import('./js/views/lector.js');
+      if (document.querySelector('.qr-lector__cuerpo').classList.contains('sin-panel')) {
+        document.getElementById('qr-toggle-panel').click();
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      S.modoZoom = 'fijo'; S.zoom = 2.6; S.rotacion = 0;
+      reescalar();
+      await new Promise((r) => setTimeout(r, 700));
+      const visor = document.getElementById('qr-visor');
+      const capa = document.getElementById('qr-barras');
+      const h = capa.querySelector('.qr-sb--h');
+      const pulgar = h.querySelector('.qr-sb__pulgar');
+      const v = visor.getBoundingClientRect();
+      const b = h.getBoundingClientRect();
+      // La hoja que cae en el borde de abajo del visor, no la primera del documento.
+      const hoja = [...visor.querySelectorAll('.qr-pliego')].map((p) => p.getBoundingClientRect())
+        .find((h) => h.top < v.bottom - 1 && h.bottom > v.bottom - 1) || { bottom: -1 };
+      const r = {
+        franjaAbajo: visor.offsetHeight - visor.clientHeight,
+        franjaDerecha: visor.offsetWidth - visor.clientWidth,
+        desborda: visor.scrollWidth > visor.clientWidth,
+        necesaria: h.classList.contains('is-necesaria'),
+        barraAbajo: Math.round(Math.abs(b.bottom - v.bottom)),
+        barraIzq: Math.round(Math.abs(b.left - v.left)),
+        hojaLlega: hoja.bottom >= v.bottom - 1,
+      };
+      visor.scrollLeft = 0;
+      await new Promise((r) => setTimeout(r, 120));
+      const p0 = pulgar.getBoundingClientRect();
+      r.alPrincipio = Math.round(p0.left - b.left);
+      visor.scrollLeft = visor.scrollWidth;
+      await new Promise((r) => setTimeout(r, 120));
+      const p1 = pulgar.getBoundingClientRect();
+      r.alFinal = Math.round(b.right - p1.right);
+      r.seVe = +getComputedStyle(h).opacity;
+      await new Promise((r) => setTimeout(r, 1300));
+      r.seApaga = capa.classList.contains('is-cerca') || +getComputedStyle(h).opacity < 0.05;
+      S.modoZoom = 'ancho';
+      reescalar();
+      await new Promise((r) => setTimeout(r, 600));
+      r.sinDesborde = !h.classList.contains('is-necesaria');
+      return r;
+    })()`);
+    ok('el visor no reserva franja para las barras', n.franjaAbajo === 0 && n.franjaDerecha === 0, JSON.stringify(n));
+    ok('con el zoom fijo grande desborda y la barra horizontal hace falta', n.desborda && n.necesaria);
+    ok('la barra flota sobre el borde de abajo del visor', n.barraAbajo <= 1 && n.barraIzq <= 1, `${n.barraAbajo} / ${n.barraIzq}`);
+    ok('y la hoja llega hasta ese borde (no la corta una franja)', n.hojaLlega);
+    ok('el pulgar recorre la pista de punta a punta', Math.abs(n.alPrincipio) <= 1 && Math.abs(n.alFinal) <= 1, `${n.alPrincipio} / ${n.alFinal}`);
+    ok('al scrollear se ve', n.seVe > 0.9, String(n.seVe));
+    ok('y después se apaga sola (sin el mouse encima)', n.seApaga);
+    ok('en «Ajustar al ancho» no hay barra horizontal', n.sinDesborde);
+  });
+
   await bloque('css-15', async () => {
     /* css-15: la franja de pestañas que se pliega reescala una vez en «Página entera». */
     await js(`(async () => {

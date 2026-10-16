@@ -448,6 +448,53 @@
   transition: outline-color var(--ox-t-1) var(--ox-ease-soft);
 }
 .qr-visor:focus-visible { box-shadow: none; outline-color: var(--ox-ring); }
+
+/* Sin barras nativas: su franja de 10 px se veía como una línea negra cortando
+   la hoja. Las dibuja barrasFlotantes() (lector.js) en .qr-barras, encima de
+   la hoja y sin robarle lugar. */
+.qr-visor::-webkit-scrollbar { width: 0; height: 0; }
+
+/* ── Las barras flotantes ────────────────────────────────────────────────────
+   Una capa calzada sobre el visor (JS le pone posición y tamaño), fuera de él
+   para que el scroll no se la lleve. Se portan como las de base.css: el pulgar
+   se materializa con el mouse encima y se aviva al tocarlo. Pero flotan sobre
+   la HOJA, que es blanca: el blanco al 10 % de las nativas ahí no se ve. El
+   pulgar es un gris translúcido con su canto claro, que se lee igual sobre el
+   papel y sobre la mesa. */
+.qr-barras {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+}
+.qr-sb {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ox-t-3) var(--ox-ease-soft);
+}
+/* Solo la que hace falta recibe eventos: si no, sus 10 px invisibles le
+   robarían el lápiz y la selección al borde de la hoja. */
+.qr-sb.is-necesaria { pointer-events: auto; }
+.qr-barras:is(.is-cerca, .is-activa) .qr-sb.is-necesaria,
+.qr-sb.is-arrastrando { opacity: 1; }
+
+.qr-sb--v { top: 0; right: 0; bottom: 0; width: 10px; }
+.qr-sb--h { left: 0; right: 0; bottom: 0; height: 10px; }
+/* Con las dos, cada una se corta antes de la esquina de la otra. */
+.qr-barras.con-h .qr-sb--v { bottom: 10px; }
+.qr-barras.con-v .qr-sb--h { right: 10px; }
+
+.qr-sb__pulgar {
+  position: absolute;
+  border-radius: var(--ox-r-pill);
+  background: color-mix(in oklch, var(--ox-s4) 72%, transparent);
+  box-shadow: inset 0 0 0 1px var(--ox-line-3);
+  transition: background-color var(--ox-t-1) var(--ox-ease-soft);
+}
+.qr-sb--v .qr-sb__pulgar { top: 0; left: 3px; right: 3px; }
+.qr-sb--h .qr-sb__pulgar { left: 0; top: 3px; bottom: 3px; }
+.qr-sb:hover .qr-sb__pulgar { background: color-mix(in oklch, var(--ox-text-4) 80%, transparent); }
+.qr-sb.is-arrastrando .qr-sb__pulgar { background: color-mix(in oklch, var(--ox-text-3) 85%, transparent); }
 /* Volver al documento desde un campo con Enter o Escape no es llegar con Tab:
    lo apaga data-sin-anillo (base.css, foco.js). */
 
