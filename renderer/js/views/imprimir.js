@@ -81,11 +81,6 @@ async function bytesParaImprimir() {
 const VENTANA = 8;
 const ATRAS = 2;
 
-/* A partir de cuántas hojas de papel el resumen destaca el total. No se pide
-   confirmación (lo decidió Fran, ux-29): se ve, y si las copias multiplican,
-   se dice cuántas por copia. */
-const MUCHAS_HOJAS = 20;
-
 /* ── Un PDF con contraseña no se imprime (todavía) ───────────────────────────
    Sus bytes están cifrados y la imposición los arma con pdf-lib, que no los
    descifra: el preview y el papel salían en blanco. Lo decidió Fran (paquete
@@ -679,7 +674,6 @@ function pintarResumen() {
 
   if (!c) {
     frase(cifra, 'Nada para imprimir');
-    $('qr-res-cifra').classList.remove('is-mucho');
     $('qr-res-detalle').hidden = true;
     numero($('qr-res-paginas'), 0);
     frase($('qr-res-caras'), '0');
@@ -696,7 +690,6 @@ function pintarResumen() {
   const copias = Math.max(1, p.copias || 1);
   const total = r.hojasFisicas * copias;
   frase(cifra, plural(total, 'hoja de papel', 'hojas de papel'));
-  $('qr-res-cifra').classList.toggle('is-mucho', total >= MUCHAS_HOJAS);
   const detalle = $('qr-res-detalle');
   if (copias > 1) frase($('qr-res-detalle-texto'), `${plural(r.hojasFisicas, 'hoja', 'hojas')} por copia, ${copias} copias`);
   detalle.hidden = copias <= 1;

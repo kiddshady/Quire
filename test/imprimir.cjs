@@ -620,16 +620,20 @@ app.whenReady().then(async () => {
       const poner = async (v) => { input.value = v; input.dispatchEvent(new Event('change', { bubbles: true })); await __dormir(60);
         return { campo: input.value, plan: (await __est).S.plan.copias }; };
       const r = { cero: await poner('0'), mucho: await poner('5000') };
-      r.destaca = document.getElementById('qr-res-cifra').classList.contains('is-mucho');
+      const hojas = document.getElementById('qr-res-hojas');
+      const cs = getComputedStyle(hojas);
+      r.total = { tam: cs.fontSize, peso: cs.fontWeight, fondo: cs.backgroundColor,
+        rango: getComputedStyle(document.querySelector('#op-rango')).fontSize };
       r.desglose = !document.getElementById('qr-res-detalle').hidden;
       r.vacio = await poner('');
-      r.noDestaca = !document.getElementById('qr-res-cifra').classList.contains('is-mucho');
       return r;
     })()`);
     ok('«0» queda en 1, en el campo y en el plan', copias.cero.campo === '1' && copias.cero.plan === 1, JSON.stringify(copias.cero));
     ok('«5000» queda en el máximo (999)', copias.mucho.campo === '999' && copias.mucho.plan === 999, JSON.stringify(copias.mucho));
     ok('vacío vuelve a 1', copias.vacio.campo === '1', JSON.stringify(copias.vacio));
-    ok('un trabajo grande se destaca en el resumen (sin pedir confirmación)', copias.destaca && copias.noDestaca, JSON.stringify(copias));
+    ok('el total va al tamaño de los controles, en negrita y sin ficha aunque sean muchas hojas',
+      copias.total.tam === copias.total.rango && Number(copias.total.peso) >= 600 && copias.total.fondo === 'rgba(0, 0, 0, 0)',
+      JSON.stringify(copias.total));
     ok('y con copias dice cuántas hojas son por copia', copias.desglose);
   } catch (e) { ok('la sección 11 no explota', false, e.message); }
 
