@@ -2204,14 +2204,25 @@ function alternarPanel() {
   const ref = pista && primeraVisible();
   const r0 = ref?.getBoundingClientRect();
 
+  /* Durante el viaje la pista desborda a lo ancho (la hoja vieja que no entra
+     al abrir, la agrandada al cerrar) y Chromium sacaba la barra horizontal:
+     10 px de fondo del visor como una banda negra abajo, el tiempo que dura
+     el pliegue (16 oct 2026). Además le restaba esos 10 px al alto que miden
+     el origen y la escala de «Página entera». Mientras dura, el visor no
+     scrollea en x. Si ya desbordaba antes (zoom fijo grande), su barra es de
+     verdad y se queda. */
+  const visor = V.visor;
+  const tapar = !!visor && visor.scrollWidth <= visor.clientWidth;
+  if (tapar) visor.classList.add('is-plegando');
+
   panel?.classList.toggle('is-collapsed', !V.panelAbierto);
   cuerpo?.classList.toggle('sin-panel', !V.panelAbierto);
-  if (!ref || !V.visor) return;
+  if (!ref || !V.visor) { if (tapar) visor.classList.remove('is-plegando'); return; }
 
   const r1 = ref.getBoundingClientRect();      // ya con el hueco nuevo
   const dx = r0.left - r1.left;
   const k = S.modoZoom === 'fijo' ? 1 : escalaActual() / V.escalaHecha;
-  if (Math.abs(dx) < 0.5 && Math.abs(k - 1) < 1e-4) return;
+  if (Math.abs(dx) < 0.5 && Math.abs(k - 1) < 1e-4) { if (tapar) visor.classList.remove('is-plegando'); return; }
 
   /* Al abrir el panel el visor se achica y la hoja, todavía a la escala vieja,
      ya no entra: los márgenes automáticos colapsan y queda apoyada a la
@@ -2229,7 +2240,7 @@ function alternarPanel() {
     [{ transform: `translateX(${dx}px)` }, { transform: Math.abs(k - 1) < 1e-4 ? 'none' : `translateX(${tx}px) scale(${k})` }],
     { duration: T3, easing: EASE, fill: 'forwards' },
   );
-  V.pliegue = { anim, pista, k, reloj: setTimeout(terminarPliegue, T3 + 200) };
+  V.pliegue = { anim, pista, k, visor: tapar ? visor : null, reloj: setTimeout(terminarPliegue, T3 + 200) };
   anim.finished.then(() => terminarPliegue(), () => {});
 }
 
@@ -2257,6 +2268,8 @@ function terminarPliegue() {
   p.pista.style.transformOrigin = '';
   p.pista.classList.remove('is-escalando');
   if (reescala) reescalar({ ancla });
+  // Después de reescalar: la hoja ya entra y no hay barra que vuelva.
+  p.visor?.classList.remove('is-plegando');
 }
 
 /* ── El tamaño del visor ──────────────────────────────────────────────────────

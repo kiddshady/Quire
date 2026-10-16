@@ -826,6 +826,10 @@
    origen en el centro del disco; acá solo se avisa al compositor. */
 .qr-pista.is-escalando { will-change: transform; }
 
+/* Mientras el panel se pliega, el desborde del viaje no saca barra horizontal
+   (ver alternarPanel en lector.js). */
+.qr-visor.is-plegando { overflow-x: hidden; }
+
 /* La capa donde vive el disco: del alto del cuerpo y del ancho del visor, con
    el borde izquierdo puesto por el lector porque se mueve con el panel. Va
    fuera del visor para que el scroll no se la lleve, y recorta para que el

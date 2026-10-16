@@ -879,19 +879,31 @@ app.whenReady().then(async () => {
 
     /* Abrirlo en ancho: el visor se achica, la hoja vieja no entra y queda
        apoyada a la izquierda. El viaje tenía que terminar donde la centra el
-       reescalado; terminaba ~75 px a la derecha y saltaba (16 oct 2026). A
-       partir de la mitad del viaje ningún cuadro se mueve de golpe. */
+       reescalado; terminaba ~75 px a la derecha y saltaba (16 oct 2026). La
+       hoja nunca se pasa de donde queda, y el último paso que da es el final
+       suave de la curva, no un salto. Sin mirar el reloj: si la animación
+       arranca un par de cuadros tarde, la curva sigue andando más tarde. */
     const apertura = await js(`(async () => {
       const ref = () => { const v = T.visor().getBoundingClientRect(); for (const p of document.querySelectorAll('.qr-pliego')) { const r = p.getBoundingClientRect(); if (r.bottom > v.top) return r; } };
+      const alto = T.visor().clientHeight;
       document.getElementById('qr-toggle-panel').click();
-      const serie = await T.cuadros((t) => [t, +ref().left.toFixed(1)], 700);
+      const serie = await T.cuadros((t) => [t, +ref().left.toFixed(1), T.visor().clientHeight], 700);
       await new Promise((r) => setTimeout(r, 200));
-      return { serie, final: +ref().left.toFixed(1) };
+      return { serie, alto, final: +ref().left.toFixed(1) };
     })()`);
-    const tardios = apertura.serie.filter(([t]) => t >= 140);
-    const saltoMax = Math.max(...tardios.map(([, x], i) => (i ? Math.abs(x - tardios[i - 1][1]) : 0)));
-    ok('abrir el panel en ancho: la hoja termina el viaje donde queda, sin rebote', saltoMax < 3 && Math.abs(tardios.at(-1)[1] - apertura.final) < 1,
-      `salto ${saltoMax.toFixed(1)} px · ${JSON.stringify(apertura.serie.map(([, x]) => x).slice(-25))}`);
+    /* Y en todo el viaje el visor no pierde alto: el desborde sacaba la barra
+       horizontal, una banda negra de 10 px abajo (16 oct 2026). */
+    const altos = [...new Set(apertura.serie.map(([, , h]) => h))];
+    ok('mientras el panel se abre no aparece la barra horizontal abajo', altos.length === 1 && altos[0] === apertura.alto,
+      `antes ${apertura.alto} · durante ${JSON.stringify(altos)}`);
+    const xa = apertura.serie.map(([, x]) => x);
+    const [lo, hi] = [Math.min(xa[0], apertura.final) - 1, Math.max(xa[0], apertura.final) + 1];
+    const dentro = xa.every((x) => x >= lo && x <= hi);
+    const pasos = xa.slice(1).map((x, i) => x - xa[i]).filter((d) => Math.abs(d) > 0.5);
+    const ultimo = pasos.length ? Math.abs(pasos.at(-1)) : 0;
+    ok('abrir el panel en ancho: la hoja termina el viaje donde queda, sin rebote',
+      dentro && ultimo < 3 && Math.abs(xa.at(-1) - apertura.final) < 1,
+      `último paso ${ultimo.toFixed(1)} px · ${JSON.stringify(xa)} · final ${apertura.final}`);
     await esperar(400);
   });
 
