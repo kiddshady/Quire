@@ -140,6 +140,22 @@ function escalaActual() {
   return Math.max(0.05, Math.min(disponible / maxAncho, alto / maxAlto));
 }
 
+/**
+ * La escala con la que están medidas las hojas, que es con la que se pintan
+ * sus capas. NO es escalaActual(): esa mide el visor ahora, y entre que
+ * reescalar() dimensiona las hojas y el render o la capa de texto arrancan
+ * puede aparecer o irse una barra de scroll. Con la escala del momento, el
+ * canvas no lo delataba (se estira al 100 % del pliego), pero la capa de texto
+ * quedaba 10 px más grande que la hoja, que es lo que mide la barra, y la
+ * selección caía corrida. Pasaba con el visor ancho (ventana maximizada, o sin
+ * rail desde la 1.2.0) y una hoja girada en «Página entera» (seleccion 5). Si
+ * el visor de verdad pide otra escala, el ResizeObserver la trae por
+ * reescalar(), que pone al día hojas y capas juntas.
+ */
+function escalaHoja() {
+  return V.escalaHecha || escalaActual();   // 0 = todavía no se midió ninguna
+}
+
 /* ── Pintar y liberar páginas ────────────────────────────────────────────── */
 
 function pintar(contenedor) {
@@ -151,7 +167,7 @@ function pintar(contenedor) {
 
   const tarea = S.doc.render(n, {
     canvas,
-    escala: escalaActual(),
+    escala: escalaHoja(),
     rotacionExtra: S.rotacion,
     // Que el repintado no deje la hoja en blanco mientras trabaja.
     preservar: true,
@@ -219,7 +235,7 @@ function montarTexto(contenedor, n) {
 
   const tarea = S.doc.capaTexto(n, {
     contenedor: div,
-    escala: escalaActual(),
+    escala: escalaHoja(),
     rotacionExtra: S.rotacion,
   });
   V.textos.set(n, tarea);
@@ -263,7 +279,7 @@ function montarTexto(contenedor, n) {
 async function montarTinta(contenedor, n) {
   if (!S.tinta || !S.doc) return;
   const doc = S.doc;
-  const escala = escalaActual();
+  const escala = escalaHoja();
   const rotacion = S.rotacion;
   let viewport;
   try {
@@ -275,7 +291,7 @@ async function montarTinta(contenedor, n) {
   /* Mientras pdf.js contestaba, la hoja se pudo ir (liberar, otro documento)
      o la escala pudo cambiar: el render que viene después la vuelve a montar. */
   if (S.doc !== doc || !contenedor.isConnected || !V.pintadas.has(n)) return;
-  if (escala !== escalaActual() || rotacion !== S.rotacion) return;
+  if (escala !== escalaHoja() || rotacion !== S.rotacion) return;
 
   /* El editor de la hoja SOBREVIVE al zoom y al giro (tinta-04): sigue con su
      canvas y su StrokeInput y solo cambia de viewport. Antes reescalar() lo
