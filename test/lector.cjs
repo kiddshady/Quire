@@ -699,6 +699,50 @@ app.whenReady().then(async () => {
     await esperar(800);
   });
 
+  await bloque('lector-16-bis', async () => {
+    /* Restaurar una ventana maximizada: el visor se achica de golpe y, durante
+       el estirado, la hoja tiene que quedar CENTRADA, donde reescalar() la va
+       a dejar. Se escalaba desde el centro del visor con la hoja apoyada a la
+       izquierda (no entraba a la escala vieja): quedaba corrida a la derecha y
+       cortada, y a los 150 ms saltaba a su lugar. El «rebote» del video de
+       Fran (16 oct 2026). Se mide cada cuadro del estirado y el salto final. */
+    await js(`(async () => {
+      const { S } = await import('./js/estado.js');
+      const { reescalar } = await import('./js/views/lector.js');
+      S.modoZoom = 'ancho'; S.rotacion = 0;
+      reescalar();
+      return true;
+    })()`);
+    await esperar(800);
+    const [w0, h0] = win.getSize();
+    await js(`window.__rebote = new Promise((ok) => {
+      const visor = document.getElementById('qr-visor');
+      const pista = visor.querySelector('.qr-pista');
+      const filas = []; const t0 = performance.now();
+      const paso = () => {
+        const v = visor.getBoundingClientRect();
+        const h = pista.querySelector('.qr-pliego').getBoundingClientRect();
+        filas.push({ t: Math.round(performance.now() - t0), estirada: /scale/.test(pista.style.transform),
+          centro: Math.round((h.left + h.right) / 2 - (v.left + visor.clientLeft + visor.clientWidth / 2)),
+          izq: Math.round(h.left - v.left) });
+        if (performance.now() - t0 < 700) requestAnimationFrame(paso); else ok(filas);
+      };
+      requestAnimationFrame(paso);
+    }); true`);
+    win.setSize(w0 - 460, h0);
+    const filas = await js('window.__rebote');
+    const estiradas = filas.filter((f) => f.estirada);
+    const peor = estiradas.reduce((m, f) => Math.max(m, Math.abs(f.centro)), 0);
+    const ultimaEstirada = estiradas.at(-1);
+    const final = filas.at(-1);
+    ok('al achicarse de golpe, la pista se estira', estiradas.length > 0, `${filas.length} cuadros`);
+    ok('y durante el estirado la hoja queda centrada', peor <= 2, `peor ${peor} px fuera del centro`);
+    ok('al asentar no salta de costado', !!ultimaEstirada && !final.estirada && Math.abs(final.izq - ultimaEstirada.izq) <= 2,
+      `${ultimaEstirada?.izq} -> ${final.izq}`);
+    win.setSize(w0, h0);
+    await esperar(800);
+  });
+
   await bloque('css-15', async () => {
     /* css-15: la franja de pestañas que se pliega reescala una vez en «Página entera». */
     await js(`(async () => {

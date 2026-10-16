@@ -2355,8 +2355,21 @@ function estirar() {
   if (Math.abs(k - 1) < 1e-4) { if (V.estirado) soltarEstirado(); return; }
   V.estirado = true;
   pista.classList.add('is-escalando');
+  /* La misma cuenta que alternarPanel() (1.1.6): al achicarse el visor, la
+     hoja todavía a la escala vieja no entra, los márgenes automáticos
+     colapsan y queda apoyada a la izquierda. Escalada desde el centro del
+     visor quedaba corrida a la derecha y cortada, y a los 150 ms reescalar()
+     la centraba de un salto: el «rebote» de restaurar una ventana maximizada
+     (16 oct 2026, más notorio sin rail desde la 1.2.0, con el visor más
+     ancho). El centro de la pista va al centro del visor, que es donde
+     reescalar() la va a dejar. Se mide sin el estirado anterior: en un
+     arrastre del borde esto corre en cada cuadro. */
+  pista.style.transform = '';
+  const vr = V.visor.getBoundingClientRect();
+  const pr = pista.getBoundingClientRect();
+  const tx = k * (vr.left + V.visor.clientLeft + V.visor.clientWidth / 2 - (pr.left + pr.width / 2));
   pista.style.transformOrigin = `${V.visor.scrollLeft + V.visor.clientWidth / 2}px ${V.visor.scrollTop + V.visor.clientHeight / 2}px`;
-  pista.style.transform = `scale(${k})`;
+  pista.style.transform = `translateX(${tx}px) scale(${k})`;
 }
 
 function soltarEstirado() {
