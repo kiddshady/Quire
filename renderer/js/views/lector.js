@@ -540,9 +540,8 @@ function ponerAncla(ancla) {
  *
  * `ancla` es el punto del papel que tiene que quedar quieto (de fotoAncla());
  * sin pasarla, el del centro del visor. Con `null`, no se toca el scroll.
- * `quieto` escribe el zoom nuevo sin destello (ver actualizarBarra).
  */
-function reescalar({ ancla, quieto = false } = {}) {
+function reescalar({ ancla } = {}) {
   if (!V.visor || !S.doc) return;
   V.reescalados += 1;
   // Con otra escala, el scroll donde irA() dejó una hoja fija ya es otro lugar.
@@ -604,7 +603,7 @@ function reescalar({ ancla, quieto = false } = {}) {
 
   // El mismo punto del papel donde estaba (ver fotoAncla). Antes: el tope de la página.
   if (punto) ponerAncla(punto);
-  actualizarBarra({ quieto });
+  actualizarBarra();
 }
 
 /* Dónde arranca una hoja dentro del área de scroll del visor. El offsetParent
@@ -759,9 +758,13 @@ function alScrollear() {
 
 /* Lo que la barra y la statusbar escriben con la app andando. Ninguno con
    textContent: cambiaban de un cuadro al otro (lector-27, fw-09).
-   · El zoom va SIEMPRE por valor(): en el gesto del puck y de la rueda cambia
-     en cada cuadro, y mezclarlo con frase() o textContent desfasaba la memoria
-     de cada uno (§1.8 del plan). Nace vacío y el montaje escribe el primero.
+   · El zoom va SIEMPRE por swap() sin opciones: en su lugar y sin destello.
+     En el gesto del puck y de la rueda cambia en cada cuadro, y mezclarlo con
+     frase() o textContent desfasaba la memoria de cada uno (§1.8 del plan).
+     Antes destellaba con cada cambio (valor()); brillaba también cuando el
+     zoom cambiaba de rebote, al plegar el panel en «Ajustar al ancho», y Fran
+     prefirió que no brille nunca (16 oct 2026). Nace vacío y el montaje
+     escribe el primero.
    · La página cambia con cada hoja que pasa: en su lugar y sin destello
      (swap sin opciones). Un destello por hoja sería un parpadeo constante.
    · La medida, con frase(): cuando cambia el tamaño de la hoja, relevo, y el
@@ -772,21 +775,11 @@ function alScrollear() {
 const textoPagina = () => `${S.pagina} / ${S.doc.paginas}`;
 const textoZoom = (escala) => `${Math.round(escala * 100)}%`;
 
-/* `quieto`: el zoom cambió de rebote, porque el lugar cambió (el panel que se
-   pliega, la ventana que se agranda) y no porque se lo haya pedido. Se
-   reescribe en su lugar sin destello: brillar un segundo al tocar el panel
-   se veía raro (lo pidió Fran, 16 oct 2026). La memoria de valor() se pone
-   al día igual, para que el próximo paso compare contra lo que se ve. */
-function actualizarBarra({ quieto = false } = {}) {
+function actualizarBarra() {
   const campo = document.getElementById('qr-pagina-input');
   if (campo && document.activeElement !== campo) campo.value = S.pagina;
 
-  const zoom = document.getElementById('qr-zoom-valor');
-  const textoZ = textoZoom(escalaActual());
-  if (quieto && zoom && zoom.__valor != null && zoom.__valor !== textoZ) {
-    zoom.__valor = textoZ;
-    swap(zoom, textoZ);
-  } else valor(zoom, textoZ);
+  swap(document.getElementById('qr-zoom-valor'), textoZoom(escalaActual()));
 
   const g = S.geometrias[S.pagina - 1];
   const medidaStat = document.getElementById('stat-medida');
@@ -2070,8 +2063,8 @@ function prepararZoomVivo(g) {
 function zoomVivo(g) {
   g.pista.style.transform = `scale(${g.k})`;
   // el porcentaje de la barra sigue al gesto: es el único número que importa.
-  // Por valor(), como en los pasos: ver actualizarBarra().
-  valor(document.getElementById('qr-zoom-valor'), textoZoom(g.escala * g.k));
+  // Por swap(), como en los pasos: ver actualizarBarra().
+  swap(document.getElementById('qr-zoom-valor'), textoZoom(g.escala * g.k));
 }
 
 /** Al soltar el núcleo (o al parar la rueda): el reescalado de verdad, con el
@@ -2278,7 +2271,7 @@ function terminarPliegue() {
   p.anim.cancel();
   p.pista.style.transformOrigin = '';
   p.pista.classList.remove('is-escalando');
-  if (reescala) reescalar({ ancla, quieto: true });
+  if (reescala) reescalar({ ancla });
   // Después de reescalar: la hoja ya entra y no hay barra que vuelva.
   p.visor?.classList.remove('is-plegando');
 }
@@ -2316,7 +2309,7 @@ function vigilarTamano() {
     // El ancla con el estirado todavía puesto: es lo que se ve.
     const ancla = cambia ? anclaCentro() : null;
     if (estirado) soltarEstirado();
-    if (cambia) reescalar({ ancla, quieto: true });
+    if (cambia) reescalar({ ancla });
   };
 
   const ro = new ResizeObserver(() => {

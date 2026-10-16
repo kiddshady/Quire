@@ -109,7 +109,7 @@ async function correr() {
       activo: puck?.dataset.activo || '',
       transform: pista.style.transform,
       tintaRecibe: tinta ? getComputedStyle(tinta).pointerEvents : 'sin canvas',
-      /* El % pasa por valor(), que releva: se lee lo vivo y no el calco que
+      /* El % pasa por swap(): se lee lo vivo y no un calco que
          se va (tests-13). */
       etiqueta: ${vivo('#qr-zoom-valor')},
       visor: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },

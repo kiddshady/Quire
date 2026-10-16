@@ -1176,7 +1176,8 @@ app.whenReady().then(async () => {
   });
 
   await bloque('lector-27', async () => {
-    /* El primer llenado no destella; un cambio de zoom sí, en su lugar (lector-27). */
+    /* El primer llenado no destella, y un cambio de zoom tampoco: se escribe en
+       su lugar y sin brillo, sea por botón, rueda o panel (16 oct 2026). */
     const destellos = await js(`(async () => {
       const router = (await T.mod('router')).default;
       router.go('imprimir'); await new Promise((r) => setTimeout(r, 500));
@@ -1185,10 +1186,18 @@ app.whenReady().then(async () => {
       const z = document.getElementById('qr-zoom-valor');
       const antes = z.textContent;
       document.getElementById('qr-zoom-mas').click();
-      return { alMontar, antes, despues: z.textContent, tick: z.classList.contains('ox-ticked'), calco: !!z.querySelector('.ox-swap-out') };
+      const brilla = () => z.getAnimations().some((a) => a.animationName === 'ox-tick' && a.playState === 'running');
+      const tickBoton = brilla() || z.classList.contains('ox-ticked');
+      const despues = z.textContent;
+      const v = document.getElementById('qr-visor').getBoundingClientRect();
+      document.getElementById('qr-visor').dispatchEvent(new WheelEvent('wheel', { deltaY: -120, ctrlKey: true, clientX: v.left + v.width / 2, clientY: v.top + v.height / 2, bubbles: true, cancelable: true }));
+      let tickRueda = false;
+      for (let i = 0; i < 30; i++) { await new Promise((r) => requestAnimationFrame(r)); tickRueda ||= brilla(); }
+      return { alMontar, antes, despues, rueda: z.textContent, tickBoton, tickRueda, calco: !!z.querySelector('.ox-swap-out') };
     })()`);
     ok('al montar, nada de la barra ni de la statusbar destella', destellos.alMontar.length === 0, JSON.stringify(destellos.alMontar));
-    ok('un cambio de zoom se escribe en su lugar con destello (lector-27)', destellos.tick && !destellos.calco && destellos.despues !== destellos.antes, JSON.stringify(destellos));
+    ok('un paso de zoom (botón +) se escribe en su lugar y sin destello', !destellos.tickBoton && !destellos.calco && destellos.despues !== destellos.antes, JSON.stringify(destellos));
+    ok('el zoom con Ctrl+rueda tampoco destella', !destellos.tickRueda && destellos.rueda !== destellos.despues, JSON.stringify(destellos));
     tecla('E', ['control']);
     await esperar(500);
     await js(`document.getElementById('qr-fit-ancho').click()`);
