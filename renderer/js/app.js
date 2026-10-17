@@ -701,6 +701,12 @@ function cablearShell() {
 
   document.getElementById('btn-abrir')?.addEventListener('click', abrirConDialogo);
 
+  /* La ruta del documento: el tooltip del nombre en la statusbar la muestra,
+     y un doble click la deja en el portapapeles (pedido de Fran, 1.2.3). */
+  document.getElementById('stat-doc')?.addEventListener('dblclick', () => {
+    if (S.doc?.ruta) copy(S.doc.ruta, { label: 'Ruta copiada' });
+  });
+
   /* La vista Convertir produce PDFs y quiere abrirlos, y los recientes del
      lector (abrirReciente) también, pero ninguno maneja pestañas: lo piden por
      acá y el shell lo abre como si lo hubieras elegido vos. */
@@ -959,7 +965,12 @@ function actualizarChrome() {
   /* La ruta completa se veía al pasar por el pie del rail, que ya no dice nada.
      Se muda acá, que es donde quedó el nombre del documento. */
   const statDoc = $('stat-doc');
-  if (statDoc) statDoc.dataset.tip = S.doc ? (S.doc.ruta || S.doc.nombre) : 'Documento abierto';
+  if (statDoc) {
+    statDoc.dataset.tip = S.doc ? (S.doc.ruta || S.doc.nombre) : 'Documento abierto';
+    // La cajita del tooltip dice cómo copiarla, como dice los atajos.
+    if (S.doc?.ruta) statDoc.dataset.tipKey = 'Doble clic copia';
+    else delete statDoc.dataset.tipKey;
+  }
 
   cuenta($('nav-paginas-count'), S.doc ? S.doc.paginas : 0);
   cuenta($('nav-convertir-count'), convertiblesPendientes());
