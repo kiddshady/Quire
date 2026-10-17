@@ -1044,19 +1044,6 @@ function ubicarIndicador({ viajar = true } = {}) {
   indicadorUbicado = true;
 }
 
-/* Con la ventana angosta las pestañas quedan solo con el ícono (quire.css):
-   el nombre pasa al tooltip. Con el nombre a la vista, un tooltip que repite
-   lo mismo sobra. El corte es el mismo número que el @media. */
-const VENTANA_ANGOSTA = matchMedia('(max-width: 1080px)');
-
-function nombresDeVistas() {
-  document.querySelectorAll('.qr-vistas .qr-vista').forEach((b) => {
-    b.setAttribute('aria-label', b.dataset.nombre);
-    if (VENTANA_ANGOSTA.matches) b.dataset.tip = b.dataset.nombre;
-    else delete b.dataset.tip;
-  });
-}
-
 /* ── «Abriendo…» ─────────────────────────────────────────────────────────────
    Abrir un PDF pesado (leerlo, geometrías, esquema, tinta) puede tardar
    segundos, y nada lo decía: el botón no cambiaba y la app parecía no haber
@@ -1153,12 +1140,10 @@ async function boot() {
   const piezas = document.getElementById('nav-piezas');
   if (piezas) piezas.hidden = !S.info?.dev;
 
-  /* Las vistas de la titlebar: los nombres según el ancho, y el indicador que
-     sigue a la activa. Navegar lo hace viajar; todo lo demás que mueve una
-     pestaña (el ancho de la ventana, un contador que aparece, la fuente que
-     termina de cargar) lo vuelve a poner en el lugar sin viaje. */
-  nombresDeVistas();
-  VENTANA_ANGOSTA.addEventListener('change', nombresDeVistas);
+  /* El indicador de las vistas de la titlebar sigue a la activa. Navegar lo
+     hace viajar; todo lo demás que mueve una pestaña (el ancho de la ventana,
+     un contador que aparece, la fuente que termina de cargar) lo vuelve a
+     poner en el lugar sin viaje. */
   Router.onChange(() => ubicarIndicador());
   const recolocar = new ResizeObserver(() => ubicarIndicador({ viajar: false }));
   recolocar.observe(document.getElementById('qr-vistas'));

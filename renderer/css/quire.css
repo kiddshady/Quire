@@ -71,6 +71,10 @@
   min-width: 0;
 }
 
+/* Las vistas van solo con el ícono, a cualquier ancho, y el nombre lo dice el
+   tooltip (pedido de Fran, 1.2.2: hasta la 1.2.1 eso pasaba solo con la
+   ventana angosta, y así se veía más prolijo y ahorraba lugar). El ancho es
+   el del ícono más el contador de Páginas o Convertir, cuando hay. */
 .ox-titlebar .qr-vista {
   width: auto;
   height: 28px;
@@ -123,13 +127,6 @@
 }
 .qr-vistas__ind.is-visible { opacity: 1; }
 .qr-vistas__ind.is-quieto { transition: opacity var(--ox-t-2) var(--ox-ease-soft); }
-
-/* Con la ventana angosta no entran los nombres: quedan los íconos, y el nombre
-   pasa al tooltip (app.js lo pone y lo saca con el mismo corte). El ancho
-   mínimo de la ventana es 900 px; con nombres, la fila pide unos 860. */
-@media (max-width: 1080px) {
-  .ox-titlebar .qr-vista__nombre { display: none; }
-}
 
 /* Hairline como sombra interior y nunca como `border`: un border deja hilacha
    en las esquinas cuando el contenedor recorta. Es la regla de la casa. */

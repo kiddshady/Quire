@@ -76,7 +76,8 @@
 
          Siguen siendo .ox-navitem a propósito: el router marca el activo por
          esa clase, y así router.js sigue igual al de Onyx. La piel de pestaña
-         es de quire.css (.qr-vista). -->
+         es de quire.css (.qr-vista). Desde la 1.2.2 van solo con el ícono y
+         el nombre lo dice el tooltip, a cualquier ancho de ventana. -->
 
     <!-- El atajo vive en el tooltip: si no, Ctrl+O no lo decía ningún lado
          salvo el «+» de la franja, que con un documento no se ve (ux-17). -->
@@ -86,27 +87,27 @@
     <div class="ox-vr qr-tb-vr"></div>
 
     <nav class="qr-vistas" id="qr-vistas" aria-label="Vistas">
-      <button class="ox-navitem qr-vista" data-view="lector" data-nombre="Documento">
-        <i data-icon="book"></i><span class="qr-vista__nombre">Documento</span>
+      <button class="ox-navitem qr-vista" data-view="lector" data-nombre="Documento" aria-label="Documento" data-tip="Documento">
+        <i data-icon="book"></i>
       </button>
-      <button class="ox-navitem qr-vista" data-view="paginas" data-nombre="Páginas">
-        <i data-icon="grid"></i><span class="qr-vista__nombre">Páginas</span>
+      <button class="ox-navitem qr-vista" data-view="paginas" data-nombre="Páginas" aria-label="Páginas" data-tip="Páginas">
+        <i data-icon="grid"></i>
         <span class="ox-navitem__count ox-plegable--ancho" id="nav-paginas-count" hidden></span>
       </button>
-      <button class="ox-navitem qr-vista" data-view="imprimir" data-nombre="Imprimir">
-        <i data-icon="printer"></i><span class="qr-vista__nombre">Imprimir</span>
+      <button class="ox-navitem qr-vista" data-view="imprimir" data-nombre="Imprimir" aria-label="Imprimir" data-tip="Imprimir">
+        <i data-icon="printer"></i>
       </button>
-      <button class="ox-navitem qr-vista" data-view="herramientas" data-nombre="Herramientas">
-        <i data-icon="tools"></i><span class="qr-vista__nombre">Herramientas</span>
+      <button class="ox-navitem qr-vista" data-view="herramientas" data-nombre="Herramientas" aria-label="Herramientas" data-tip="Herramientas">
+        <i data-icon="tools"></i>
       </button>
-      <button class="ox-navitem qr-vista" data-view="convertir" data-nombre="Convertir">
-        <i data-icon="convertir"></i><span class="qr-vista__nombre">Convertir</span>
+      <button class="ox-navitem qr-vista" data-view="convertir" data-nombre="Convertir" aria-label="Convertir" data-tip="Convertir">
+        <i data-icon="convertir"></i>
         <span class="ox-navitem__count ox-plegable--ancho" id="nav-convertir-count" hidden></span>
       </button>
       <!-- La vitrina del framework, no una función de Quire: solo se ve en
            modo desarrollo (--dev o QUIRE_DEV; ver boot() en app.js). -->
-      <button class="ox-navitem qr-vista" data-view="piezas" data-nombre="Piezas" id="nav-piezas" hidden>
-        <i data-icon="layers"></i><span class="qr-vista__nombre">Piezas</span>
+      <button class="ox-navitem qr-vista" data-view="piezas" data-nombre="Piezas" aria-label="Piezas" data-tip="Piezas" id="nav-piezas" hidden>
+        <i data-icon="layers"></i>
       </button>
     </nav>
 

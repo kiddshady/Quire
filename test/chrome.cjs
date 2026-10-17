@@ -440,29 +440,37 @@ async function chrome() {
     ok('y llega debajo de la nueva', bajo(ind.despues) && ind.despues.vista === 'imprimir', JSON.stringify(ind.despues));
     ok('al volver, debajo de Documento otra vez', bajo(ind.final), JSON.stringify(ind.final));
 
-    /* La ventana angosta: los nombres se van, el tooltip los dice, la fila
-       entra sin pisar a Ajustes y el indicador sigue a su pestaña. */
-    const [w0, h0] = win.getSize();
-    win.setSize(960, h0);
-    await esperar(500);
-    const ang = await js(`(() => {
+    /* 1.2.2: las vistas van solo con el ícono a CUALQUIER ancho, y el nombre
+       lo dice el tooltip (pedido de Fran). Se mide ancha y angosta: ningún
+       texto visible en la pestaña, el tooltip con el nombre, la fila sin
+       pisar a Ajustes y el indicador debajo de su pestaña. */
+    const medirVistas = () => js(`(() => {
       const vistas = [...document.querySelectorAll('.qr-vistas .qr-vista')].filter((b) => !b.hidden);
-      const nombres = vistas.map((b) => getComputedStyle(b.querySelector('.qr-vista__nombre')).display);
+      // El texto propio de la pestaña, sin el contador (que es un número aparte).
+      const textos = vistas.map((b) => [...b.childNodes]
+        .filter((n) => !(n.nodeType === 1 && n.classList.contains('ox-navitem__count')))
+        .map((n) => n.textContent).join('').trim());
       const ultima = vistas.at(-1).getBoundingClientRect();
       const ajustes = document.querySelector('.qr-vista--ajustes').getBoundingClientRect();
       const i = document.getElementById('qr-vistas-ind').getBoundingClientRect();
       const a = document.querySelector('.ox-titlebar .qr-vista.is-active').getBoundingClientRect();
-      return { ocultos: nombres.every((d) => d === 'none'), tips: vistas.every((b) => b.dataset.tip === b.dataset.nombre),
+      return { soloIcono: textos.every((t) => t === ''), tips: vistas.every((b) => b.dataset.tip === b.dataset.nombre),
+               labels: vistas.every((b) => b.getAttribute('aria-label') === b.dataset.nombre),
                entra: ultima.right < ajustes.left, centrado: Math.abs((i.left + i.right) / 2 - (a.left + a.right) / 2) };
     })()`);
+    const ancha = await medirVistas();
+    const [w0, h0] = win.getSize();
+    win.setSize(960, h0);
+    await esperar(500);
+    const ang = await medirVistas();
     win.setSize(w0, h0);
     await esperar(500);
-    const ancha = await js(`[...document.querySelectorAll('.qr-vistas .qr-vista')].every((b) => !b.dataset.tip)`);
-    ok('con la ventana angosta las vistas quedan con el ícono', ang.ocultos);
-    ok('y el nombre pasa al tooltip', ang.tips);
-    ok('la fila entra sin pisar a Ajustes', ang.entra);
-    ok('el indicador sigue debajo de su pestaña', ang.centrado < 1.5, `${ang.centrado.toFixed(1)} px corrido`);
-    ok('con la ventana ancha el tooltip sobra y se va', ancha);
+    for (const [cual, m] of [['ancha', ancha], ['angosta', ang]]) {
+      ok(`con la ventana ${cual} las vistas van solo con el ícono`, m.soloIcono);
+      ok(`y el nombre lo dicen el tooltip y el aria-label (${cual})`, m.tips && m.labels);
+      ok(`la fila entra sin pisar a Ajustes (${cual})`, m.entra);
+      ok(`el indicador sigue debajo de su pestaña (${cual})`, m.centrado < 1.5, `${m.centrado.toFixed(1)} px corrido`);
+    }
 
     /* shell-41: el ícono de maximizar se releva. */
     win.webContents.send('win:maximized', true);

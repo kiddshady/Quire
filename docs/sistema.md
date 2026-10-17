@@ -103,14 +103,15 @@ vistas a la titlebar: usa un espacio que ya existía y no suma clicks.
 - **Abrir es un ícono** (`#btn-abrir`): ocupado pasa al spinner y el tooltip
   dice «Abriendo…». **Ajustes** va solo con su ícono, contra los botones de
   ventana.
-- **Ventana angosta** (`max-width: 1080px`, el mismo número en el `@media` y
-  en `VENTANA_ANGOSTA`): las pestañas quedan con el ícono y el nombre pasa al
-  tooltip. Con el nombre a la vista no hay tooltip.
+- **Las pestañas van solo con el ícono** (desde la 1.2.2, a cualquier ancho):
+  el nombre lo dicen el tooltip y el `aria-label`, puestos en el HTML. Hasta
+  la 1.2.1 eso pasaba solo por debajo de 1080 px; Fran prefirió ese aspecto
+  siempre, por prolijo y por el lugar que ahorra.
 - **El nombre del documento ya no va en el centro de la titlebar**: lo dicen la
   statusbar y, con dos o más abiertos, la franja de pestañas.
 
 Lo mide `npm run chrome` (6-bis): dónde cae el indicador, que viaje por
-cuadros intermedios, y la ventana angosta.
+cuadros intermedios, y que ancha y angosta las pestañas queden con el ícono.
 
 ### La selección sobre una superficie clara: `--ox-select-claro`
 
