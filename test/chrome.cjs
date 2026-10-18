@@ -194,10 +194,11 @@ async function chrome() {
     ok('la impresora de la statusbar es la elegida', n.impresora === IMPRESORA.nombre, n.impresora);
 
     /* 1.2.3: doble click en el nombre copia la ruta entera. Se lee el
-       portapapeles real desde el main, y lo que Fran tenía se le devuelve. */
+       portapapeles real desde el main, y lo que Fran tenía se le devuelve. Desde
+       Electron 44 el portapapeles del main es asíncrono, como el de la web. */
     const { clipboard } = require('electron');
-    const tenia = clipboard.readText();
-    clipboard.writeText('');
+    const tenia = await clipboard.readText();
+    await clipboard.writeText('');
     const tip = await js(`(() => { const s = document.getElementById('stat-doc'); return { tip: s.dataset.tip, key: s.dataset.tipKey }; })()`);
     ok('el tooltip del nombre trae la ruta entera y dice cómo copiarla',
       tip.tip === PDFS[0] && tip.key === 'Doble clic copia', JSON.stringify(tip));
@@ -205,8 +206,8 @@ async function chrome() {
     win.webContents.focus();
     await js(`document.getElementById('stat-doc-name').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
     await esperar(400);
-    const copiada = clipboard.readText();
-    clipboard.writeText(tenia);
+    const copiada = await clipboard.readText();
+    await clipboard.writeText(tenia);
     ok('doble click en el nombre copia la ruta', copiada === PDFS[0], JSON.stringify(copiada));
     ok('y lo confirma con un aviso', await js(`[...document.querySelectorAll('.ox-toast')].some((t) => /Ruta copiada/.test(t.textContent))`));
 

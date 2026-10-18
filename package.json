@@ -60,7 +60,7 @@
   "comentario-extraResources": "SumatraPDF va en extraResources, o sea FUERA del asar: un .exe adentro del asar no se puede ejecutar. Es lo único que sabe elegir el tamaño de papel — ver vendor/sumatrapdf/LEEME.md y la sección de impresión del README. Este comentario vive en la raíz y no adentro de `build` porque electron-builder valida esa sección contra un esquema y rechaza cualquier clave que no conozca.",
   "comentario-dependencias": "pdf-lib es devDependency A PROPÓSITO: en runtime el renderer la carga de renderer/vendor/, donde está copiada y versionada, y como dependency electron-builder la metería en el asar sin que nadie la use. pdfjs-dist, en cambio, está DOS veces y las dos hacen falta: la 5.7 vendorizada en renderer/vendor/pdfjs/ (el visor, con su shim para Electron 40) y la 6.x de node_modules, que usa el motor de conversión en el proceso principal (src/motor/converters/pdf.cjs) — la 5.x no anda con @napi-rs/canvas 1.x, que es lo que rasteriza las páginas para el OCR. De pdfjs-dist se empaqueta solo el build legacy: el resto se excluye en `files`.",
   "devDependencies": {
-    "electron": "40.10.2",
+    "electron": "44.5.1",
     "electron-builder": "^25.1.8",
     "pdf-lib": "^1.17.1"
   },
