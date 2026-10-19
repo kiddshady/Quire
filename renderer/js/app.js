@@ -12,7 +12,7 @@ import { Icons } from './icons.js';
 import { Tooltip, Toast, Menu, Modal } from './overlays.js';
 import Router from './router.js';
 import {
-  initClickFlash, initScrollFades, raf2, swap, frase, contador, ocupar, deslizarAncho, bindSwitcher, exit,
+  initClickFlash, initScrollFades, raf2, swap, frase, contador, ocupar, deslizarAncho, bindSwitcher, exit, roll,
 } from './motion.js';
 import { paint, head, empty, esc, attempt, copy, colorToken } from './ui.js';
 import { fmtBytes, fmtDec, plural, relTime } from './format.js';
@@ -568,15 +568,21 @@ function cablearAjustes() {
      apuntando a un nodo que ya no está en el DOM. */
   /* La línea del estado no se reescribe con textContent: cambiaba de golpe
      («Buscando…» → «Estás en la última versión.») (shell-18). Cada fase nueva
-     es un relevo (frase); bajando, solo cambia el número en su span, en el
-     lugar y sin destello: frase() destellaría veinte veces por segundo y la
-     línea quedaría teñida de acento toda la descarga. */
+     es un relevo (frase); bajando, solo el número de su span corre (roll),
+     en el lugar y sin destello: frase() destellaría veinte veces por segundo
+     y la línea quedaría teñida de acento toda la descarga. Antes se escribía
+     con textContent y saltaba; ahora arranca de lo que dice el span y corre
+     como el de la statusbar. */
   Router.onLeave(Actualizar.alCambiar((e) => {
     const el = $('set-update-estado');
     if (!el) return;
     if (e.fase === 'descargando' && el.dataset.fase === 'descargando') {
       const n = el.querySelector(':scope > .qr-pct');
-      if (n) { n.textContent = `${pctActualizacion(e)}%`; return; }
+      if (n) {
+        roll(n, pctActualizacion(e), (v) => { n.textContent = `${Math.round(v)}%`; },
+          { from: parseInt(n.textContent, 10) });
+        return;
+      }
     }
     el.dataset.fase = e.fase || '';
     frase(el, resumenActualizacion());

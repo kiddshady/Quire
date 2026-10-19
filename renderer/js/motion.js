@@ -773,6 +773,39 @@ export function countTo(el, to, { from = 0, duration = 700, format = (n) => n } 
   requestAnimationFrame(tick);
 }
 
+/* ── Números que corren ─────────────────────────────────────────────────────
+   Como countTo(), pero arranca de lo que se ve AHORA: cada dato nuevo retoma
+   la carrera desde donde iba en vez de volver a cero o saltar. Es lo que pide
+   un porcentaje que llega de a pedazos (una descarga, una instalación). No
+   destella: corre solo, y un destello en cada pedazo titilaría.
+   `to` es un número o un objeto de números; `paint` recibe el valor (o el
+   objeto) de cada cuadro y escribe. La primera vez escribe sin correr, salvo
+   que `from` diga qué número muestra ya el texto. De Onyx/Opal (oct 2026). */
+export function roll(el, to, paint, { duration = 420, from: start0 } = {}) {
+  if (!el) return;
+  const obj = typeof to === 'object' && to !== null;
+  if (!el.__roll && Number.isFinite(start0)) el.__roll = { cur: start0, to: start0, raf: 0 };   // lo que ya dice el texto
+  const st = el.__roll;
+  if (!st) { el.__roll = { cur: to, to, raf: 0 }; paint(to); return; }
+  if (JSON.stringify(st.to) === JSON.stringify(to)) return;
+  cancelAnimationFrame(st.raf);
+  st.to = to;
+  const from = st.cur;
+  const start = performance.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  const lerp = (a, b, k) => (Number.isFinite(a) ? a + (b - a) * k : b);
+  const frame = (now) => {
+    if (!el.isConnected) return;
+    const k = ease(Math.min(1, (now - start) / duration));
+    st.cur = obj
+      ? Object.fromEntries(Object.keys(to).map((key) => [key, lerp(from?.[key], to[key], k)]))
+      : lerp(from, to, k);
+    paint(st.cur);
+    if (k < 1) st.raf = requestAnimationFrame(frame);
+  };
+  st.raf = requestAnimationFrame(frame);
+}
+
 /** Marca un valor que acaba de cambiar: destella y vuelve. */
 export function tick(el) {
   el.classList.remove('ox-ticked');
@@ -788,7 +821,9 @@ export function tick(el) {
      numero(el, v)               un número suelto: en su lugar, con destello
      frase(el, html)             una frase: si cambiaron solo sus cifras,
                                  destella; si cambió la frase, relevo
-     valor(el, html)             algo que cambia MUY seguido (las flechas de un
+                                 (las dos con `{ destello: false }` para un
+                                 progreso: en su lugar, sin destello)
+     valor(el, html)           algo que cambia MUY seguido (las flechas de un
                                  stepper apretadas): siempre en su lugar
      deslizarAlto(el, cambio)    la caja va de su alto al nuevo, no salta
      deslizarAncho(el, cambio)   lo mismo a lo ancho (un ítem de una fila)
@@ -817,14 +852,21 @@ function settled(anim, ms, fn) {
     apagarse y prenderse en cada una se leería como un parpadeo. El primer
     llenado (el elemento vacío) no es un cambio y no destella: por eso un
     contador del chrome nace vacío en el HTML, no en «0» —si no, el primer
-    dato cuenta como cambio y queda teñido mientras se va el splash—. */
-export function numero(el, v) {
+    dato cuenta como cambio y queda teñido mientras se va el splash—.
+
+    `{ destello: false }` es para un progreso (el % de una descarga o de una
+    instalación): cambia varias veces por segundo, cada destello (700 ms)
+    arrancaba antes de que terminara el anterior y el número se prendía y
+    apagaba sin parar, como un bug. El destello es para un valor que cambió
+    porque alguien lo cambió, no para uno que corre solo. Para que el %
+    corra suave en vez de saltar, roll() (que tampoco destella). */
+export function numero(el, v, { destello = true } = {}) {
   if (!el) return;
   const texto = String(v);
   if (el.textContent === texto) return;
   const primero = el.textContent === '';
   el.textContent = texto;
-  if (!primero) tick(el);
+  if (!primero && destello) tick(el);
 }
 
 const textoDe = (html) => {
@@ -841,8 +883,11 @@ const molde = (s) => s.replace(/\d[\d.,]*/g, '#');
  * sus números, se reescribe en el lugar con un destello, como un número: un
  * relevo de la frase entera en cada tecla la apagaría y prendería sin parar.
  * Si cambió la frase, relevo; lo vacío entra o se va esfumándose.
+ * Con `{ destello: false }` las cifras cambian en su lugar sin destello: es
+ * para un progreso («Bajando… 41 %» → «42 %»), como en numero(). El relevo
+ * cuando cambia la frase (de «Bajando» a «Instalando») sigue igual.
  */
-export function frase(el, html) {
+export function frase(el, html, { destello = true } = {}) {
   if (!el) return;
   // Durante un relevo el textContent junta lo que se va con lo que llega: por
   // eso se compara contra la última frase puesta, no contra el DOM.
@@ -852,7 +897,7 @@ export function frase(el, html) {
   if (viejo === nuevo) return;
   const soloCifras = viejo !== '' && nuevo !== '' && molde(viejo) === molde(nuevo);
   swap(el, html, soloCifras ? {} : { relevo: true });
-  if (soloCifras) tick(el);
+  if (soloCifras && destello) tick(el);
 }
 
 /** Algo que cambia muy seguido (con las flechas apretadas, cada 45 ms): se

@@ -378,14 +378,21 @@ async function chrome() {
     mandar({ fase: 'descargando', version: '9.9.9', progreso: { pct: 0.1, transferido: 1, total: 10, bps: 0 } });
     await esperar(450);
     await js(`window.__pctAjustes = document.querySelector('#set-update-estado > .qr-pct'); true`);
+    // El número corre (roll): se miran los cuadros mientras va de 10 a 40.
+    const corriendo = js(`(async () => { const v = [];
+      for (let i = 0; i < 8; i++) { await new Promise((r) => requestAnimationFrame(r));
+        const n = document.querySelector('#set-update-estado > .qr-pct'); v.push(parseInt(n?.textContent, 10)); }
+      return v; })()`);
     mandar({ fase: 'descargando', version: '9.9.9', progreso: { pct: 0.4, transferido: 4, total: 10, bps: 0 } });
-    await esperar(120);
+    const cuadros = await corriendo;
+    await esperar(500);
     const bajando = await js(`(() => { const el = document.getElementById('set-update-estado'); const n = el.querySelector(':scope > .qr-pct');
-      return { mismo: !!n && n === window.__pctAjustes, txt: n?.textContent, destello: el.classList.contains('ox-ticked') }; })()`);
+      return { mismo: !!n && n === window.__pctAjustes, txt: n?.textContent, destello: el.classList.contains('ox-ticked') || !!n?.classList.contains('ox-ticked') }; })()`);
     mandar({ fase: 'al-dia' });
     await esperar(400);
     ok('la línea del actualizador cambia de fase con un relevo', relevo.calco, JSON.stringify(relevo));
     ok('bajando, el porcentaje cambia en el mismo nodo', bajando.mismo && bajando.txt === '40%', JSON.stringify(bajando));
+    ok('y corre de a poco en vez de saltar', cuadros.some((n) => n > 10 && n < 40), JSON.stringify(cuadros));
     ok('y sin destellar', !bajando.destello);
   }
 
