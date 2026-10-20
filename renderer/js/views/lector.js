@@ -1031,7 +1031,18 @@ function ponerPanel(cual, { fundir = false } = {}) {
     cuerpo.innerHTML = html;
   } else {
     const cs = getComputedStyle(cuerpo);
-    const acomodo = { display: cs.display, flexDirection: cs.flexDirection, padding: cs.padding };
+    /* Y el ancho de la barra de scroll, que también es del acomodo viejo. El
+       calco va de borde a borde del cuerpo, y .es-buscar le saca el scroll: la
+       barra desaparece y el calco gana sus 10 px. Las miniaturas miden según
+       el ancho, así que se agrandaban de 202 a 212 px en el primer cuadro y se
+       esfumaban así, como un zoom (lector-42). Se los suma al relleno de la
+       derecha: el calco sigue tapando todo y su contenido no cambia de ancho. */
+    const barra = cuerpo.offsetWidth - cuerpo.clientWidth
+      - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0);
+    const acomodo = {
+      display: cs.display, flexDirection: cs.flexDirection, padding: cs.padding,
+      paddingRight: `${(parseFloat(cs.paddingRight) || 0) + Math.max(0, barra)}px`,
+    };
     const scroll = cuerpo.scrollTop;
     cuerpo.scrollTop = 0;
     cuerpo.classList.toggle('es-buscar', esBuscar);

@@ -820,6 +820,42 @@ app.whenReady().then(async () => {
       n.topeAbajo <= 0.01 && n.topeAbajo > -0.6, `(${n.topeAbajo} · visor de ${n.altoVisor} px)`);
   });
 
+  await bloque('lector-42', async () => {
+    /* lector-42: de Miniaturas a Buscar, las miniaturas que se iban se
+       agrandaban un toque mientras se esfumaban. El cuerpo pierde la barra de
+       scroll al pasar a Buscar y el calco, de borde a borde, ganaba sus 10 px.
+       Se mide la miniatura dentro del calco en cada cuadro del fundido. */
+    const n = await js(`(async () => {
+      const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+      if (document.querySelector('.qr-lector__cuerpo').classList.contains('sin-panel')) {
+        document.getElementById('qr-toggle-panel').click();
+        await espera(700);
+      }
+      document.querySelector('.qr-panel__tab[data-panel="miniaturas"]').click();
+      await espera(700);
+      const cuerpo = document.getElementById('qr-panel-cuerpo');
+      const antes = cuerpo.querySelector('.qr-mini').getBoundingClientRect().width;
+      const conBarra = cuerpo.offsetWidth - cuerpo.clientWidth > 0;
+      document.querySelector('.qr-panel__tab[data-panel="buscar"]').click();
+      const anchos = [];
+      const t0 = performance.now();
+      await new Promise((fin) => {
+        const f = () => {
+          const m = cuerpo.querySelector('.ox-swap-out--fundido .qr-mini');
+          if (m) anchos.push(m.getBoundingClientRect().width);
+          if (m && performance.now() - t0 < 600) requestAnimationFrame(f); else fin();
+        };
+        requestAnimationFrame(f);
+      });
+      document.querySelector('.qr-panel__tab[data-panel="miniaturas"]').click();
+      await espera(500);
+      return { antes, conBarra, anchos: anchos.map((a) => Math.round(a * 10) / 10) };
+    })()`);
+    ok('el panel de miniaturas tiene barra de scroll (si no, no hay nada que probar)', n.conBarra, JSON.stringify(n));
+    ok('las miniaturas no cambian de ancho mientras se esfuman hacia Buscar (lector-42)',
+      n.anchos.length > 3 && n.anchos.every((a) => Math.abs(a - n.antes) < 0.5), JSON.stringify(n));
+  });
+
   await bloque('css-15', async () => {
     /* css-15: la franja de pestañas que se pliega reescala una vez en «Página entera». */
     await js(`(async () => {
