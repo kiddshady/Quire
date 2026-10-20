@@ -478,8 +478,14 @@
 .qr-barras:is(.is-cerca, .is-activa) .qr-sb.is-necesaria,
 .qr-sb.is-arrastrando { opacity: 1; }
 
-.qr-sb--v { top: 0; right: 0; bottom: 0; width: 10px; }
-.qr-sb--h { left: 0; right: 0; bottom: 0; height: 10px; }
+/* Las puntas dejan 3 px de respiro, los mismos que separan al pulgar de los
+   costados de su barra: así no se apoya en la línea de la barra de
+   herramientas ni en la de la statusbar. Pegado a la statusbar, encendido, se
+   confundía con su línea y parecía meterse abajo (pedido de Fran, 20 oct
+   2026). barrasFlotantes() mide el recorrido sobre la barra, así que el
+   respiro no le cambia nada. */
+.qr-sb--v { top: 3px; right: 0; bottom: 3px; width: 10px; }
+.qr-sb--h { left: 3px; right: 3px; bottom: 0; height: 10px; }
 /* Con las dos, cada una se corta antes de la esquina de la otra. */
 .qr-barras.con-h .qr-sb--v { bottom: 10px; }
 .qr-barras.con-v .qr-sb--h { right: 10px; }

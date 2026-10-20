@@ -795,7 +795,8 @@ app.whenReady().then(async () => {
       r.sinDesborde = !h.classList.contains('is-necesaria');
       /* lector-41: los dos topes de la vertical, iguales. La capa se medía con
          offsetHeight (entero) y el visor mide con decimales: abajo del todo el
-         pulgar pasaba medio píxel y se metía en la línea de la statusbar. */
+         pulgar pasaba medio píxel y se metía en la línea de la statusbar.
+         Desde la 1.2.7 las dos puntas dejan 3 px de respiro. */
       const pv = capa.querySelector('.qr-sb--v .qr-sb__pulgar');
       const vv = visor.getBoundingClientRect();
       visor.scrollTop = 0;
@@ -809,15 +810,16 @@ app.whenReady().then(async () => {
     })()`);
     ok('el visor no reserva franja para las barras', n.franjaAbajo === 0 && n.franjaDerecha === 0, JSON.stringify(n));
     ok('con el zoom fijo grande desborda y la barra horizontal hace falta', n.desborda && n.necesaria);
-    ok('la barra flota sobre el borde de abajo del visor', n.barraAbajo <= 1 && n.barraIzq <= 1, `${n.barraAbajo} / ${n.barraIzq}`);
+    // A la izquierda deja los 3 px de respiro de las puntas (ver .qr-sb en lector.css).
+    ok('la barra flota sobre el borde de abajo del visor', n.barraAbajo <= 1 && n.barraIzq === 3, `${n.barraAbajo} / ${n.barraIzq}`);
     ok('y la hoja llega hasta ese borde (no la corta una franja)', n.hojaLlega);
     ok('el pulgar recorre la pista de punta a punta', Math.abs(n.alPrincipio) <= 1 && Math.abs(n.alFinal) <= 1, `${n.alPrincipio} / ${n.alFinal}`);
     ok('al scrollear se ve', n.seVe > 0.9, String(n.seVe));
     ok('y después se apaga sola (sin el mouse encima)', n.seApaga);
     ok('en «Ajustar al ancho» no hay barra horizontal', n.sinDesborde);
-    ok('la vertical arranca justo en el canto de arriba del visor', Math.abs(n.topeArriba) < 0.1, `(${n.topeArriba})`);
-    ok('y termina justo en el de abajo, sin meterse en la statusbar (lector-41)',
-      n.topeAbajo <= 0.01 && n.topeAbajo > -0.6, `(${n.topeAbajo} · visor de ${n.altoVisor} px)`);
+    ok('la vertical arranca 3 px debajo del canto de arriba del visor', Math.abs(n.topeArriba - 3) < 0.1, `(${n.topeArriba})`);
+    ok('y termina 3 px antes del de abajo: los dos respiros iguales (lector-41)',
+      n.topeAbajo <= -2.99 && n.topeAbajo > -3.6, `(${n.topeAbajo} · visor de ${n.altoVisor} px)`);
   });
 
   await bloque('lector-42', async () => {
