@@ -2457,18 +2457,27 @@ function barrasFlotantes() {
 
   const medir = (e) => {
     const sobra = visor[e.total] - visor[e.vista];
-    const recorrido = e.barra[e.lado];
+    // Con decimales: clientHeight redondea, y el medio píxel de más iba abajo.
+    const recorrido = e.barra.getBoundingClientRect()[e.largo];
     const largo = Math.min(recorrido, Math.max(PULGAR_MIN, Math.round(recorrido * visor[e.vista] / visor[e.total])));
     return { sobra, recorrido, largo, libre: recorrido - largo };
   };
 
   const actualizar = () => {
     if (!visor.isConnected) return;
-    /* Calzada sobre el visor: el panel lateral puede estar abierto o no. */
-    capa.style.left = `${visor.offsetLeft}px`;
-    capa.style.top = `${visor.offsetTop}px`;
-    capa.style.width = `${visor.offsetWidth}px`;
-    capa.style.height = `${visor.offsetHeight}px`;
+    /* Calzada sobre el visor: el panel lateral puede estar abierto o no. Se
+       mide con decimales y no con offset*, que redondean a entero: el visor
+       mide, por ejemplo, 723,5 px, la capa salía de 724, y ese medio píxel
+       caía todo abajo. Arriba del todo el pulgar arrancaba justo en el canto y
+       abajo del todo se metía en la línea de la statusbar (lector-41). Los dos
+       comparten offsetParent, así que restar sus cajas da la posición. */
+    const padre = capa.offsetParent;
+    const rv = visor.getBoundingClientRect();
+    const rp = padre ? padre.getBoundingClientRect() : { left: 0, top: 0 };
+    capa.style.left = `${rv.left - rp.left - (padre?.clientLeft ?? 0) + (padre?.scrollLeft ?? 0)}px`;
+    capa.style.top = `${rv.top - rp.top - (padre?.clientTop ?? 0) + (padre?.scrollTop ?? 0)}px`;
+    capa.style.width = `${rv.width}px`;
+    capa.style.height = `${rv.height}px`;
     const hace = {
       v: visor.scrollHeight - visor.clientHeight > 1,
       h: visor.scrollWidth - visor.clientWidth > 1,
@@ -2479,9 +2488,10 @@ function barrasFlotantes() {
       e.barra.classList.toggle('is-necesaria', hace[k]);
       if (!hace[k]) continue;
       const m = medir(e);
-      const x = m.sobra > 0 ? m.libre * (visor[e.scroll] / m.sobra) : 0;
+      const x = m.sobra > 0 ? m.libre * Math.min(1, visor[e.scroll] / m.sobra) : 0;
       e.pulgar.style[e.largo] = `${m.largo}px`;
-      e.pulgar.style.transform = `${e.mover}(${Math.round(x)}px)`;
+      // Redondeado pero nunca pasado del final: el tope de abajo es el canto.
+      e.pulgar.style.transform = `${e.mover}(${Math.min(m.libre, Math.round(x))}px)`;
     }
   };
 

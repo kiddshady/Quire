@@ -793,6 +793,18 @@ app.whenReady().then(async () => {
       reescalar();
       await new Promise((r) => setTimeout(r, 600));
       r.sinDesborde = !h.classList.contains('is-necesaria');
+      /* lector-41: los dos topes de la vertical, iguales. La capa se medía con
+         offsetHeight (entero) y el visor mide con decimales: abajo del todo el
+         pulgar pasaba medio píxel y se metía en la línea de la statusbar. */
+      const pv = capa.querySelector('.qr-sb--v .qr-sb__pulgar');
+      const vv = visor.getBoundingClientRect();
+      visor.scrollTop = 0;
+      await new Promise((r) => setTimeout(r, 150));
+      r.topeArriba = +(pv.getBoundingClientRect().top - vv.top).toFixed(2);
+      visor.scrollTop = visor.scrollHeight;
+      await new Promise((r) => setTimeout(r, 150));
+      r.topeAbajo = +(pv.getBoundingClientRect().bottom - vv.bottom).toFixed(2);
+      r.altoVisor = vv.height;
       return r;
     })()`);
     ok('el visor no reserva franja para las barras', n.franjaAbajo === 0 && n.franjaDerecha === 0, JSON.stringify(n));
@@ -803,6 +815,9 @@ app.whenReady().then(async () => {
     ok('al scrollear se ve', n.seVe > 0.9, String(n.seVe));
     ok('y después se apaga sola (sin el mouse encima)', n.seApaga);
     ok('en «Ajustar al ancho» no hay barra horizontal', n.sinDesborde);
+    ok('la vertical arranca justo en el canto de arriba del visor', Math.abs(n.topeArriba) < 0.1, `(${n.topeArriba})`);
+    ok('y termina justo en el de abajo, sin meterse en la statusbar (lector-41)',
+      n.topeAbajo <= 0.01 && n.topeAbajo > -0.6, `(${n.topeAbajo} · visor de ${n.altoVisor} px)`);
   });
 
   await bloque('css-15', async () => {
