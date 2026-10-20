@@ -498,6 +498,64 @@ app.whenReady().then(async () => {
   ok('hay más resultados de los que entran en la lista', enLista.total === 30, JSON.stringify(enLista));
   ok('después de Shift+Enter, la fila actual está dentro de la lista (lector-09)', enLista.adentro, JSON.stringify(enLista));
 
+  /* ── 10 · Un apunte denso ────────────────────────────────────────────── */
+  console.log('\n10. Miles de coincidencias no traban la ventana');
+
+  /* lector-40: en un apunte de antiarrítmicos, escribir «anti» pasa por «a», y
+     «a» son miles de coincidencias. La lista armaba dos mil filas animadas y,
+     al pasar a «an», reconcile() rehacía el layout de la lista por cada fila
+     que se iba: la ventana quedaba tildada más de un minuto. Se mide el hueco
+     más largo entre dos cuadros mientras se tipea letra por letra, con el
+     respiro justo para que cada letra lance su búsqueda. El techo es holgado a
+     propósito (en la UCX da menos de 100 ms): lo que caza es el cuelgue, no
+     una máquina cargada. */
+  const denso = await (async () => {
+    const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+    const pdf = await PDFDocument.create();
+    const fuente = await pdf.embedFont(StandardFonts.Helvetica);
+    const renglon = 'Los antiarritmicos de clase I bloquean canales de sodio; la amiodarona es antiarritmica';
+    for (let p = 0; p < 40; p++) {
+      const pagina = pdf.addPage([595, 842]);
+      for (let i = 0; i < 48; i++) pagina.drawText(renglon, { x: 30, y: 810 - i * 16.5, size: 9, font: fuente, color: rgb(0, 0, 0) });
+    }
+    const ruta = path.join(dir, 'apunte-denso.pdf');
+    fs.writeFileSync(ruta, await pdf.save());
+    return ruta;
+  })();
+  await js(`(async () => {
+    const mod = await import('./js/estado.js');
+    await mod.abrir(await window.onyx.docs.leer(${JSON.stringify(denso)}));
+  })()`);
+  await esperar(2200);
+  await js(`(() => {
+    const p = document.querySelector('.qr-panel__tab[data-panel="buscar"]');
+    if (p && !p.classList.contains('is-active')) p.click();
+    window.M = { max: 0, corre: true };
+    let t = performance.now();
+    const loop = (now) => { window.M.max = Math.max(window.M.max, now - t); t = now; if (window.M.corre) requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+  })()`);
+  await esperar(300);
+  for (const letras of ['a', 'an', 'ant', 'anti']) {
+    await js(`window.T.tipear(${JSON.stringify(letras)})`);
+    await esperar(260);
+  }
+  await hastaQuieto(() => js(`window.T.cuenta()`), 20_000, 'la cuenta de la búsqueda densa', { veces: 3 });
+  const trabado = await js(`(() => { window.M.corre = false; return Math.round(window.M.max); })()`);
+  ok('tipear «anti» letra por letra no deja cuadros de más de 1,5 s', trabado < 1500, `(${trabado} ms)`);
+
+  await js(`window.T.tipear('a')`);
+  await esperar(250); await hastaQuieto(() => js(`window.T.cuenta()`), 20_000, 'la cuenta de «a»', { veces: 3 });
+  const tandas = await js(`(async () => {
+    const primera = window.T.filas().length;
+    const lista = document.getElementById('qr-buscar-lista');
+    lista.scrollTop = lista.scrollHeight;
+    await new Promise((r) => setTimeout(r, 500));
+    return { primera, alScrollear: window.T.filas().length, cuenta: window.T.cuenta() };
+  })()`);
+  ok('la lista arma las filas de a tandas', tandas.primera === 200, JSON.stringify(tandas));
+  ok('y suma la siguiente al acercarse al final', tandas.alScrollear === 400, JSON.stringify(tandas));
+
   console.log(`\n----- errores de consola: ${errores.length} -----`);
   for (const e of errores.slice(0, 6)) console.log('   ', e);
   ok('sin errores en la consola', errores.length === 0);

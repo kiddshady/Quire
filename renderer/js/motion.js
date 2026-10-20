@@ -1130,6 +1130,15 @@ export function reconcile(box, items, { update, created, height = false, enter =
   for (const el of box.children) if (el.dataset.state !== 'closing') first.set(el, el.getBoundingClientRect());
   const celdas = new Map(leaving.filter((el) => el.cells)
     .map((el) => [el, [...el.cells].map((c) => c.getBoundingClientRect().width)]));
+  /* El origen de la caja y la opacidad de las que se van también se leen
+     ACÁ. Leídos adentro del bucle de abajo, cada uno venía justo después de
+     escribirle el estilo a la fila anterior y obligaba a rehacer el layout de
+     la lista entera: con dos mil filas saliendo (buscar «a» y después «an» en
+     un apunte), la ventana se quedaba tildada más de un minuto (Quire
+     lector-40). */
+  const y0 = box0.top + box.clientTop - box.scrollTop;
+  const x0 = box0.left + box.clientLeft - box.scrollLeft;
+  const ops = new Map(reducido() ? [] : leaving.map((el) => [el, Number(getComputedStyle(el).opacity) || 0]));
   for (const el of was.values()) { el.__move?.cancel(); el.__move = null; }
 
   if (leaving.length && getComputedStyle(box).position === 'static') box.style.position = 'relative';
@@ -1140,24 +1149,23 @@ export function reconcile(box, items, { update, created, height = false, enter =
     celdas.get(el)?.forEach((w, i) => { el.cells[i].style.width = `${w}px`; });
     Object.assign(el.style, {
       position: 'absolute', margin: '0', boxSizing: 'border-box', pointerEvents: 'none', zIndex: '0',
-      top: `${r.top - box0.top - box.clientTop + box.scrollTop}px`,
-      left: `${r.left - box0.left - box.clientLeft + box.scrollLeft}px`,
+      top: `${r.top - y0}px`,
+      left: `${r.left - x0}px`,
       width: `${r.width}px`, height: `${r.height}px`,
     });
     el.dataset.state = 'closing';
     if (reducido()) { el.remove(); continue; }
-    const op = Number(getComputedStyle(el).opacity) || 0;
-    const anim = el.animate([{ opacity: op }, { opacity: 0 }], { duration: T.out, easing: EASE_BOTH, fill: 'forwards' });
+    const anim = el.animate([{ opacity: ops.get(el) }, { opacity: 0 }], { duration: T.out, easing: EASE_BOTH, fill: 'forwards' });
     settled(anim, T.out + 200, () => el.remove());
   }
 
-  const fresh = [];
+  const fresh = new Set();
   let prev = null;
   for (const it of items) {
     let el = was.get(it.key);
     if (!el) {
       el = hacerFila(it);
-      fresh.push(el);
+      fresh.add(el);
     } else if (el.__html !== it.html) {
       if (update) update(el, it); else ponerFila(el, it, created);
       el.__html = it.html;
@@ -1167,7 +1175,7 @@ export function reconcile(box, items, { update, created, height = false, enter =
     while (want && want !== el && want.dataset.state === 'closing') want = want.nextElementSibling;
     if (want !== el) {
       box.insertBefore(el, want);
-      if (!fresh.includes(el)) callar(el);   // moverlo le reinicia las animaciones de CSS
+      if (!fresh.has(el)) callar(el);   // moverlo le reinicia las animaciones de CSS
     }
     prev = el;
   }
@@ -1188,7 +1196,7 @@ export function reconcile(box, items, { update, created, height = false, enter =
     }
     if (enter) {
       const wait = leaving.length ? T.after : 0;
-      fresh.forEach((el, i) => {
+      [...fresh].forEach((el, i) => {
         el.animate([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
           { duration: T.in, easing: EASE, delay: wait + Math.min(i, 16) * T.step, fill: 'backwards' });
       });
@@ -1196,7 +1204,7 @@ export function reconcile(box, items, { update, created, height = false, enter =
   }
 
   if (height) { box.__glide?.cancel(); glideAlto(box, h0); }
-  return { fresh, leaving };
+  return { fresh: [...fresh], leaving };
 }
 
 function hacerFila(it) {

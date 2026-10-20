@@ -79,6 +79,7 @@ const V = {
   buscador: null,
   consulta: '',
   actual: -1,              // índice en buscador.resultados, o -1 si ninguno
+  listadas: 0,             // cuántos resultados tienen su fila en la lista (ver TANDA)
   pendiente: null,         // página cuyo resultado hay que centrar cuando monte
   divsTexto: new Map(),    // nº de página → los spans de su capa de texto
 
@@ -1265,6 +1266,7 @@ function irAlResultado(i) {
   V.actual = ((i % res.length) + res.length) % res.length;
   const r = res[V.actual];
 
+  listarHasta(V.actual);
   marcarLista();
   actualizarCuenta();
 
@@ -1340,6 +1342,21 @@ function actualizarCuenta() {
   document.getElementById('qr-buscar-next')?.toggleAttribute('disabled', !hay);
 }
 
+/* Cuántas filas se arman por vez. El buscador guarda hasta dos mil resultados,
+   pero dos mil filas animadas en el panel —rearmadas seis veces por segundo
+   mientras la búsqueda avanza— traban la ventana: buscar «anti» en un apunte
+   pasaba por «a», y eso eran segundos sin responder (lector-40). Se arman
+   las primeras y la lista crece cuando el scroll se acerca al final, o cuando
+   Enter navega a una que todavía no tiene fila. */
+const TANDA = 200;
+
+/** Que la lista tenga fila hasta el resultado `i` inclusive. */
+function listarHasta(i) {
+  if (i < Math.max(TANDA, V.listadas)) return;
+  V.listadas = (Math.floor(i / TANDA) + 1) * TANDA;
+  pintarResultados();
+}
+
 /* El texto de la pista, con su plural: «las 1 páginas» con un PDF de una
    hoja (ux-26). */
 const textoPista = (paginas) => (paginas === 1
@@ -1405,20 +1422,24 @@ function pintarResultados() {
     /* Los dos pies dicen lo que la lista NO muestra: que todavía falta
        recorrer, o que hay más coincidencias de las que entraron. Una lista
        recortada en silencio se lee como una lista completa. */
+    /* Lo que tiene fila: de a tandas (ver TANDA). El tope recién se avisa
+       cuando están todas puestas; antes, al final de la lista hay más. */
+    const filas = b.resultados.slice(0, Math.max(TANDA, V.listadas));
+    const todas = filas.length === b.resultados.length;
     const pie = !b.terminada
       ? `Buscando… ${b.leidas} de ${paginas} páginas`
-      : b.recortada ? `Se listan ${b.resultados.length} de ${b.total}. Las demás se resaltan igual en la hoja.` : '';
+      : b.recortada && todas ? `Se listan ${b.resultados.length} de ${b.total}. Las demás se resaltan igual en la hoja.` : '';
 
     const memo = lista.__pintada;
     const igual = memo && memo.buscador === b && memo.consulta === consulta
-      && memo.n === b.resultados.length && memo.conPie === !!pie;
+      && memo.n === filas.length && memo.conPie === !!pie;
     if (igual) {
       const el = lista.querySelector(':scope > [data-key="pie"]');
-      if (el && pie) frase(el, esc(pie));
+      if (el && pie) frase(el, esc(pie), { destello: false });
       return;
     }
 
-    items = b.resultados.map((r, i) => ({ key: `${r.pagina}:${r.enPagina}`, html: `
+    items = filas.map((r, i) => ({ key: `${r.pagina}:${r.enPagina}`, html: `
       <button class="qr-hit${i === V.actual ? ' is-actual' : ''}" data-i="${i}">
         <span class="qr-hit__texto">${esc(r.antes)}<mark>${esc(r.medio)}</mark>${esc(r.despues)}</span>
         <span class="qr-hit__pag ox-num">${r.pagina}</span>
@@ -1427,7 +1448,7 @@ function pintarResultados() {
       items.push({ key: 'pie', html: '<div class="qr-buscar__pie ox-meta"></div>' });
       textos.set('pie', pie);
     }
-    lista.__pintada = { buscador: b, consulta, n: b.resultados.length, conPie: !!pie };
+    lista.__pintada = { buscador: b, consulta, n: filas.length, conPie: !!pie };
   }
   if (!b?.resultados.length) lista.__pintada = null;
 
@@ -1435,7 +1456,11 @@ function pintarResultados() {
   for (const [clave, texto] of textos) {
     const pieza = lista.querySelector(`:scope > [data-key="${CSS.escape(clave)}"]:not([data-state=closing])`);
     const destino = pieza?.matches('[data-frase]') || clave === 'pie' ? pieza : pieza?.querySelector('[data-frase]');
-    if (destino) frase(destino, esc(texto));
+    /* Los dos textos que pasan por acá son avances («Leyendo la página 12…»,
+       «Buscando… 12 de 40 páginas»): corren solos y no destellan. Además el
+       destello reinicia su animación forzando un layout, y con dos mil filas
+       recién puestas eso era un layout entero de la lista en cada aviso. */
+    if (destino) frase(destino, esc(texto), { destello: false });
   }
 }
 
@@ -1466,6 +1491,7 @@ async function lanzarBusqueda(consulta) {
   if (!S.doc) return;
   V.consulta = consulta;
   V.actual = -1;
+  V.listadas = 0;
   V.pendiente = null;
 
   // Al cambiar de pestaña, el buscador de antes es el de otro documento.
@@ -1530,10 +1556,21 @@ function cablearBuscar() {
   document.getElementById('qr-buscar-prev')?.addEventListener('click', () => navegarBusqueda(-1));
   document.getElementById('qr-buscar-next')?.addEventListener('click', () => navegarBusqueda(1));
 
-  document.getElementById('qr-buscar-lista')?.addEventListener('click', (e) => {
+  const lista = document.getElementById('qr-buscar-lista');
+  lista?.addEventListener('click', (e) => {
     const fila = e.target.closest('.qr-hit');
     if (fila) irAlResultado(Number(fila.dataset.i));
   });
+
+  /* La tanda siguiente se arma un poco antes de llegar al final, para que el
+     scroll no se tope con el borde y tenga que esperar. */
+  lista?.addEventListener('scroll', () => {
+    const hay = V.buscador?.resultados.length ?? 0;
+    const puestas = Math.max(TANDA, V.listadas);
+    if (puestas >= hay) return;
+    if (lista.scrollTop + lista.clientHeight < lista.scrollHeight - 600) return;
+    listarHasta(puestas);
+  }, { passive: true });
 }
 
 /** Ctrl+F: abre el panel en Buscar y pone el cursor en el campo. */
@@ -1551,6 +1588,7 @@ function reiniciarBusqueda() {
   V.buscador = null;
   V.consulta = '';
   V.actual = -1;
+  V.listadas = 0;
   V.pendiente = null;
 }
 
